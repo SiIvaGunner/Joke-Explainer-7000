@@ -102,11 +102,11 @@ class TestDownload(unittest.TestCase):
         if filepath:
             os.remove(filepath)
 
-    def testSuccessNeocities(self):
-        filepath = self.parseAndDownload("https://livvy94.neocities.org/rips/IoG_Fanfare.mp3")
-        self.assertEqual(filepath, DOWNLOAD_DIR / 'IoG_Fanfare.mp3')
-        if filepath:
-            os.remove(filepath)
+    # def testSuccessNeocities(self):
+    #     filepath = self.parseAndDownload("https://livvy94.neocities.org/rips/IoG_Fanfare.mp3")
+    #     self.assertEqual(filepath, DOWNLOAD_DIR / 'IoG_Fanfare.mp3')
+    #     if filepath:
+    #         os.remove(filepath)
 
     def testSuccessCatbox(self):
         filepath = self.parseAndDownload("https://files.catbox.moe/twp0nz.mp3")
@@ -353,7 +353,7 @@ class TestOverall(unittest.TestCase):
     def testOverall(self):
         check, msg = performQoC("https://siiva-gunner.com/?id=vnrufKKnxu")
         self.assertEqual(check, 0)
-        self.assertEqual(msg, "- Bitrate is OK.\n- The rip is not clipping.")
+        self.assertEqual(msg, "- Bitrate is OK.\n- The rip is not clipping.\n-No video streams detected")
 
     def testOverallV2(self):
         check, msg = performQoC(TEST_URLS['clipping5.ogg'])

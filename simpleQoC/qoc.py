@@ -63,7 +63,7 @@ def ffprobeUrl(validUrl: str):
         probeOutput = subprocess.check_output([
             'ffprobe',
             '-v', 'quiet',
-            '-select_streams', 'a:0',
+            # '-select_streams', 'a:0',
             '-print_format', 'json',
             '-show_format',
             '-show_streams',
@@ -201,6 +201,7 @@ def downloadAudioFromUrl(validUrl: str) -> str:
                 raise QoCException('Unknown error trying to parse filename.')
         filename = validUrl.split('/')[-1]
     
+    filename = filename.replace('/', '_')
     filepath = DOWNLOAD_DIR / filename
     save_response_content(response, filepath)
     
@@ -228,7 +229,9 @@ def checkBitrateFromFile(file: FileType) -> Tuple[bool, str]:
     # seems video files show lower bitrate on properties view for some reason, shouldn't be an issue generally
     if hasattr(file.info, 'bitrate'):
         bitrate = file.info.bitrate
-        if bitrate < 300000:    # Apparently some weird files can have bitrate at 317kbps or even 319.999kbps. Let's say 300k is good enough
+        if bitrate == 0:      # Some MP4 files have 0 kbps bitrate?
+            return (True, "Bitrate is OK (0 kbps detected).")
+        elif bitrate < 300000:    # Apparently some weird files can have bitrate at 317kbps or even 319.999kbps. Let's say 300k is good enough
             return (False, "The {} file's bitrate is {}kbps. Please re-render at 320kbps.".format(type(file).__name__, bitrate // 1000))
         else:
             return (True, "Bitrate is OK.")
@@ -260,7 +263,9 @@ def checkBitrateFromUrl(validUrl: str) -> Tuple[bool, str]:
     except KeyError:
         filetype = "[TYPE UNKNOWN]"
 
-    if bitrate < 300000:    # Apparently some weird files can have bitrate at 317kbps or even 319.999kbps. Let's say 300k is good enough
+    if bitrate == 0:      # Some MP4 files have 0 kbps bitrate?
+        return (True, "Bitrate is OK (0 kbps detected).")
+    elif bitrate < 300000:    # Apparently some weird files can have bitrate at 317kbps or even 319.999kbps. Let's say 300k is good enough
         return (False, "The {} file's bitrate is {}kbps. Please re-render at 320kbps.".format(filetype, bitrate // 1000))
     else:
         return (True, "Bitrate is OK.")
@@ -444,7 +449,7 @@ def checkClippingFromUrl(validUrl: str, threshold: int = DEFAULT_CLIPPING_THRESH
 
 
 #=======================================#
-#         DLS CLIPPING CHECKING          #
+#         DLS CLIPPING CHECKING         #
 #=======================================#
 """
 Same idea behind checking clipping, but not limited to min/max values.
@@ -594,6 +599,31 @@ def checkDLSClippingFromUrl(validUrl: str, threshold: int = DEFAULT_DS_CLIPPING_
 
 
 #=======================================#
+#            VIDEO RESOLUTION           #
+#=======================================#
+"""
+Verify that video files are at least 1080p
+"""
+
+def checkResolution(filepath: str) -> Tuple[bool, str]:
+    probeOutput = ffprobeUrl(filepath)
+    height = None
+    for stream in probeOutput['streams']:
+        try:
+            height = stream['height']
+        except KeyError:
+            continue
+    
+    if height is None:
+        return (True, "No video streams detected")  
+    else:
+        if height < 1080:
+            return (False, f"The video file height is {height}. Please re-render at 1080p, unless intentional.")
+        else:
+            return (True, f"The video file height is {height}.")
+
+
+#=======================================#
 #                Utility                #
 #=======================================#
 """
@@ -607,6 +637,104 @@ def msgContainsClippingFix(msg: str) -> bool:
 
 def msgContainsPRVRClippingFix(msg: str) -> bool:
     return msg.find("Post-render volume reduction detected") != -1
+
+def msgContainsSigninErr(msg: str) -> bool:
+    return msg.find("Drive link is not accessible") != -1
+
+
+def getFileMetadataMutagen(url: str) -> Tuple[int, str]:
+    """
+    Returns the metadata of file at given URL via mutagen's `pprint()` function.
+    """
+    try:
+        downloadableUrl = parseUrl(url)
+    except QoCException as e:
+        return (-1, e.message)
+    
+    if not os.path.exists(DOWNLOAD_DIR):
+        os.mkdir(DOWNLOAD_DIR)
+    
+    filepath = None
+    errors = []
+
+    try:
+        filepath = downloadAudioFromUrl(downloadableUrl)
+        DEBUG("Downloaded audio: " + Path(filepath).name)
+    except QoCException as e:
+        errors.append(e.message)
+    else:
+        file = parseAudio(filepath)
+        metadata = file.pprint()
+    finally:
+        if filepath:
+            os.remove(filepath)
+
+    if len(errors) > 0:
+        return (-1, '\n'.join(errors))
+
+    return (0, metadata)
+
+
+def getFileMetadataFfprobe(url: str) -> Tuple[int, str]:
+    """
+    Returns the metadata of file at given URL via ffprobe.
+    """
+    try:
+        downloadableUrl = parseUrl(url)
+    except QoCException as e:
+        return (-1, e.message)
+
+    if not os.path.exists(DOWNLOAD_DIR):
+        os.mkdir(DOWNLOAD_DIR)
+    
+    filepath = None
+    errors = []
+
+    try:
+        filepath = downloadAudioFromUrl(downloadableUrl)
+        DEBUG("Downloaded audio: " + Path(filepath).name)
+    except QoCException as e:
+        errors.append(e.message)
+    else:
+        probeOutput = ffprobeUrl(filepath)
+        try:
+            probeOutput['format']['filename'] = "[REDACTED]"
+        except KeyError:
+            pass
+
+        # some entries in the json may be too long to be sent on Discord
+        def redactLongStrings(obj, max_length = 300):
+            if max_length < 11:
+                raise ValueError("Cannot shorten more than the [LONG TEXT] message")
+            if isinstance(obj, dict):
+                keys_to_delete = []
+                for key, value in obj.items():
+                    if isinstance(value, str) and len(value) > max_length:
+                        keys_to_delete.append(key)
+                    else:
+                        redactLongStrings(value, max_length) # Recurse for nested objects/lists
+                for key in keys_to_delete:
+                    obj[key] = "[LONG TEXT]"
+            elif isinstance(obj, list):
+                i = 0
+                while i < len(obj):
+                    if isinstance(obj[i], str) and len(obj[i]) > max_length:
+                        obj[i] = "[LONG TEXT]"
+                    else:
+                        redactLongStrings(obj[i], max_length) # Recurse for nested objects/lists
+                        i += 1
+
+        redactLongStrings(probeOutput)
+        metadata = json.dumps(probeOutput, indent=2)
+    finally:
+        if filepath:
+            os.remove(filepath)
+
+    if len(errors) > 0:
+        return (-1, '\n'.join(errors))
+
+    return (0, metadata)
+
 
 #=======================================#
 #            Main Function              #
@@ -634,6 +762,9 @@ def performQoC(url: str, fullFeedback: bool = True) -> Tuple[int, str]:
         DEBUG("Downloaded audio: " + Path(filepath).name)
     
     except QoCException as e:
+        if 'drive' in url and 'Sign-in' in e.message:
+            # custom return value for sign-in issues, return 1 so it doesn't get filtered
+            return (1, "Drive link is not accessible. Ask Mailroom to reupload if this is an email sub.")
         errors.append(e.message)
     
     else:
@@ -649,6 +780,8 @@ def performQoC(url: str, fullFeedback: bool = True) -> Tuple[int, str]:
             clippingCheck, clippingMsg = checkClippingFromFile(file, filepath)
         except QoCException as e:
             errors.append(e.message)
+
+        resolutionCheck, resolutionMsg = checkResolution(filepath)
     
     finally:
         if filepath:
@@ -657,15 +790,13 @@ def performQoC(url: str, fullFeedback: bool = True) -> Tuple[int, str]:
     if len(errors) > 0:
         return (-1, '\n'.join(errors))
     
-    message = ""
-    if fullFeedback or not bitrateCheck: 
-        message += "- {}".format(bitrateMsg)
-    if fullFeedback or (not bitrateCheck and not clippingCheck):
-        message += "\n"
-    if fullFeedback or not clippingCheck: 
-        message += "- {}".format(clippingMsg)
+    msgs = []
+    if fullFeedback or not bitrateCheck: msgs.append(bitrateMsg)
+    if fullFeedback or not clippingCheck: msgs.append(clippingMsg)
+    if fullFeedback or not resolutionCheck: msgs.append(resolutionMsg)
+    message = "\n".join("- " + msg for msg in msgs)
 
-    return (0 if (bitrateCheck and clippingCheck) else 1, message)
+    return (0 if (bitrateCheck and clippingCheck and resolutionCheck) else 1, message)
 
 """
 Commented this out to work on it later

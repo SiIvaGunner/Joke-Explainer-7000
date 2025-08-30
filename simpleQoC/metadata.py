@@ -237,17 +237,16 @@ def checkMetadata(description: str, channel_name: str, playlist_id: str, api_key
             track = get_music_from_desc(desc)
 
             game = None
+            temp_messages = set()
+            good_match = False
+
             for p in patterns["TITLE"]:
-                match = re.search(p.replace('[[TRACK]]', re.escape(track)), title)
+                match = re.match(p.replace('[[TRACK]]', re.escape(track)), title)
                 if match:
+                    game = match.group('game')
                     existing_titles = [video['title'] for video in videos]
 
-                    # Check that at least 50% of existing videos have the same title formatting
-                    if len(existing_titles) > 0 and sum([re.search(p.replace('[[TRACK]]', r'(?P<track>[^\n]*)'), t) is not None for t in existing_titles]) / len(existing_titles) < 0.5:
-                        continue
-                    
                     # Check game name
-                    game = match.group('game')
                     if p.startswith('[[TRACK]]'):
                         game_match = any([video.endswith(game) for video in existing_titles])
                     elif p.endswith('[[TRACK]]'):
@@ -257,13 +256,28 @@ def checkMetadata(description: str, channel_name: str, playlist_id: str, api_key
                         game_match = True
                     
                     if len(existing_titles) > 0 and (game != playlist_name) and not game_match:
-                        if len(title) < 100 and (game in playlist_name or any([game in video for video in existing_titles])):
-                            adv_messages.add('Game in title appears to be cut off. Ignore if this was intentional to go under 100-character limit.')
+                        if title[-1] == ' ':
+                            temp_messages.add('Trailing whitespace detected at end of title.')
+                        elif len(title) == 100 or (game in playlist_name or any([game in video for video in existing_titles])):
+                            temp_messages.add('Game in title appears to be cut off. Ignore if this was intentional to go under 100-character limit.')
                         else:
-                            adv_messages.add('Game in title does not match playlist name nor any existing videos in playlist.')
+                            temp_messages.add(f'Game in title does not match playlist name (``{playlist_name}``) nor any existing videos in playlist.')
+                    else:
+                        # Check that at least one other existing video has the same title formatting
+                        other_p = p.replace('[[TRACK]]', r'(?P<track>[^\n]*)').replace(r'(?P<game>[^\n]*)', re.escape(game))
+                        if len(existing_titles) > 0 and not any([re.match(other_p, t) is not None for t in existing_titles]):
+                            game = None
+                            continue
+                        good_match = True
+
+            if not good_match:
+                adv_messages = adv_messages.union(temp_messages)
             
             if game is None:
-                adv_messages.add('Title format does not match {}, or Music line is incorrect (e.g. missing mixname, leftover game part).'.format('existing videos in playlist' if len(videos) > 0 else 'any known pattern'))
+                if title == track:
+                    adv_messages.add('Game name in Music field should be removed.')
+                else:
+                    adv_messages.add('Title format does not match {}, or Music line is incorrect (e.g. missing mixname).'.format('existing videos in playlist' if len(videos) > 0 else 'any known pattern'))
     
     if advanced: messages = messages.union(adv_messages)
     return int(len(messages) > 0), list(messages)

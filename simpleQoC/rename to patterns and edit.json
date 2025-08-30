@@ -1,0 +1,11 @@
+{
+    "MISTAKE": [
+        {
+            "reg_pattern": "  [^\n]",
+            "message": "Double space detected in description."
+        }
+    ],
+    "TITLE": [
+        "[[TRACK]] - (?P<game>[^\\n]*)"
+    ]
+}

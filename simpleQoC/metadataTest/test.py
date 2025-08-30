@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from inspect import getsourcefile
 
-from simpleQoC.metadataChecker import checkMetadata
+from simpleQoC.metadata import checkMetadata
 
 TEST_DIR = Path(os.path.abspath(getsourcefile(lambda:0))).parent
 DEBUG_MODE = False
@@ -42,8 +42,8 @@ class TestMetadata(unittest.TestCase):
             self.assertTrue(m in msgs)
 
 
-    @patch('simpleQoC.metadataChecker.get_playlist_videos')
-    @patch('simpleQoC.metadataChecker.get_playlist_details')
+    @patch('simpleQoC.metadata.get_playlist_videos')
+    @patch('simpleQoC.metadata.get_playlist_details')
     def test_metadata_ok(self, mock_details, mock_videos):
         self.base_test(
             mock_details, mock_videos,
@@ -54,8 +54,8 @@ class TestMetadata(unittest.TestCase):
         )
 
 
-    @patch('simpleQoC.metadataChecker.get_playlist_videos')
-    @patch('simpleQoC.metadataChecker.get_playlist_details')
+    @patch('simpleQoC.metadata.get_playlist_videos')
+    @patch('simpleQoC.metadata.get_playlist_details')
     def test_metadata_issue(self, mock_details, mock_videos):
         self.base_test(
             mock_details, mock_videos,
@@ -74,13 +74,13 @@ class TestMetadata(unittest.TestCase):
                 "Irregular line without : found in description: \"dummy l...s — lol\"",
                 "``Arrangement`` field not present in any existing videos in playlist.",
                 "``Platlist`` field not present in any existing videos in playlist.",
-                "Title format does not match existing videos in playlist, or Music line is incorrect (e.g. missing mixname, leftover game part).",
+                "Title format does not match existing videos in playlist, or Music line is incorrect (e.g. missing mixname).",
             ]
         )
 
 
-    @patch('simpleQoC.metadataChecker.get_playlist_videos')
-    @patch('simpleQoC.metadataChecker.get_playlist_details')
+    @patch('simpleQoC.metadata.get_playlist_videos')
+    @patch('simpleQoC.metadata.get_playlist_details')
     def test_metadata_issue_v2(self, mock_details, mock_videos):
         self.base_test(
             mock_details, mock_videos,
@@ -88,13 +88,13 @@ class TestMetadata(unittest.TestCase):
             "Super \u2588\u2588\u2588\u2588\u2588 4D All Stars Music S\u258864 Super \u2588\u2588\u2588\u2588\u2588 64 Main Theme (JP Version)\n\nMusic: S\u258864 Super \u2588\u2588\u2588\u2588\u2588 64 Main Theme (JP Version)\nComposer: Koji Kondo\nPlaylist: https://www.youtube.com/playlist?list=PLL0CQjrcN8D0RpfnKPuj8anigmMCnbJpF\nPlatform: Nintendo Switch\r\n\r\nPlease read the channel description.",
             "PLL0CQjrcN8D0RpfnKPuj8anigmMCnbJpF",
             [
-                "Game in title does not match playlist name nor any existing videos in playlist.",
+                "Game in title does not match playlist name (``Super \u2588\u2588\u2588\u2588\u2588 3D All Stars``) nor any existing videos in playlist.",
             ]
         )
 
 
-    @patch('simpleQoC.metadataChecker.get_playlist_videos')
-    @patch('simpleQoC.metadataChecker.get_playlist_details')
+    @patch('simpleQoC.metadata.get_playlist_videos')
+    @patch('simpleQoC.metadata.get_playlist_details')
     def test_metadata_issue_v3(self, mock_details, mock_videos):
         self.base_test(
             mock_details, mock_videos,
@@ -108,14 +108,13 @@ class TestMetadata(unittest.TestCase):
                 "Em dash (``—``) detected. It is recommended that you use hyphen (``-``) for consistency.",
                 "The **S** in PlayStation should be capitalized.",
                 "We commonly use Xbox Series X|S.",
-                "Reboot metadata found. Change to regular metadata if this was not intentional.",
             ],
             False
         )
 
     
-    @patch('simpleQoC.metadataChecker.get_playlist_videos')
-    @patch('simpleQoC.metadataChecker.get_playlist_details')
+    @patch('simpleQoC.metadata.get_playlist_videos')
+    @patch('simpleQoC.metadata.get_playlist_details')
     def test_metadata_no_playlist(self, mock_details, mock_videos):
         self.base_test(
             mock_details, mock_videos,
@@ -126,8 +125,8 @@ class TestMetadata(unittest.TestCase):
         )
     
 
-    @patch('simpleQoC.metadataChecker.get_playlist_videos')
-    @patch('simpleQoC.metadataChecker.get_playlist_details')
+    @patch('simpleQoC.metadata.get_playlist_videos')
+    @patch('simpleQoC.metadata.get_playlist_details')
     def test_metadata_announcement(self, mock_details, mock_videos):
         self.base_test(
             mock_details, mock_videos,
