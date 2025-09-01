@@ -1,7 +1,6 @@
 #!/usr/bin/python3
 import discord
 from discord import Message, Thread, TextChannel, Reaction
-from discord import RawMessageUpdateEvent, RawMessageDeleteEvent
 from discord.abc import GuildChannel
 from discord.ext import commands
 from discord.ext.commands import Context
@@ -83,7 +82,7 @@ import traceback
 @bot.event
 async def on_error(event, *args, **kwargs):
     # https://stackoverflow.com/a/60031624
-    await write_log('%s```py\n%s\n```'.format(event, traceback.format_exc()), embed=True)
+    await write_log('{}```py\n{}\n```'.format(event, traceback.format_exc()), embed=True)
 
 _bot_close = bot.close
 async def close_with_log(self: commands.Bot):
@@ -125,28 +124,52 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
             await channel.send("**Rip**: **[{}]({})**\n**Verdict**: {}\n{}-# React {} if this is resolved.".format(rip_title, link, verdict, msg, DEFAULT_CHECK))
 
 
+# On-listen events
 
-@bot.event
-async def on_message(message: Message):
+@bot.listen('on_message')
+async def on_message_update_cache(message: Message):
     if channel_is_types(message.channel, ['SUBS', 'SUBS_THREAD', 'QUEUE']):
         outdate_cache(message.channel.id)
 
-@bot.event
-async def on_raw_message_edit(payload: RawMessageUpdateEvent):
+@bot.listen('on_raw_message_edit')
+async def on_raw_message_edit_update_cache(payload: discord.RawMessageUpdateEvent):
     if channel_is_types(payload.channel_id, ['SUBS', 'SUBS_THREAD', 'QUEUE']):
         outdate_cache(payload.channel_id)
     elif channel_is_types(payload.channel_id, ['QOC', 'SUBS_PIN']) and \
         payload.channel_id in cached_rips.keys() and payload.message_id in [m.id for m in cached_rips[payload.channel_id].rips]:
         outdate_cache(payload.channel_id)
 
-@bot.event
-async def on_raw_message_delete(payload: RawMessageDeleteEvent):
+@bot.listen('on_raw_message_delete')
+async def on_raw_message_delete_update_cache(payload: discord.RawMessageDeleteEvent):
     if channel_is_types(payload.channel_id, ['SUBS', 'SUBS_THREAD', 'QUEUE']):
         outdate_cache(payload.channel_id)
     elif channel_is_types(payload.channel_id, ['QOC', 'SUBS_PIN']) and \
         payload.channel_id in cached_rips.keys() and payload.message_id in [m.id for m in cached_rips[payload.channel_id].rips]:
         outdate_cache(payload.channel_id)
 
+@bot.listen('on_raw_reaction_add')
+async def on_raw_reaction_add_update_cache(payload: discord.RawReactionActionEvent):
+    if channel_is_types(payload.channel_id, ['QOC', 'SUBS_PIN']) and \
+        payload.channel_id in cached_rips.keys() and payload.message_id in [m.id for m in cached_rips[payload.channel_id].rips]:
+        outdate_cache(payload.channel_id)
+
+@bot.listen('on_raw_reaction_remove')
+async def on_raw_reaction_remove_update_cache(payload: discord.RawReactionActionEvent):
+    if channel_is_types(payload.channel_id, ['QOC', 'SUBS_PIN']) and \
+        payload.channel_id in cached_rips.keys() and payload.message_id in [m.id for m in cached_rips[payload.channel_id].rips]:
+        outdate_cache(payload.channel_id)
+
+@bot.listen('on_raw_reaction_clear')
+async def on_raw_reaction_clear_update_cache(payload: discord.RawReactionClearEvent):
+    if channel_is_types(payload.channel_id, ['QOC', 'SUBS_PIN']) and \
+        payload.channel_id in cached_rips.keys() and payload.message_id in [m.id for m in cached_rips[payload.channel_id].rips]:
+        outdate_cache(payload.channel_id)
+
+@bot.listen('on_raw_reaction_clear_emoji')
+async def on_raw_reaction_clear_emoji_update_cache(payload: discord.RawReactionClearEmojiEvent):
+    if channel_is_types(payload.channel_id, ['QOC', 'SUBS_PIN']) and \
+        payload.channel_id in cached_rips.keys() and payload.message_id in [m.id for m in cached_rips[payload.channel_id].rips]:
+        outdate_cache(payload.channel_id)
 
 #===============================================#
 #                   COMMANDS                    #
