@@ -882,8 +882,8 @@ async def help(ctx: Context):
     async with ctx.channel.typing():
         result = "_**YOU ARE NOW QoCING:**_\n`!roundup [embed_minutes: float]`" + roundup.brief \
             + "\n`!links` " + links.brief \
-            + "\n_**Special lists:**_\n`!mypins`" + mypins.brief \
-            + "\n`!search` <arg1: str|arg2: str|...> " + search.brief \
+            + "\n_**Special lists:**_\n`!mypins` " + mypins.brief \
+            + "\n`!search <arg1: str|arg2: str|...>` " + search.brief \
             + "\n`!emails` " + emails.brief + "\n`!events <name: str>` " + events.brief \
             + "\n`!checks`, `!rejects`, `!wrenches`, `!stops`" \
             + "\n`!overdue` " + overdue.brief.replace('X', str(get_config('overdue_days'))) \
