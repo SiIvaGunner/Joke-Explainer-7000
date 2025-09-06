@@ -203,7 +203,7 @@ async def search_subs(ctx: Context, search_key: str, sub_channel_link: str = Non
     """
     search_keys = search_key.split('|')
     await filter_sub_command(ctx, 'search_subs', 
-            (lambda rip: any([line_contains_substring(rip.content.split("```")[0], key) for key in search_keys])), 
+            (lambda rip: any([line_contains_substring(get_raw_rip_title(rip), key) for key in search_keys])), 
             sub_channel_link, optional_time)
 
 
@@ -238,7 +238,7 @@ async def event_subs(ctx: Context, event: str = None, sub_channel_link: str = No
         await ctx.channel.send("Error: Please indicate the event name. Rips should be tagged with this name.")
         return
     
-    await filter_sub_command(ctx, 'event_subs', (lambda rip: line_contains_substring(rip.content.split("```")[0], event)), sub_channel_link, optional_time)
+    await filter_sub_command(ctx, 'event_subs', (lambda rip: line_contains_substring(get_raw_rip_author(rip), event)), sub_channel_link, optional_time)
 
 
 @bot.command(name="fresh", aliases = ['blank', 'bald', 'clean', 'noreacts'], brief='rips with no reacts yet')
@@ -1393,15 +1393,24 @@ def get_rip_title(message: Message) -> str:
         return rip_title
 
 
-def get_rip_author(message: Message) -> str:
+def get_raw_rip_author(message: Message) -> str:
     """
     Return the rip author line of a Discord message.
-    If the line contains "by me", append the message sender's name to the author line.
-    Assumes the message follows the format where the rip author is before the first instance of ```
+    Assumes the message follows the format where the rip author is after the first instance of ```
     """
     author = message.content.split("```")[0]
     author = author.replace('\n', '')
     author = author.replace('||', '') # in case of spoilered rips
+
+    return author
+
+
+def get_rip_author(message: Message) -> str:
+    """
+    Wrapper function to format author line.
+    If the line contains "by me", append the message sender's name to the author line.
+    """
+    author = get_raw_rip_author(message)
     
     if len(re.findall(r'\bby\b', author.lower())) == 0:
         # If "by" is not found, notify that the "author line" might be unusual
