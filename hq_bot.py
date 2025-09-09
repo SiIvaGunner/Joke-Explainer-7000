@@ -853,7 +853,7 @@ async def disable_metadata(ctx: Context):
     set_config('metadata', False)
     await ctx.channel.send("Advanced metadata checking disabled.")
 
-def set_config(config: str, value: bool):
+def set_config(config: str, value):
     if os.path.exists('config.json'):
         with open('config.json', 'r', encoding='utf-8') as file:
             configs = json.load(file)
@@ -1193,7 +1193,7 @@ async def filter_sub_command(ctx: Context, cmd_name: str, filter_sub_func: typin
             if filter_sub_func(rip):
                 if any([react_is_qoc(r) for r in rip.reactions]):
                     result += f"{qoc_emote} "
-                author = str(rip.author).split('#')[0]
+                author = str(rip.author).split('#')[0].replace('_', '\_')
                 result += f'**[{rip_title}]({rip_link})** (by {author})\n'
 
         if len(result) == 0:
