@@ -518,7 +518,6 @@ async def vet(ctx: Context, optional_arg = None):
     Find rips in pinned messages with bitrate/clipping issues and show their details
     """
     if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
-    heard_command("vet", ctx.message.author.name)
 
     if optional_arg is not None:
         await ctx.channel.send("WARNING: ``!vet`` takes no argument. Did you mean to use ``!vet_msg`` or ``!vet_url``?")
@@ -527,6 +526,23 @@ async def vet(ctx: Context, optional_arg = None):
     if ctx.message.reference is not None:
         await ctx.channel.send("WARNING: ``!vet`` takes no argument (nor replies). Did you mean to use ``!vet_msg`` or ``!vet_url``?")
         return
+    
+    await vet_from(ctx)
+
+
+@bot.command(name='vet_from', brief='!vet but start from a message')
+async def vet_from(ctx: Context, from_msg):
+    """
+    Find rips in pinned messages with bitrate/clipping issues and show their details, only counting messages not older than linked message
+    """
+    if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
+    heard_command("vet_from", ctx.message.author.name)
+
+    _, _, from_message, status = await parse_message_link(from_msg)
+    if from_message is None:
+        await ctx.channel.send(status)
+        return
+    from_timestamp = from_message.created_at
 
     channel = await get_roundup_channel(ctx)
     if channel is None: return
@@ -539,6 +555,8 @@ async def vet(ctx: Context, optional_arg = None):
         pin_list = await get_pins(channel)
 
         for pinned_message in pin_list:
+            if pinned_message.created_at < from_timestamp:
+                continue
             qcCode, qcMsg, _ = await check_qoc(pinned_message, False)
             rip_title = get_rip_title(pinned_message)
             verdict = code_to_verdict(qcCode, qcMsg)
