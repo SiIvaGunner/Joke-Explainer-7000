@@ -424,7 +424,7 @@ async def scout(ctx: Context, prefix: str = None, channel_link: str = None, opti
                 result += f'**[{rip_title}]({rip_link})**\n'
 
         if len(result) == 0:
-            await ctx.channel.send("No rips found.")
+            await ctx.channel.send(f"No approved rips starting with {prefix} found.")
         else:
             await send_embed(ctx.channel, result, time)
 
@@ -476,7 +476,7 @@ async def scout_stats(ctx: Context, channel_link: str = None, optional_time = No
             result += f"{k}: " + ("▮" * int(v / maxCount * 20)) + f" ({v})\n"
 
         if len(rips) == 0:
-            await ctx.channel.send("No rips found.")
+            await ctx.channel.send("No approved rips found.")
         else:
             await send_embed(ctx.channel, result, time)
 
@@ -566,7 +566,7 @@ async def vet_from(ctx: Context, from_msg):
                 await ctx.channel.send("**Rip**: **[{}]({})**\n**Verdict**: {}\n{}\n-# React {} if this is resolved.".format(rip_title, link, verdict, qcMsg, DEFAULT_CHECK))
 
         if len(pin_list) == 0:
-            await ctx.channel.send("No rips found.")
+            await ctx.channel.send("No pinned rips found to QoC.")
         else:
             await ctx.channel.send("Finished QoC-ing. Please note that these are only automated detections - you should verify the issues in Audacity and react manually.")
 
@@ -910,17 +910,17 @@ async def help(ctx: Context):
             + "\n`!count_subs [sub_channel: link]` " + count_subs.brief \
             + "\n`!search_subs <arg1: str|arg2: str|...> [sub_channel: link]` " + search_subs.brief \
             + "\n`!event_subs <name: str> [sub_channel: link]` " + event_subs.brief \
-            + "\n`!stats [show_queues: any]`" + stats.brief \
-            + "\n`!channel_list`" + channel_list.brief \
-            + "\n`!cleanup [search_limit: int]`" + cleanup.brief \
-            + "\n`!frames, !alerts, !metadata [queue_channel: link]`" \
-            + "\n`!scout <prefix: str> [queue_channel: link]`" + scout.brief \
-            + "\n`!scout_stats [queue_channel: link]`" + scout_stats.brief \
+            + "\n`!stats [show_queues: any]` " + stats.brief \
+            + "\n`!channel_list` " + channel_list.brief \
+            + "\n`!cleanup [search_limit: int]` " + cleanup.brief \
+            + "\n`!frames, !alerts, !metadata [queue_channel: link]` " \
+            + "\n`!scout <prefix: str> [queue_channel: link]` " + scout.brief \
+            + "\n`!scout_stats [queue_channel: link]` " + scout_stats.brief \
             + "\n_**Auto QoC tools:**_\n`!vet` " + vet.brief + "\n`!vet_all` " + vet_all.brief \
             + "\n`!vet_msg <message: link>` " + vet_msg.brief + "\n`!vet_url <URL: link>` " + vet_url.brief \
             + "\n`!peek_msg <message: link> [ffprobe: any]` " + peek_msg.brief + "\n`!peek_url <URL: link> [ffprobe: any]` " + peek_url.brief \
-            + "\n`!count_dupe <message: link> [count_queues: any]`" + count_dupe.brief \
-            + "\n_**Experimental tools:**_\n`!scan <queue_channel: link> [start_index: int] [end_index: int]`" + scan.brief \
+            + "\n`!count_dupe <message: link> [count_queues: any]` " + count_dupe.brief \
+            + "\n_**Experimental tools:**_\n`!scan <queue_channel: link> [start_index: int] [end_index: int]` " + scan.brief \
             + "\n_**Config:**_\n`![enable/disable]_metadata` enables/disables advanced metadata checking (currently {})".format("enabled" if get_config('metadata') else "disabled") \
             + "\n=====================================" \
             + "\n_**Legend:**_\n`<argument: type>` Mandatory argument\n`[argument: type]` Optional argument" \
@@ -1143,6 +1143,12 @@ async def react_command(ctx: Context, cmd_name: str, check_func: typing.Callable
         else:
             await send_embed(ctx.channel, result, time)
 
+NO_RIP_DESCRIPTOR = {
+    'search': 'pinned rips containing indicated text in title',
+    'search_subs': 'submissions containing indicated text in title',
+    'events': 'pinned rips containing indicated text in author line',
+    'event_subs': 'submissions containing indicated text in author line',
+}
 
 async def filter_command(ctx: Context, cmd_name: str, filter_func: typing.Callable, display_reacts: bool, optional_time = None):
     """
@@ -1165,7 +1171,7 @@ async def filter_command(ctx: Context, cmd_name: str, filter_func: typing.Callab
             if filter_func(ctx, rip_info):
                 result += make_markdown(rip_info, display_reacts) # a match!
         if result == "":
-            await ctx.channel.send("No rips found.")
+            await ctx.channel.send("No {} found.".format(NO_RIP_DESCRIPTOR[cmd_name] if cmd_name in NO_RIP_DESCRIPTOR.keys() else 'rips'))
         else:
             await send_embed(ctx.channel, result, time)
 
@@ -1215,7 +1221,7 @@ async def filter_sub_command(ctx: Context, cmd_name: str, filter_sub_func: typin
                 result += f'**[{rip_title}]({rip_link})** (by {author})\n'
 
         if len(result) == 0:
-            await ctx.channel.send("No rips found.")
+            await ctx.channel.send("No {} found.".format(NO_RIP_DESCRIPTOR[cmd_name] if cmd_name in NO_RIP_DESCRIPTOR.keys() else 'rips'))
         else:
             await send_embed(ctx.channel, result, time)
 
