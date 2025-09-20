@@ -242,7 +242,7 @@ async def event_subs(ctx: Context, event: str = None, sub_channel_link: str = No
 
 
 @bot.command(name='myfixes', brief='displays rips you\'ve wrenched')
-async def myfixes(ctx: Context, user_id: str = None, optional_time = None):
+async def myfixes(ctx: Context, user_id: str = "", optional_time = None):
     """
     Retrieve all messages with fix or alert reactions by the command author.
     """
@@ -250,16 +250,14 @@ async def myfixes(ctx: Context, user_id: str = None, optional_time = None):
     if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
     heard_command(myfixes, ctx.message.author.name)
 
-    try:
-        user = int(user_id)
-        author = ctx.guild.get_member(user)
-        if author is None:
-            author = ctx.author
-    except ValueError:
-        author = ctx.author
-
-    if author != ctx.author:
-        await ctx.channel.send(f"Searching for rips with wrenches by {author.name}")
+    match = re.search(r'\d+', user_id)
+    if match:
+        id = int(match.group(0))
+        search_author = ctx.guild.get_member(id)
+        if search_author:
+            await ctx.channel.send(f"Searching for rips with wrenches by {search_author.name}")
+    else:
+        id = ctx.author.id
 
     time, msg = parse_optional_time(ctx.channel, optional_time)
     if msg is not None: await ctx.channel.send(msg)
@@ -282,7 +280,7 @@ async def myfixes(ctx: Context, user_id: str = None, optional_time = None):
             valid_msg = False
             for r in message.reactions:
                 if react_is_fix(r) or react_is_alert(r):
-                    if author in [user async for user in r.users()]:
+                    if id in [user.id async for user in r.users()]:
                         valid_msg = True
                         break
             if not valid_msg:
