@@ -241,6 +241,74 @@ async def event_subs(ctx: Context, event: str = None, sub_channel_link: str = No
     await filter_sub_command(ctx, 'event_subs', (lambda rip: line_contains_substring(get_raw_rip_author(rip), event)), sub_channel_link, optional_time)
 
 
+@bot.command(name='myfixes', brief='displays rips you\'ve wrenched')
+async def myfixes(ctx: Context, user_id: str = None, optional_time = None):
+    """
+    Retrieve all messages with fix or alert reactions by the command author.
+    """
+    # not using filter_command for now because implementing this would require refactoring the entire code
+    if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
+    heard_command(myfixes, ctx.message.author.name)
+
+    try:
+        user = int(user_id)
+        author = ctx.guild.get_member(user)
+        if author is None:
+            author = ctx.author
+    except ValueError:
+        author = ctx.author
+
+    if author != ctx.author:
+        await ctx.channel.send(f"Searching for rips with wrenches by {author.name}")
+
+    time, msg = parse_optional_time(ctx.channel, optional_time)
+    if msg is not None: await ctx.channel.send(msg)
+
+    channel = await get_roundup_channel(ctx)
+    if channel is None: return
+
+    async with ctx.channel.typing():
+        pin_list = await get_pins(channel)
+
+        dict_index = 1
+        pins_in_message = {}  # make a dict for everything
+
+        for pinned_message in pin_list:
+            rip_title = get_rip_title(pinned_message)
+            author = get_rip_author(pinned_message)        
+            message = await channel.fetch_message(pinned_message.id)
+
+            # added part to only parse messages witf :fix: or :alert: react from `author`
+            valid_msg = False
+            for r in message.reactions:
+                if react_is_fix(r) or react_is_alert(r):
+                    if author in [user async for user in r.users()]:
+                        valid_msg = True
+                        break
+            if not valid_msg:
+                continue
+            
+            reacts, indicator = await get_reactions(channel, message)
+            author = author.replace('*', '').replace('_', '')
+            pins_in_message[dict_index] = {
+                'Title': rip_title,
+                'Author': author,
+                'Reacts': reacts,
+                'PinMiser': pinned_message.author.name,  # im mister rip christmas, im mister qoc
+                'Indicator': indicator,
+                'Link': f"<https://discordapp.com/channels/{str(channel.guild.id)}/{str(channel.id)}/{str(pinned_message.id)}>"
+            }
+            dict_index += 1
+
+        result = ""
+        for rip_id, rip_info in pins_in_message.items():
+            result += make_markdown(rip_info, True) # a match!
+        if result == "":
+            await ctx.channel.send("No rips found.")
+        else:
+            await send_embed(ctx.channel, result, time)
+
+
 @bot.command(name="fresh", aliases = ['blank', 'bald', 'clean', 'noreacts'], brief='rips with no reacts yet')
 async def fresh(ctx: Context, optional_time = None):
     """
@@ -1617,6 +1685,7 @@ async def get_reactions(channel: TextChannel, message: Message) -> typing.Tuple[
         indicator = OVERDUE_INDICATOR
 
     return reacts, indicator
+
 
 async def process_pins(channel: TextChannel, get_reacts: bool):
     """
