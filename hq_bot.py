@@ -1789,13 +1789,13 @@ async def check_metadata(message: Message, fullFeedback: bool = False) -> typing
             queue_channel = server.get_channel(queue_channel_id)
             queue_rips = await get_rips(queue_channel, 'msg')
             for m in checkDupes(queue_channel_id, queue_rips[queue_channel_id]):
-                mtCode = 1
+                if "Video" in m: mtCode = 1
                 mtMsgs.append(m)
 
             queue_thread_rips = await get_rips(queue_channel, 'thread')
             for thread, rips in queue_thread_rips.items():
                 for m in checkDupes(thread, rips):
-                    mtCode = 1
+                    if "Video" in m: mtCode = 1
                     mtMsgs.append(m)
         
         qoc_channels = [k for k, v in CHANNELS.items() if 'QOC' in v]
@@ -1803,7 +1803,7 @@ async def check_metadata(message: Message, fullFeedback: bool = False) -> typing
             qoc_channel = server.get_channel(qoc_channel_id)
             qoc_rips = await get_rips(qoc_channel, 'pin')
             for m in checkDupes(qoc_channel_id, qoc_rips[qoc_channel_id]):
-                mtCode = 1
+                if "Video" in m: mtCode = 1
                 mtMsgs.append(m)
 
     mtMsg = '\n'.join(["- " + m for m in mtMsgs]) if len(mtMsgs) > 0 else ("- Metadata is OK." if fullFeedback else "")
