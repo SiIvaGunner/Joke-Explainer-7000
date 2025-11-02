@@ -301,7 +301,7 @@ def isDupe(desc1: str, desc2: str, desc2_is_main: bool = False) -> bool:
         # then check if they are equal
         title1 = desc1.splitlines()[0]
         title2 = desc2.splitlines()[0]
-        return re.sub(r'\s*\(.*?\)\s*', ' ', title1).rstrip() == title2 if desc2_is_main else re.sub(r'\s*\(.*?\)\s*', ' ', title2).rstrip()
+        return re.sub(r'\s*\(.*?\)\s*', ' ', title1).rstrip() == (title2 if desc2_is_main else re.sub(r'\s*\(.*?\)\s*', ' ', title2).rstrip())
     else:
         # Check dupe based on the 'Music' key
         # Assuming all mixnames are "(<anything>)" added at the end of the track name,
@@ -311,7 +311,9 @@ def isDupe(desc1: str, desc2: str, desc2_is_main: bool = False) -> bool:
         # trying to account for track names with parentheses
         track1_base = track1.rsplit(' (', 1)[0]
         track2_base = track2.rsplit(' (', 1)[0]
-        return (track1_base == track2_base and not desc2_is_main) or track1_base == track2
+        if desc2_is_main:
+            return track1_base == track2
+        return track1_base == track2_base or track1_base == track2
 
 
 def countDupe(description: str, channel_name: str, playlist_id: str, api_key: str) -> Tuple[int, str]:
