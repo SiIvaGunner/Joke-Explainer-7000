@@ -254,9 +254,10 @@ async def myfixes(ctx: Context, user_id: str = "", optional_time = None):
     """
     Retrieve all messages with fix or alert reactions by the command author.
     """
-    await react_conditional_command(ctx, 'myfixes', user_id, 
-            lambda ID, r, r_users: (react_is_fix(r) or react_is_alert(r)) and ID in r_users,
-            'with wrenches', optional_time)
+    async def reactions_contain_fix_by_user(ID: int, reactions: typing.List[Reaction]):
+        return any([(react_is_fix(r) or react_is_alert(r)) and ID in [user.id async for user in r.users] for r in reactions])
+
+    await react_conditional_command(ctx, 'myfixes', user_id, reactions_contain_fix_by_user, 'with wrenches', optional_time)
 
 
 @bot.command(name='myfresh', brief='displays rips you\'ve not reviewed')
@@ -264,9 +265,10 @@ async def myfresh(ctx: Context, user_id: str = "", optional_time = None):
     """
     Retrieve all messages with no reactions by the command author.
     """
-    await react_conditional_command(ctx, 'myfresh', user_id, 
-            lambda ID, r, r_users: ID not in r_users,
-            'with no reacts', optional_time)
+    async def reactions_all_not_by_user(ID: int, reactions: typing.List[Reaction]):
+        return all([ID not in [user.id async for user in r.users] for r in reactions])
+
+    await react_conditional_command(ctx, 'myfresh', user_id, reactions_all_not_by_user, 'with no reacts', optional_time)
 
 
 @bot.command(name="fresh", aliases = ['blank', 'bald', 'clean', 'noreacts'], brief='rips with no reacts yet')
@@ -1173,7 +1175,7 @@ async def react_command(ctx: Context, cmd_name: str, check_func: typing.Callable
             await send_embed(ctx.channel, result, time)
 
 
-async def react_conditional_command(ctx: Context, cmd_name: str, user_id: str, check_func: typing.Callable, conditional_message: str, optional_time = None):
+async def react_conditional_command(ctx: Context, cmd_name: str, user_id: str, valid_func: typing.Callable, conditional_message: str, optional_time = None):
     """
     Unified command to roundup messages with user-dependent reactions in QoC channels.
     Uses the react_is_ABC helper functions to filter reacts.
@@ -1207,14 +1209,7 @@ async def react_conditional_command(ctx: Context, cmd_name: str, user_id: str, c
             author = get_rip_author(pinned_message)        
             message = await channel.fetch_message(pinned_message.id)
 
-            # added part to only parse messages witf :fix: or :alert: react from `author`
-            valid_msg = False
-            for r in message.reactions:
-                r_users = [user.id async for user in r.users()]
-                if check_func(ID, r, r_users):
-                    valid_msg = True
-                    break
-            if not valid_msg:
+            if not valid_func(ID, message.reactions):
                 continue
             
             reacts, indicator = await get_reactions(channel, message)
