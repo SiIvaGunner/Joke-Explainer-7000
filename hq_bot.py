@@ -255,7 +255,11 @@ async def myfixes(ctx: Context, user_id: str = "", optional_time = None):
     Retrieve all messages with fix or alert reactions by the command author.
     """
     async def reactions_contain_fix_by_user(ID: int, reactions: typing.List[Reaction]):
-        return any([(react_is_fix(r) or react_is_alert(r)) and ID in [user.id async for user in r.users] for r in reactions])
+        for r in reactions:
+            users = [user.id async for user in r.users]
+            if (react_is_fix(r) or react_is_alert(r)) and ID in users:
+                return True
+        return False
 
     await react_conditional_command(ctx, 'myfixes', user_id, reactions_contain_fix_by_user, 'with wrenches', optional_time)
 
@@ -266,7 +270,11 @@ async def myfresh(ctx: Context, user_id: str = "", optional_time = None):
     Retrieve all messages with no reactions by the command author.
     """
     async def reactions_all_not_by_user(ID: int, reactions: typing.List[Reaction]):
-        return all([ID not in [user.id async for user in r.users] for r in reactions])
+        for r in reactions:
+            users = [user.id async for user in r.users]
+            if ID in users:
+                return False
+        return True
 
     await react_conditional_command(ctx, 'myfresh', user_id, reactions_all_not_by_user, 'with no reacts', optional_time)
 
@@ -1209,7 +1217,8 @@ async def react_conditional_command(ctx: Context, cmd_name: str, user_id: str, v
             author = get_rip_author(pinned_message)        
             message = await channel.fetch_message(pinned_message.id)
 
-            if not valid_func(ID, message.reactions):
+            valid = await valid_func(ID, message.reactions)
+            if not valid:
                 continue
             
             reacts, indicator = await get_reactions(channel, message)
