@@ -255,7 +255,7 @@ async def myfixes(ctx: Context, user_id: str = "", optional_time = None):
     Retrieve all messages with fix or alert reactions by the command author.
     """
     await react_conditional_command(ctx, 'myfixes', user_id, 
-            lambda ID, r: (react_is_fix(r) or react_is_alert(r)) and ID in [user.id async for user in r.users()],
+            lambda ID, r, r_users: (react_is_fix(r) or react_is_alert(r)) and ID in r_users,
             'No rips found.', optional_time)
 
 
@@ -265,7 +265,7 @@ async def myfresh(ctx: Context, user_id: str = "", optional_time = None):
     Retrieve all messages with no reactions by the command author.
     """
     await react_conditional_command(ctx, 'myfresh', user_id, 
-            lambda ID, r: ID not in [user.id async for user in r.users()],
+            lambda ID, r, r_users: ID not in r_users,
             'No rips found.', optional_time)
 
 
@@ -1210,7 +1210,8 @@ async def react_conditional_command(ctx: Context, cmd_name: str, user_id: str, c
             # added part to only parse messages witf :fix: or :alert: react from `author`
             valid_msg = False
             for r in message.reactions:
-                if check_func(ID, r):
+                r_users = [user.id async for user in r.users()]
+                if check_func(ID, r, r_users):
                     valid_msg = True
                     break
             if not valid_msg:
