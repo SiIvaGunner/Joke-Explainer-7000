@@ -254,65 +254,19 @@ async def myfixes(ctx: Context, user_id: str = "", optional_time = None):
     """
     Retrieve all messages with fix or alert reactions by the command author.
     """
-    # not using filter_command for now because implementing this would require refactoring the entire code
-    if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
-    heard_command(myfixes, ctx.message.author.name)
+    await react_conditional_command(ctx, 'myfixes', user_id, 
+            lambda ID, r: (react_is_fix(r) or react_is_alert(r)) and ID in [user.id async for user in r.users()],
+            'No rips found.', optional_time)
 
-    match = re.search(r'\d+', user_id)
-    if match:
-        id = int(match.group(0))
-        search_author = ctx.guild.get_member(id)
-        if search_author:
-            await ctx.channel.send(f"Searching for rips with wrenches by {search_author.name}")
-    else:
-        id = ctx.author.id
 
-    time, msg = parse_optional_time(ctx.channel, optional_time)
-    if msg is not None: await ctx.channel.send(msg)
-
-    channel = await get_roundup_channel(ctx)
-    if channel is None: return
-
-    async with ctx.channel.typing():
-        pin_list = await get_pins(channel)
-
-        dict_index = 1
-        pins_in_message = {}  # make a dict for everything
-
-        for pinned_message in pin_list:
-            rip_title = get_rip_title(pinned_message)
-            author = get_rip_author(pinned_message)        
-            message = await channel.fetch_message(pinned_message.id)
-
-            # added part to only parse messages witf :fix: or :alert: react from `author`
-            valid_msg = False
-            for r in message.reactions:
-                if react_is_fix(r) or react_is_alert(r):
-                    if id in [user.id async for user in r.users()]:
-                        valid_msg = True
-                        break
-            if not valid_msg:
-                continue
-            
-            reacts, indicator = await get_reactions(channel, message)
-            author = author.replace('*', '').replace('_', '')
-            pins_in_message[dict_index] = {
-                'Title': rip_title,
-                'Author': author,
-                'Reacts': reacts,
-                'PinMiser': pinned_message.author.name,  # im mister rip christmas, im mister qoc
-                'Indicator': indicator,
-                'Link': f"<https://discordapp.com/channels/{str(channel.guild.id)}/{str(channel.id)}/{str(pinned_message.id)}>"
-            }
-            dict_index += 1
-
-        result = ""
-        for rip_id, rip_info in pins_in_message.items():
-            result += make_markdown(rip_info, True) # a match!
-        if result == "":
-            await ctx.channel.send("No rips found.")
-        else:
-            await send_embed(ctx.channel, result, time)
+@bot.command(name='myfresh', brief='displays rips you\'ve not reviewed')
+async def myfresh(ctx: Context, user_id: str = "", optional_time = None):
+    """
+    Retrieve all messages with no reactions by the command author.
+    """
+    await react_conditional_command(ctx, 'myfresh', user_id, 
+            lambda ID, r: ID not in [user.id async for user in r.users()],
+            'No rips found.', optional_time)
 
 
 @bot.command(name="fresh", aliases = ['blank', 'bald', 'clean', 'noreacts'], brief='rips with no reacts yet')
@@ -974,7 +928,8 @@ async def help(ctx: Context):
     async with ctx.channel.typing():
         result = "_**YOU ARE NOW QoCING:**_\n`!roundup [embed_minutes: float]`" + roundup.brief \
             + "\n`!links` " + links.brief \
-            + "\n_**Special lists:**_\n`!mypins` " + mypins.brief + "\n`!myfixes <name: str>` " + myfixes.brief \
+            + "\n_**Special lists:**_\n`!mypins` " + mypins.brief \
+            + "\n`!myfixes <user_id: str>` " + myfixes.brief + "\n`!myfresh <user_id: str>` " + myfixes.brief\
             + "\n`!search <arg1: str|arg2: str|...>` " + search.brief \
             + "\n`!emails` " + emails.brief + "\n`!events <arg1: str|arg2: str|...>` " + events.brief \
             + "\n`!checks`, `!rejects`, `!wrenches`, `!stops`" \
@@ -1216,6 +1171,71 @@ async def react_command(ctx: Context, cmd_name: str, check_func: typing.Callable
             await ctx.channel.send(not_found_message)
         else:
             await send_embed(ctx.channel, result, time)
+
+
+async def react_conditional_command(ctx: Context, cmd_name: str, user_id: str, check_func: typing.Callable, not_found_message: str, optional_time = None):
+    """
+    Unified command to roundup messages with user-dependent reactions in QoC channels.
+    Uses the react_is_ABC helper functions to filter reacts.
+    """
+    if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
+    heard_command(cmd_name, ctx.message.author.name)
+
+    match = re.search(r'\d+', user_id)
+    if match:
+        ID = int(match.group(0))
+        search_author = ctx.guild.get_member(ID)
+        if search_author:
+            await ctx.channel.send(f"Searching for rips with wrenches by {search_author.name}")
+    else:
+        ID = ctx.author.id
+    
+    time, msg = parse_optional_time(ctx.channel, optional_time)
+    if msg is not None: await ctx.channel.send(msg)
+
+    channel = await get_roundup_channel(ctx)
+    if channel is None: return
+
+    async with ctx.channel.typing():
+        pin_list = await get_pins(channel)
+
+        dict_index = 1
+        pins_in_message = {}  # make a dict for everything
+
+        for pinned_message in pin_list:
+            rip_title = get_rip_title(pinned_message)
+            author = get_rip_author(pinned_message)        
+            message = await channel.fetch_message(pinned_message.id)
+
+            # added part to only parse messages witf :fix: or :alert: react from `author`
+            valid_msg = False
+            for r in message.reactions:
+                if check_func(ID, r):
+                    valid_msg = True
+                    break
+            if not valid_msg:
+                continue
+            
+            reacts, indicator = await get_reactions(channel, message)
+            author = author.replace('*', '').replace('_', '')
+            pins_in_message[dict_index] = {
+                'Title': rip_title,
+                'Author': author,
+                'Reacts': reacts,
+                'PinMiser': pinned_message.author.name,  # im mister rip christmas, im mister qoc
+                'Indicator': indicator,
+                'Link': f"<https://discordapp.com/channels/{str(channel.guild.id)}/{str(channel.id)}/{str(pinned_message.id)}>"
+            }
+            dict_index += 1
+
+        result = ""
+        for rip_id, rip_info in pins_in_message.items():
+            result += make_markdown(rip_info, True) # a match!
+        if result == "":
+            await ctx.channel.send(not_found_message)
+        else:
+            await send_embed(ctx.channel, result, time)
+
 
 NO_RIP_DESCRIPTOR = {
     'search': 'pinned rips containing indicated text in title',
