@@ -256,7 +256,7 @@ async def myfixes(ctx: Context, user_id: str = "", optional_time = None):
     """
     async def reactions_contain_fix_by_user(ID: int, reactions: typing.List[Reaction]):
         for r in reactions:
-            users = [user.id async for user in r.users]
+            users = [user.id async for user in r.users()]
             if (react_is_fix(r) or react_is_alert(r)) and ID in users:
                 return True
         return False
@@ -271,7 +271,7 @@ async def myfresh(ctx: Context, user_id: str = "", optional_time = None):
     """
     async def reactions_all_not_by_user(ID: int, reactions: typing.List[Reaction]):
         for r in reactions:
-            users = [user.id async for user in r.users]
+            users = [user.id async for user in r.users()]
             if ID in users:
                 return False
         return True
