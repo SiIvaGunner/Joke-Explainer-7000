@@ -256,7 +256,7 @@ async def myfixes(ctx: Context, user_id: str = "", optional_time = None):
     """
     await react_conditional_command(ctx, 'myfixes', user_id, 
             lambda ID, r, r_users: (react_is_fix(r) or react_is_alert(r)) and ID in r_users,
-            'No rips found.', optional_time)
+            'with wrenches', optional_time)
 
 
 @bot.command(name='myfresh', brief='displays rips you\'ve not reviewed')
@@ -266,7 +266,7 @@ async def myfresh(ctx: Context, user_id: str = "", optional_time = None):
     """
     await react_conditional_command(ctx, 'myfresh', user_id, 
             lambda ID, r, r_users: ID not in r_users,
-            'No rips found.', optional_time)
+            'with no reacts', optional_time)
 
 
 @bot.command(name="fresh", aliases = ['blank', 'bald', 'clean', 'noreacts'], brief='rips with no reacts yet')
@@ -1173,7 +1173,7 @@ async def react_command(ctx: Context, cmd_name: str, check_func: typing.Callable
             await send_embed(ctx.channel, result, time)
 
 
-async def react_conditional_command(ctx: Context, cmd_name: str, user_id: str, check_func: typing.Callable, not_found_message: str, optional_time = None):
+async def react_conditional_command(ctx: Context, cmd_name: str, user_id: str, check_func: typing.Callable, conditional_message: str, optional_time = None):
     """
     Unified command to roundup messages with user-dependent reactions in QoC channels.
     Uses the react_is_ABC helper functions to filter reacts.
@@ -1186,7 +1186,7 @@ async def react_conditional_command(ctx: Context, cmd_name: str, user_id: str, c
         ID = int(match.group(0))
         search_author = ctx.guild.get_member(ID)
         if search_author:
-            await ctx.channel.send(f"Searching for rips with wrenches by {search_author.name}")
+            await ctx.channel.send(f"Searching for rips {conditional_message} by {search_author.name}")
     else:
         ID = ctx.author.id
     
@@ -1233,7 +1233,7 @@ async def react_conditional_command(ctx: Context, cmd_name: str, user_id: str, c
         for rip_id, rip_info in pins_in_message.items():
             result += make_markdown(rip_info, True) # a match!
         if result == "":
-            await ctx.channel.send(not_found_message)
+            await ctx.channel.send('No rips found.')
         else:
             await send_embed(ctx.channel, result, time)
 
