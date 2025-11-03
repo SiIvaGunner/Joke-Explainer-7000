@@ -219,26 +219,34 @@ async def emails(ctx: Context, optional_time = None):
 async def events(ctx: Context, event: str = None, optional_time = None):
     """
     Retrieve all messages that are tagged as for an event.
-    The provided string must appear in the rip's author label (case insensitive)
+    The provided string must appear in the rip's author label (case insensitive).
+    Supports `|` for multiple search keys.
     """
     if channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']) and event is None:
         await ctx.channel.send("Error: Please indicate the event name. Rips should be tagged with this name.")
         return
     
-    await filter_command(ctx, 'events', (lambda ctx, rip_info: line_contains_substring(rip_info["Author"], event)), True, optional_time)
+    event_keys = event.split('|')
+    await filter_command(ctx, 'events', 
+            (lambda ctx, rip_info: any([line_contains_substring(rip_info["Author"], e) for e in event_keys])), 
+            True, optional_time)
 
 
 @bot.command(name='event_subs', aliases = ['event_sub'], brief='displays event submissions from linked channel')
 async def event_subs(ctx: Context, event: str = None, sub_channel_link: str = None, optional_time = None):
     """
     Retrieve all messages in a submission channel that are tagged as for an event.
-    The provided string must appear in the rip's author label (case insensitive)
+    The provided string must appear in the rip's author label (case insensitive).
+    Supports `|` for multiple search keys.
     """
     if channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']) and event is None:
         await ctx.channel.send("Error: Please indicate the event name. Rips should be tagged with this name.")
         return
     
-    await filter_sub_command(ctx, 'event_subs', (lambda rip: line_contains_substring(get_raw_rip_author(rip), event)), sub_channel_link, optional_time)
+    event_keys = event.split('|')
+    await filter_sub_command(ctx, 'event_subs', 
+            (lambda rip: any([line_contains_substring(get_raw_rip_author(rip), e) for e in event_keys])), 
+            sub_channel_link, optional_time)
 
 
 @bot.command(name='myfixes', brief='displays rips you\'ve wrenched')
@@ -968,14 +976,14 @@ async def help(ctx: Context):
             + "\n`!links` " + links.brief \
             + "\n_**Special lists:**_\n`!mypins` " + mypins.brief + "\n`!myfixes <name: str>` " + myfixes.brief \
             + "\n`!search <arg1: str|arg2: str|...>` " + search.brief \
-            + "\n`!emails` " + emails.brief + "\n`!events <name: str>` " + events.brief \
+            + "\n`!emails` " + emails.brief + "\n`!events <arg1: str|arg2: str|...>` " + events.brief \
             + "\n`!checks`, `!rejects`, `!wrenches`, `!stops`" \
             + "\n`!overdue` " + overdue.brief.replace('X', str(get_config('overdue_days'))) \
             + "\n_**Misc. tools:**_\n`!count` " + count.brief \
             + "\n`!limitcheck` " + limitcheck.brief \
             + "\n`!count_subs [sub_channel: link]` " + count_subs.brief \
             + "\n`!search_subs <arg1: str|arg2: str|...> [sub_channel: link]` " + search_subs.brief \
-            + "\n`!event_subs <name: str> [sub_channel: link]` " + event_subs.brief \
+            + "\n`!event_subs <arg1: str|arg2: str|...> [sub_channel: link]` " + event_subs.brief \
             + "\n`!stats [show_queues: any]` " + stats.brief \
             + "\n`!channel_list` " + channel_list.brief \
             + "\n`!cleanup [search_limit: int]` " + cleanup.brief \
