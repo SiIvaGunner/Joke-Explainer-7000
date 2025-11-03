@@ -267,16 +267,16 @@ async def myfixes(ctx: Context, user_id: str = "", optional_time = None):
 @bot.command(name='myfresh', brief='displays rips you\'ve not reviewed')
 async def myfresh(ctx: Context, user_id: str = "", optional_time = None):
     """
-    Retrieve all messages with no reactions by the command author.
+    Retrieve all messages with no review reactions by the command author.
     """
     async def reactions_all_not_by_user(ID: int, reactions: typing.List[Reaction]):
         for r in reactions:
             users = [user.id async for user in r.users()]
-            if ID in users:
+            if (react_is_check(r) or react_is_goldcheck(r) or react_is_fix(r) or react_is_alert(r) or react_is_reject(r)) and ID in users:
                 return False
         return True
 
-    await react_conditional_command(ctx, 'myfresh', user_id, reactions_all_not_by_user, 'with no reacts', optional_time)
+    await react_conditional_command(ctx, 'myfresh', user_id, reactions_all_not_by_user, 'not reviewed', optional_time)
 
 
 @bot.command(name="fresh", aliases = ['blank', 'bald', 'clean', 'noreacts'], brief='rips with no reacts yet')
