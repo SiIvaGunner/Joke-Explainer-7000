@@ -525,7 +525,7 @@ async def frames(ctx: Context, channel_link: str = None, optional_time = None):
     Search queue channel for rips with "thumbnail needed" react.
     """
     heard_command("frames", ctx.message.author.name)
-    await fetch_command(ctx, react_is_thumbnail, channel_link, optional_time)
+    await fetch_reaction_command(ctx, react_is_thumbnail, channel_link, optional_time)
 
 
 @bot.command(name='alerts', brief='find approved rips with alert reacts')
@@ -535,7 +535,7 @@ async def alerts(ctx: Context, channel_link: str = None, optional_time = None):
     """
     if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
     heard_command("alerts", ctx.message.author.name)
-    await fetch_command(ctx, react_is_alert, channel_link, optional_time)
+    await fetch_reaction_command(ctx, react_is_alert, channel_link, optional_time)
 
 
 @bot.command(name='metadata', brief='find approved rips with metadata reacts')
@@ -545,7 +545,18 @@ async def metadata(ctx: Context, channel_link: str = None, optional_time = None)
     """
     if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
     heard_command("metadata", ctx.message.author.name)
-    await fetch_command(ctx, react_is_metadata, channel_link, optional_time)
+    await fetch_reaction_command(ctx, react_is_metadata, channel_link, optional_time)
+
+
+@bot.command(name='unsent', brief='find approved emails with no emailsent reacts')
+async def unsent(ctx: Context, channel_link: str = None, optional_time = None):
+    """
+    Search queue channel for rips tagged email with no "approval email sent" react.
+    """
+    heard_command("unsent", ctx.message.author.name)
+    await fetch_reaction_command(ctx, 
+            lambda rip: line_contains_substring(get_raw_rip_author(rip), 'email') and not any(react_is_emailsent(r) for r in rip.reactions),
+            channel_link, optional_time)
 
 
 # ============ Basic QoC commands ============== #
@@ -939,7 +950,7 @@ async def help(ctx: Context):
         result = "_**YOU ARE NOW QoCING:**_\n`!roundup [embed_minutes: float]`" + roundup.brief \
             + "\n`!links` " + links.brief \
             + "\n_**Special lists:**_\n`!mypins` " + mypins.brief \
-            + "\n`!myfixes <user_id: str>` " + myfixes.brief + "\n`!myfresh <user_id: str>` " + myfixes.brief\
+            + "\n`!myfixes <user_id: str>` " + myfixes.brief + "\n`!myfresh <user_id: str>` " + myfresh.brief\
             + "\n`!search <arg1: str|arg2: str|...>` " + search.brief \
             + "\n`!emails` " + emails.brief + "\n`!events <arg1: str|arg2: str|...>` " + events.brief \
             + "\n`!checks`, `!rejects`, `!wrenches`, `!stops`" \
@@ -952,7 +963,7 @@ async def help(ctx: Context):
             + "\n`!stats [show_queues: any]` " + stats.brief \
             + "\n`!channel_list` " + channel_list.brief \
             + "\n`!cleanup [search_limit: int]` " + cleanup.brief \
-            + "\n`!frames, !alerts, !metadata [queue_channel: link]` " \
+            + "\n`!frames, !alerts, !metadata, !unsent [queue_channel: link]` " \
             + "\n`!scout <prefix: str> [queue_channel: link]` " + scout.brief \
             + "\n`!scout_stats [queue_channel: link]` " + scout_stats.brief \
             + "\n_**Auto QoC tools:**_\n`!vet` " + vet.brief + "\n`!vet_all` " + vet_all.brief \
@@ -1325,9 +1336,9 @@ async def filter_sub_command(ctx: Context, cmd_name: str, filter_sub_func: typin
             await send_embed(ctx.channel, result, time)
 
 
-async def fetch_command(ctx: Context, react_func: typing.Callable, channel_link = None, optional_time = None):
+async def fetch_command(ctx: Context, valid_func: typing.Callable, channel_link = None, optional_time = None):
     """
-    Unified command to roundup messages with specific reactions in queues.
+    Unified command to roundup messages satisfying condition in queues.
     Uses the react_is_ABC helper functions to filter reacts.
     """
     channel_id, msg = parse_channel_link(channel_link, ['QUEUE'])
@@ -1360,7 +1371,7 @@ async def fetch_command(ctx: Context, react_func: typing.Callable, channel_link 
             for rip in rips:
                 rip_title = get_rip_title(rip)
                 rip_link = f"<https://discordapp.com/channels/{str(ctx.guild.id)}/{str(rip.channel.id)}/{str(rip.id)}>"
-                if any(react_func(r) for r in rip.reactions):
+                if valid_func(rip):
                     result += f'**[{rip_title}]({rip_link})**\n'
             
             result += '------------------------------\n'
@@ -1369,6 +1380,10 @@ async def fetch_command(ctx: Context, react_func: typing.Callable, channel_link 
             await ctx.channel.send("No rips found.")
         else:
             await send_embed(ctx.channel, result, time)
+
+
+async def fetch_reaction_command(ctx: Context, react_func: typing.Callable, channel_link = None, optional_time = None):
+    await fetch_command(ctx, lambda rip: any(react_func(r) for r in rip.reactions), channel_link, optional_time)
 
 
 def split_long_message(a_message: str, character_limit: int) -> list[str]:  # avoid Discord's character limit
@@ -1639,6 +1654,9 @@ def react_is_metadata(react: Reaction) -> bool:
 
 def react_is_thumbnail(react: Reaction) -> bool:
     return any([r in react_name(react).lower() for r in ["thumbnail", DEFAULT_THUMBNAIL]])
+
+def react_is_emailsent(react: Reaction) -> bool:
+    return any([r in react_name(react).lower() for r in ["emailsent"]])
 
 
 KEYCAP_EMOJIS = {'2️⃣': 2, '3️⃣': 3, '4️⃣': 4, '5️⃣': 5, '6️⃣': 6, '7️⃣': 7, '8️⃣': 8, '9️⃣': 9, '🔟': 10}
