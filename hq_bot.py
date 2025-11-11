@@ -554,7 +554,7 @@ async def unsent(ctx: Context, channel_link: str = None, optional_time = None):
     Search queue channel for rips tagged email with no "approval email sent" react.
     """
     heard_command("unsent", ctx.message.author.name)
-    await fetch_reaction_command(ctx, 
+    await fetch_command(ctx, 
             lambda rip: line_contains_substring(get_raw_rip_author(rip), 'email') and not any(react_is_emailsent(r) for r in rip.reactions),
             channel_link, optional_time)
 
