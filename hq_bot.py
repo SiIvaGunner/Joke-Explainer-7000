@@ -587,11 +587,13 @@ async def vet_from(ctx: Context, from_msg):
     if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
     heard_command("vet_from", ctx.message.author.name)
 
-    _, _, from_message, status = await parse_message_link(from_msg)
-    if from_message is None:
-        await ctx.channel.send(status)
-        return
-    from_timestamp = from_message.created_at
+    vet_all_pins = from_msg is None
+    if not vet_all_pins:
+        _, _, from_message, status = await parse_message_link(from_msg)
+        if from_message is None:
+            await ctx.channel.send(status)
+            return
+        from_timestamp = from_message.created_at
 
     channel = await get_roundup_channel(ctx)
     if channel is None: return
@@ -604,7 +606,7 @@ async def vet_from(ctx: Context, from_msg):
         pin_list = await get_pins(channel)
 
         for pinned_message in pin_list:
-            if pinned_message.created_at < from_timestamp:
+            if not vet_all_pins and pinned_message.created_at < from_timestamp:
                 continue
             qcCode, qcMsg, _ = await check_qoc(pinned_message, False)
             rip_title = get_rip_title(pinned_message)
@@ -725,6 +727,7 @@ async def count_dupe(ctx: Context, msg_link: str = None, check_queues: str = Non
             queue_channels = [k for k, v in CHANNELS.items() if 'QUEUE' in v]
             for queue_channel_id in queue_channels:
                 queue_channel = server.get_channel(queue_channel_id)
+                if queue_channel is None: continue
                 queue_rips = await get_rips(queue_channel, 'msg')
                 q += sum([isDupe(description, get_rip_description(r)) for r in queue_rips[queue_channel_id] if r.id != message.id])
 
@@ -1079,6 +1082,7 @@ async def stats(ctx: Context, optional_arg = None):
             email_count = 0
 
             channel = server.get_channel(channel_id)
+            if channel is None: continue
             pin_list = await get_pins(channel)
 
             for pinned_message in pin_list:
@@ -1094,6 +1098,7 @@ async def stats(ctx: Context, optional_arg = None):
         sub_channels = [k for k, v in CHANNELS.items() if any(t in v for t in ['SUBS', 'SUBS_PIN', 'SUBS_THREAD'])]
         for channel_id in sub_channels:
             channel = server.get_channel(channel_id)
+            if channel is None: continue
 
             if channel_is_type(channel, 'SUBS'): t = 'msg'
             elif channel_is_type(channel, 'SUBS_PIN'): t = 'pin'
@@ -1113,6 +1118,7 @@ async def stats(ctx: Context, optional_arg = None):
             queue_channels = [k for k, v in CHANNELS.items() if 'QUEUE' in v]
             for channel_id in queue_channels:
                 channel = server.get_channel(channel_id)
+                if channel is None: continue
                 rip_count = await count_rips(channel, 'msg')
                 ret += f"- <#{channel_id}>: **{rip_count}** rips\n"
 
@@ -1838,6 +1844,7 @@ async def check_metadata(message: Message, fullFeedback: bool = False) -> typing
         queue_channels = [k for k, v in CHANNELS.items() if 'QUEUE' in v]
         for queue_channel_id in queue_channels:
             queue_channel = server.get_channel(queue_channel_id)
+            if queue_channel is None: continue
             queue_rips = await get_rips(queue_channel, 'msg')
             for m in checkDupes(queue_channel_id, queue_rips[queue_channel_id]):
                 if "Video" in m: mtCode = 1
@@ -1852,6 +1859,7 @@ async def check_metadata(message: Message, fullFeedback: bool = False) -> typing
         qoc_channels = [k for k, v in CHANNELS.items() if 'QOC' in v]
         for qoc_channel_id in qoc_channels:
             qoc_channel = server.get_channel(qoc_channel_id)
+            if qoc_channel is None: continue
             qoc_rips = await get_rips(qoc_channel, 'pin')
             for m in checkDupes(qoc_channel_id, qoc_rips[qoc_channel_id]):
                 if "Video" in m: mtCode = 1
