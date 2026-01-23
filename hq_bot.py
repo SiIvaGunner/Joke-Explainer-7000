@@ -97,7 +97,11 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
 
         SOFT_PIN_LIMIT = get_config('soft_pin_limit')
         if len(pin_list) > SOFT_PIN_LIMIT:
-            await channel.send(f"**Warning**: More than {SOFT_PIN_LIMIT} rips pinned - please handle them first :(")
+            if get_config("pinlimit_must_die_mode"):
+                await latest_msg.unpin()
+                await channel.send(f"**Error**: More than {SOFT_PIN_LIMIT} rips in pins. Unpinned.")
+            else:
+                await channel.send(f"**Warning**: More than {SOFT_PIN_LIMIT} rips pinned - please handle them first :(")
     
         verdict, msg = await check_qoc_and_metadata(latest_msg)
 
@@ -923,6 +927,17 @@ async def disable_metadata(ctx: Context):
     set_config('metadata', False)
     await ctx.channel.send("Advanced metadata checking disabled.")
 
+@bot.command(name='enable_pinlimit_must_die')
+async def enable_pinlimit_must_die(ctx: Context): 
+    set_config('pinlimit_must_die_mode', True)
+    await ctx.channel.send("Soft pin limit is now hard pin limit. Good luck.")
+
+@bot.command(name='disable_pinlimit_must_die')
+async def disable_pinlimit_must_die(ctx: Context): 
+    set_config('pinlimit_must_die_mode', False)
+    await ctx.channel.send("Back to normal.")
+
+
 def set_config(config: str, value):
     if os.path.exists('config.json'):
         with open('config.json', 'r', encoding='utf-8') as file:
@@ -1142,6 +1157,54 @@ async def stats(ctx: Context, optional_arg = None):
 #async def sync(ctx):
 #  cmds = await bot.tree.sync()
 #  await ctx.send(f"Synced {len(cmds)} commands globally!")
+
+# some owner-only commands to config or kill bot if necessary
+
+@bot.command(name='shutdown')
+@commands.is_owner()
+async def shutdown(ctx: Context):
+    await bot.close()
+
+@bot.command(name='current_config')
+@commands.is_owner()
+async def current_config(ctx: Context, conf: str):
+    if os.path.exists('config.json'):
+        with open('config.json', 'r', encoding='utf-8') as file:
+            configs = json.load(file)
+            if conf is None:
+                all_configs = ""
+                for k, v in configs.items():
+                    all_configs += f"{k}: {v}\n"
+                await ctx.channel.send(all_configs)
+            else:
+                try:
+                    await ctx.channel.send(configs[conf])
+                except KeyError:
+                    await ctx.channel.send(f"Error: No config named {conf}.")
+    else:
+        await ctx.channel.send("Error: Config file not found.")
+
+@bot.command(name='modify_config')
+@commands.is_owner()
+async def modify_config(ctx: Context, conf: str, value: str):
+    if conf is None or value is None:
+        await ctx.channel.send("Invalid syntax.")
+        return
+    
+    cur_val = get_config(conf)
+    if value == 'true':
+        new_val = True
+    elif value == 'false':
+        new_val = False
+    else:
+        try:
+            new_val = int(value)
+        except ValueError:
+            await ctx.channel.send("Error: Invalid value type.")
+            return
+    
+    set_config(conf, new_val)
+    await ctx.channel.send(f"Modified config {conf} from {cur_val} to {new_val}.")
 
 #===============================================#
 #               HELPER FUNCTIONS                #

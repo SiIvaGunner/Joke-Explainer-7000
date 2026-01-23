@@ -1,5 +1,6 @@
 {
     "metadata": true,
+    "pinlimit_must_die_mode": false,
 
     "embed_seconds": 2700,
     "proxy_embed_seconds": 10800,
