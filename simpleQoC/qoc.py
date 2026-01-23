@@ -305,6 +305,11 @@ def checkClipping(wav_filepath: Path, threshold: int, doGradientAnalysis: bool) 
     - **threshold**: How many consecutive samples to look for. Recommended value: 3.
     - **doGradientAnalysis**: Set to True if the waveform may contain overflows.
     """
+    if os.path.getsize(wav_filepath) > CLIPPING_FILESIZE_LIMIT:
+        # if WAV file is over 500 MB, skip clipping checking to not nuke the RAM by loading the entire waveform into memory
+        # TODO: change to analyze by chunk?
+        return (True, "Unable to check for clipping due to large file size or audio length. Workaround TBA.")
+    
     wavFile = parseAudio(wav_filepath)
 
     clips = []
@@ -402,22 +407,16 @@ def checkClippingFromFile(file: FileType, filepath: str, threshold: int = DEFAUL
         wav_filepath = "{}_temp.wav".format(Path.joinpath(wav_filepath.parent, wav_filepath.stem))
     else:
         DEBUG('Bits per sample: {}'.format(file.info.bits_per_sample))
-
-    if os.path.getsize(wav_filepath) > CLIPPING_FILESIZE_LIMIT:
-        # if WAV file is over 500 MB, skip clipping checking to not nuke the RAM by loading the entire waveform into memory
-        # TODO: change to analyze by chunk?
-        check, msg = (True, "Unable to check for clipping due to large file size or audio length. Workaround TBA.")
     
-    else:  
-        if not os.path.exists(wav_filepath):
-            ffmpegToWAV(filepath, wav_filepath)
+    if not os.path.exists(wav_filepath):
+        ffmpegToWAV(filepath, wav_filepath)
 
-        # do gradient analysis if file is 24-bit FLAC
-        if isinstance(file, flac.FLAC) and file.info.bits_per_sample == 24:
-            DEBUG("Input file is detected as 24-bit FLAC. Recommend verifing clipping in Audacity.")
-            check, msg = checkClipping(wav_filepath, threshold, True)
-        else:
-            check, msg = checkClipping(wav_filepath, threshold, False)
+    # do gradient analysis if file is 24-bit FLAC
+    if isinstance(file, flac.FLAC) and file.info.bits_per_sample == 24:
+        DEBUG("Input file is detected as 24-bit FLAC. Recommend verifing clipping in Audacity.")
+        check, msg = checkClipping(wav_filepath, threshold, True)
+    else:
+        check, msg = checkClipping(wav_filepath, threshold, False)
 
     if newfile:
         os.remove(wav_filepath)
@@ -436,26 +435,20 @@ def checkClippingFromUrl(validUrl: str, threshold: int = DEFAULT_CLIPPING_THRESH
         wav_filepath = downloadAudioFromUrl(validUrl)
     else:
         ffmpegToWAV(validUrl, wav_filepath)
-        
-    if os.path.getsize(wav_filepath) > CLIPPING_FILESIZE_LIMIT:
-        # if WAV file is over 500 MB, skip clipping checking to not nuke the RAM by loading the entire waveform into memory
-        # TODO: change to analyze by chunk?
-        check, msg = (True, "Unable to check for clipping due to large file size or audio length. Workaround TBA.")
 
+    # do gradient analysis if file is 24-bit FLAC
+    is24bitFLAC = False
+    try:
+        probeOutput = ffprobeUrl(validUrl)
+        is24bitFLAC = ('flac' in probeOutput['format']['format_name']) and (int(probeOutput['streams'][0]['bits_per_raw_sample']) == 24)
+    except (KeyError, ValueError):
+        pass
+
+    if is24bitFLAC:
+        DEBUG("Input file is detected as 24-bit FLAC. Recommend verifing clipping in Audacity.")
+        check, msg = checkClipping(wav_filepath, threshold, True)
     else:
-        # do gradient analysis if file is 24-bit FLAC
-        is24bitFLAC = False
-        try:
-            probeOutput = ffprobeUrl(validUrl)
-            is24bitFLAC = ('flac' in probeOutput['format']['format_name']) and (int(probeOutput['streams'][0]['bits_per_raw_sample']) == 24)
-        except (KeyError, ValueError):
-            pass
-
-        if is24bitFLAC:
-            DEBUG("Input file is detected as 24-bit FLAC. Recommend verifing clipping in Audacity.")
-            check, msg = checkClipping(wav_filepath, threshold, True)
-        else:
-            check, msg = checkClipping(wav_filepath, threshold, False)
+        check, msg = checkClipping(wav_filepath, threshold, False)
 
     os.remove(wav_filepath)
 
