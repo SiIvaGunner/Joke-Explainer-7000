@@ -402,16 +402,22 @@ def checkClippingFromFile(file: FileType, filepath: str, threshold: int = DEFAUL
         wav_filepath = "{}_temp.wav".format(Path.joinpath(wav_filepath.parent, wav_filepath.stem))
     else:
         DEBUG('Bits per sample: {}'.format(file.info.bits_per_sample))
-        
-    if not os.path.exists(wav_filepath):
-        ffmpegToWAV(filepath, wav_filepath)
 
-    # do gradient analysis if file is 24-bit FLAC
-    if isinstance(file, flac.FLAC) and file.info.bits_per_sample == 24:
-        DEBUG("Input file is detected as 24-bit FLAC. Recommend verifing clipping in Audacity.")
-        check, msg = checkClipping(wav_filepath, threshold, True)
-    else:
-        check, msg = checkClipping(wav_filepath, threshold, False)
+    if os.path.getsize(wav_filepath) > CLIPPING_FILESIZE_LIMIT:
+        # if WAV file is over 500 MB, skip clipping checking to not nuke the RAM by loading the entire waveform into memory
+        # TODO: change to analyze by chunk?
+        check, msg = (False, "Unable to check for clipping due to large file size or audio length. Workaround TBA.")
+    
+    else:  
+        if not os.path.exists(wav_filepath):
+            ffmpegToWAV(filepath, wav_filepath)
+
+        # do gradient analysis if file is 24-bit FLAC
+        if isinstance(file, flac.FLAC) and file.info.bits_per_sample == 24:
+            DEBUG("Input file is detected as 24-bit FLAC. Recommend verifing clipping in Audacity.")
+            check, msg = checkClipping(wav_filepath, threshold, True)
+        else:
+            check, msg = checkClipping(wav_filepath, threshold, False)
 
     if newfile:
         os.remove(wav_filepath)
