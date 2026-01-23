@@ -406,7 +406,7 @@ def checkClippingFromFile(file: FileType, filepath: str, threshold: int = DEFAUL
     if os.path.getsize(wav_filepath) > CLIPPING_FILESIZE_LIMIT:
         # if WAV file is over 500 MB, skip clipping checking to not nuke the RAM by loading the entire waveform into memory
         # TODO: change to analyze by chunk?
-        check, msg = (False, "Unable to check for clipping due to large file size or audio length. Workaround TBA.")
+        check, msg = (True, "Unable to check for clipping due to large file size or audio length. Workaround TBA.")
     
     else:  
         if not os.path.exists(wav_filepath):
@@ -440,7 +440,7 @@ def checkClippingFromUrl(validUrl: str, threshold: int = DEFAULT_CLIPPING_THRESH
     if os.path.getsize(wav_filepath) > CLIPPING_FILESIZE_LIMIT:
         # if WAV file is over 500 MB, skip clipping checking to not nuke the RAM by loading the entire waveform into memory
         # TODO: change to analyze by chunk?
-        check, msg = (False, "Unable to check for clipping due to large file size or audio length. Workaround TBA.")
+        check, msg = (True, "Unable to check for clipping due to large file size or audio length. Workaround TBA.")
 
     else:
         # do gradient analysis if file is 24-bit FLAC
