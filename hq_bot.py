@@ -95,9 +95,9 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
         if len(pin_list) < 1: return
         latest_msg = pin_list[0]
 
-        SOFT_PIN_LIMIT = get_config('soft_pin_limit')
+        SOFT_PIN_LIMIT = _get_config('soft_pin_limit')
         if len(pin_list) > SOFT_PIN_LIMIT:
-            if get_config("pinlimit_must_die_mode"):
+            if _get_config("pinlimit_must_die_mode"):
                 await latest_msg.unpin()
                 await channel.send(f"**Error**: More than {SOFT_PIN_LIMIT} rips in pins. Unpinned.")
             else:
@@ -421,7 +421,7 @@ async def limitcheck(ctx: Context):
 
     async with ctx.channel.typing():
         pin_list = [message async for message in channel.pins(limit=None)]
-        result = f"You can pin {get_config('soft_pin_limit') - len(pin_list)} more rips until I start complaining about pin space."
+        result = f"You can pin {_get_config('soft_pin_limit') - len(pin_list)} more rips until I start complaining about pin space."
 
         result += proxy
         await ctx.channel.send(result)
@@ -880,7 +880,7 @@ async def peek_msg(ctx: Context, msg_link: str = None, use_ffprobe = None):
         if code == -1:
             await ctx.channel.send("Error reading message:\n{}".format('\n'.join(errs)))
         else:
-            long_message = split_long_message("**Rip**: **{}**\n**File metadata**:\n{}".format(rip_title, msg), get_config('character_limit'))
+            long_message = split_long_message("**Rip**: **{}**\n**File metadata**:\n{}".format(rip_title, msg), _get_config('character_limit'))
             for line in long_message:
                 await ctx.channel.send(line)
 
@@ -910,7 +910,7 @@ async def peek_url(ctx: Context, url: str = None, use_ffprobe = None):
         if code == -1:
             await ctx.channel.send("Error reading URL: {}".format(msg))
         else:
-            long_message = split_long_message("**File metadata**:\n{}".format(msg), get_config('character_limit'))
+            long_message = split_long_message("**File metadata**:\n{}".format(msg), _get_config('character_limit'))
             for line in long_message:
                 await ctx.channel.send(line)
 
@@ -919,26 +919,26 @@ async def peek_url(ctx: Context, url: str = None, use_ffprobe = None):
 
 @bot.command(name='enable_metadata')
 async def enable_metadata(ctx: Context): 
-    set_config('metadata', True)
+    _set_config('metadata', True)
     await ctx.channel.send("Advanced metadata checking enabled.")
 
 @bot.command(name='disable_metadata')
 async def disable_metadata(ctx: Context): 
-    set_config('metadata', False)
+    _set_config('metadata', False)
     await ctx.channel.send("Advanced metadata checking disabled.")
 
 @bot.command(name='enable_pinlimit_must_die')
 async def enable_pinlimit_must_die(ctx: Context): 
-    set_config('pinlimit_must_die_mode', True)
+    _set_config('pinlimit_must_die_mode', True)
     await ctx.channel.send("Soft pin limit is now hard pin limit. Good luck.")
 
 @bot.command(name='disable_pinlimit_must_die')
 async def disable_pinlimit_must_die(ctx: Context): 
-    set_config('pinlimit_must_die_mode', False)
+    _set_config('pinlimit_must_die_mode', False)
     await ctx.channel.send("Back to normal.")
 
 
-def set_config(config: str, value):
+def _set_config(config: str, value):
     if os.path.exists('config.json'):
         with open('config.json', 'r', encoding='utf-8') as file:
             configs = json.load(file)
@@ -948,7 +948,7 @@ def set_config(config: str, value):
     with open('config.json', 'w', encoding='utf-8') as file:
         json.dump(configs, file, indent=4)
 
-def get_config(config: str):
+def _get_config(config: str):
     if os.path.exists('config.json'):
         with open('config.json', 'r', encoding='utf-8') as file:
             configs = json.load(file)
@@ -972,7 +972,7 @@ async def help(ctx: Context):
             + "\n`!search <arg1: str|arg2: str|...>` " + search.brief \
             + "\n`!emails` " + emails.brief + "\n`!events <arg1: str|arg2: str|...>` " + events.brief \
             + "\n`!checks`, `!rejects`, `!wrenches`, `!stops`" \
-            + "\n`!overdue` " + overdue.brief.replace('X', str(get_config('overdue_days'))) \
+            + "\n`!overdue` " + overdue.brief.replace('X', str(_get_config('overdue_days'))) \
             + "\n_**Misc. tools:**_\n`!count` " + count.brief \
             + "\n`!limitcheck` " + limitcheck.brief \
             + "\n`!count_subs [sub_channel: link]` " + count_subs.brief \
@@ -989,7 +989,7 @@ async def help(ctx: Context):
             + "\n`!peek_msg <message: link> [ffprobe: any]` " + peek_msg.brief + "\n`!peek_url <URL: link> [ffprobe: any]` " + peek_url.brief \
             + "\n`!count_dupe <message: link> [count_queues: any]` " + count_dupe.brief \
             + "\n_**Experimental tools:**_\n`!scan <queue_channel: link> [start_index: int] [end_index: int]` " + scan.brief \
-            + "\n_**Config:**_\n`![enable/disable]_metadata` enables/disables advanced metadata checking (currently {})".format("enabled" if get_config('metadata') else "disabled") \
+            + "\n_**Config:**_\n`![enable/disable]_metadata` enables/disables advanced metadata checking (currently {})".format("enabled" if _get_config('metadata') else "disabled") \
             + "\n=====================================" \
             + "\n_**Legend:**_\n`<argument: type>` Mandatory argument\n`[argument: type]` Optional argument" \
             + "\n_**Tips:**_\nUse quotes for string arguments with spaces, e.g. \"Main Theme\"\nAll embed commands accept the [embed_minutes] optional argument"
@@ -1142,7 +1142,7 @@ async def stats(ctx: Context, optional_arg = None):
                     if count > 0:
                         ret += f"  - <#{thread}>: **{count}** rips\n"
 
-        long_message = split_long_message(ret, get_config('character_limit'))
+        long_message = split_long_message(ret, _get_config('character_limit'))
         for line in long_message:
             await ctx.channel.send(line)
 
@@ -1165,9 +1165,9 @@ async def stats(ctx: Context, optional_arg = None):
 async def shutdown(ctx: Context):
     await bot.close()
 
-@bot.command(name='current_config')
+@bot.command(name='current_config', aliases = ['get_config'])
 @commands.is_owner()
-async def current_config(ctx: Context, conf: str):
+async def current_config(ctx: Context, conf: str = None):
     if os.path.exists('config.json'):
         with open('config.json', 'r', encoding='utf-8') as file:
             configs = json.load(file)
@@ -1184,14 +1184,14 @@ async def current_config(ctx: Context, conf: str):
     else:
         await ctx.channel.send("Error: Config file not found.")
 
-@bot.command(name='modify_config')
+@bot.command(name='modify_config', aliases = ['set_config'])
 @commands.is_owner()
 async def modify_config(ctx: Context, conf: str, value: str):
     if conf is None or value is None:
         await ctx.channel.send("Invalid syntax.")
         return
     
-    cur_val = get_config(conf)
+    cur_val = _get_config(conf)
     if value == 'true':
         new_val = True
     elif value == 'false':
@@ -1203,7 +1203,7 @@ async def modify_config(ctx: Context, conf: str, value: str):
             await ctx.channel.send("Error: Invalid value type.")
             return
     
-    set_config(conf, new_val)
+    _set_config(conf, new_val)
     await ctx.channel.send(f"Modified config {conf} from {cur_val} to {new_val}.")
 
 #===============================================#
@@ -1483,9 +1483,9 @@ async def send_embed(channel: TextChannel, message: str, delete_after: float = N
     - message: Text to send as embed
     - delete_after: Number of seconds to automatically remove the message. Defaults to constant at the beginning of file. If set to None, message will not delete.
     """
-    long_message = split_long_message(message, get_config('embed_character_limit'))
+    long_message = split_long_message(message, _get_config('embed_character_limit'))
     for line in long_message:
-        fancy_message = discord.Embed(description=line, color=get_config('embed_color'))
+        fancy_message = discord.Embed(description=line, color=_get_config('embed_color'))
         await channel.send(embed=fancy_message, delete_after=delete_after)
 
 def channel_is_type(channel: TextChannel | Thread, type: str):
@@ -1514,7 +1514,7 @@ def parse_optional_time(channel: TextChannel, optional_time):
     """
     Get the number of houminutesrs from user input for roundup embed commands.
     """
-    time = get_config('proxy_embed_seconds') if channel_is_type(channel, 'PROXY_ROUNDUP') else get_config('embed_seconds')
+    time = _get_config('proxy_embed_seconds') if channel_is_type(channel, 'PROXY_ROUNDUP') else _get_config('embed_seconds')
     msg = None
     if optional_time is not None:
         try:
@@ -1737,13 +1737,13 @@ def rip_is_specs_overdue(message: Message) -> bool:
     """
     Returns true if the message is older than SPECS_OVERDUE_DAYS
     """
-    return datetime.now(timezone.utc) - message.created_at > timedelta(days=get_config('spec_overdue_days'))
+    return datetime.now(timezone.utc) - message.created_at > timedelta(days=_get_config('spec_overdue_days'))
 
 def rip_is_overdue(message: Message) -> bool:
     """
     Returns true if the message is older than OVERDUE_DAYS
     """
-    return datetime.now(timezone.utc) - message.created_at > timedelta(days=get_config('overdue_days'))
+    return datetime.now(timezone.utc) - message.created_at > timedelta(days=_get_config('overdue_days'))
 
 
 async def get_reactions(channel: TextChannel, message: Message) -> typing.Tuple[str, str]:
@@ -1880,7 +1880,7 @@ async def check_metadata(message: Message, fullFeedback: bool = False) -> typing
     """
     playlistId = extract_playlist_id('\n'.join(message.content.splitlines()[1:])) # ignore author line
     description = get_rip_description(message)
-    advancedCheck = get_config('metadata')
+    advancedCheck = _get_config('metadata')
     skipCheck = "unusual metadata" in message.content.lower()
     if not skipCheck and len(description) > 0:
         mtCode, mtMsgs = await run_blocking(checkMetadata, description, YOUTUBE_CHANNEL_NAME, playlistId, YOUTUBE_API_KEY, advancedCheck)
@@ -1997,7 +1997,7 @@ async def get_pins(channel: TextChannel) -> typing.List[Message]:
     Raw pin retrieval helper function
     """
     pins = [message async for message in channel.pins(limit=None)]
-    return pins[:-1] if get_config('qoc_contains_pinned_rule') else pins
+    return pins[:-1] if _get_config('qoc_contains_pinned_rule') else pins
 
 
 async def get_rips(channel: TextChannel, type: typing.Literal['pin', 'msg', 'thread']) -> dict[int, typing.List[Message]]:
