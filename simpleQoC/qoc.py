@@ -17,6 +17,8 @@ DOWNLOAD_DIR = Path(os.path.abspath(getsourcefile(lambda:0))).parent / 'audioDow
 DEFAULT_CLIPPING_THRESHOLD = 3
 DEFAULT_DS_CLIPPING_THRESHOLD = 5
 
+CLIPPING_FILESIZE_LIMIT = 1024 * 1024 * 500 # 500MB
+
 #=======================================#
 #               DEBUGGING               #
 #=======================================#
@@ -146,7 +148,7 @@ def parseUrl(url: str) -> str:
 
 # https://stackoverflow.com/questions/38511444/python-download-files-from-google-drive-using-url
 def save_response_content(response, destination):
-    CHUNK_SIZE = 32768
+    CHUNK_SIZE = 1024 * 32
 
     with open(destination, "wb") as f:
         for chunk in response.iter_content(CHUNK_SIZE):
@@ -429,19 +431,25 @@ def checkClippingFromUrl(validUrl: str, threshold: int = DEFAULT_CLIPPING_THRESH
     else:
         ffmpegToWAV(validUrl, wav_filepath)
         
-    # do gradient analysis if file is 24-bit FLAC
-    is24bitFLAC = False
-    try:
-        probeOutput = ffprobeUrl(validUrl)
-        is24bitFLAC = ('flac' in probeOutput['format']['format_name']) and (int(probeOutput['streams'][0]['bits_per_raw_sample']) == 24)
-    except (KeyError, ValueError):
-        pass
+    if os.path.getsize(wav_filepath) > CLIPPING_FILESIZE_LIMIT:
+        # if WAV file is over 500 MB, skip clipping checking to not nuke the RAM by loading the entire waveform into memory
+        # TODO: change to analyze by chunk?
+        check, msg = (False, "Unable to check for clipping due to large file size or audio length. Workaround TBA.")
 
-    if is24bitFLAC:
-        DEBUG("Input file is detected as 24-bit FLAC. Recommend verifing clipping in Audacity.")
-        check, msg = checkClipping(wav_filepath, threshold, True)
     else:
-        check, msg = checkClipping(wav_filepath, threshold, False)
+        # do gradient analysis if file is 24-bit FLAC
+        is24bitFLAC = False
+        try:
+            probeOutput = ffprobeUrl(validUrl)
+            is24bitFLAC = ('flac' in probeOutput['format']['format_name']) and (int(probeOutput['streams'][0]['bits_per_raw_sample']) == 24)
+        except (KeyError, ValueError):
+            pass
+
+        if is24bitFLAC:
+            DEBUG("Input file is detected as 24-bit FLAC. Recommend verifing clipping in Audacity.")
+            check, msg = checkClipping(wav_filepath, threshold, True)
+        else:
+            check, msg = checkClipping(wav_filepath, threshold, False)
 
     os.remove(wav_filepath)
 
