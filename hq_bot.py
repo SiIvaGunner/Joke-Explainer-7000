@@ -1966,6 +1966,7 @@ async def check_qoc_and_metadata(message: Message, fullFeedback: bool = False) -
     if detectedUrl is not None:
         try:
             for line in message.content.split('```', 2)[2].splitlines():
+                line = "".join(c for c in line if c.isprintable())
                 if detectedUrl in line:
                     break
                 elif len(line) > 0 and not line.startswith('Joke') and not line == '||':
