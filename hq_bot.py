@@ -12,6 +12,7 @@ from simpleQoC.metadata import checkMetadata, countDupe, isDupe
 import re
 import functools
 import typing
+from typing import NamedTuple
 import math
 import json
 import os
@@ -133,6 +134,10 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
             await channel.send("**Rip**: **[{}]({})**\n**Verdict**: {}\n{}-# React {} if this is resolved.".format(rip_title, link, verdict, msg, DEFAULT_CHECK))
 
 REACTION_CACHE = dict()
+
+class ReactionData(NamedTuple):
+    name: str
+    user_id: int
 
 @bot.listen('on_raw_reaction_add')
 async def on_raw_reaction_add_update_cache(payload: discord.RawReactionActionEvent):
@@ -284,10 +289,9 @@ async def myfixes(ctx: Context, user_id: str = "", optional_time = None):
     """
     Retrieve all messages with fix or alert reactions by the command author.
     """
-    async def reactions_contain_fix_by_user(ID: int, reactions: typing.List[Reaction]):
-        for r in reactions:
-            users = [user.id async for user in r.users()]
-            if (react_is_fix(r) or react_is_alert(r)) and ID in users:
+    async def reactions_contain_fix_by_user(ID: int, reactionDatas: typing.List[ReactionData]):
+        for r in reactionDatas:
+            if (react_is_fix(r.name) or react_is_alert(r.name)) and ID == r.user_id:
                 return True
         return False
 
@@ -299,10 +303,9 @@ async def myfresh(ctx: Context, user_id: str = "", optional_time = None):
     """
     Retrieve all messages with no review reactions by the command author.
     """
-    async def reactions_all_not_by_user(ID: int, reactions: typing.List[Reaction]):
-        for r in reactions:
-            users = [user.id async for user in r.users()]
-            if (react_is_check(r) or react_is_goldcheck(r) or react_is_fix(r) or react_is_alert(r) or react_is_reject(r)) and ID in users:
+    async def reactions_all_not_by_user(ID: int, reactionDatas: typing.List[ReactionData]):
+        for r in reactionDatas:
+            if (react_is_check(r.name) or react_is_goldcheck(r.name) or react_is_fix(r.name) or react_is_alert(r.name) or react_is_reject(r.name)) and ID == r.user_id:
                 return False
         return True
 
@@ -1288,6 +1291,25 @@ async def react_command(ctx: Context, cmd_name: str, check_func: typing.Callable
         else:
             await send_embed(ctx.channel, result, time)
 
+async def get_reaction_data(message_id: int, channel: TextChannel) -> typing.List[ReactionData]:
+    """
+    Gets reaction data from a message. If not in cache, fetches and caches it.
+    Fast if cached, slow if not.
+    """
+    reactionDatas = []
+    if message_id in REACTION_CACHE:
+        reactionDatas = REACTION_CACHE.get(message_id)
+    else:
+        message = await channel.fetch_message(message_id)
+        for reaction in message.reactions:
+            name = reaction.emoji
+            if hasattr(reaction.emoji, "name"):
+                name = reaction.emoji.name
+            user_ids = [user.id async for user in reaction.users()]
+            for user_id in user_ids:
+                reactionDatas.append(ReactionData(name, user_id))
+        REACTION_CACHE.update({message_id: reactionDatas})
+    return reactionDatas
 
 async def react_conditional_command(ctx: Context, cmd_name: str, user_id: str, valid_func: typing.Callable, conditional_message: str, optional_time = None):
     """
@@ -1321,9 +1343,9 @@ async def react_conditional_command(ctx: Context, cmd_name: str, user_id: str, v
         for pinned_message in pin_list:
             rip_title = get_rip_title(pinned_message)
             author = get_rip_author(pinned_message)        
-            message = await channel.fetch_message(pinned_message.id)
+            reactionDatas = get_reaction_data(message.id, channel)
 
-            valid = await valid_func(ID, message.reactions)
+            valid = await valid_func(ID, reactionDatas)
             if not valid:
                 continue
             
@@ -1715,48 +1737,45 @@ async def get_pinned_msgs_and_react(channel: TextChannel, react_func: typing.Cal
 
 
 # A bunch of functions to check if react is of specific types
-def react_name(react: Reaction) -> str:
-    if hasattr(react.emoji, "name"): return react.emoji.name
-    else: return react.emoji
 
-def react_is_goldcheck(react: Reaction) -> bool:
-    return any([r in react_name(react).lower() for r in ["goldcheck", DEFAULT_GOLDCHECK]])
+def react_is_goldcheck(name: str) -> bool:
+    return any([r in name.lower() for r in ["goldcheck", DEFAULT_GOLDCHECK]])
 
-def react_is_checkreq(react: Reaction) -> bool:
-    return react_name(react).lower().endswith("check") and react_name(react).lower()[0].isdigit()
+def react_is_checkreq(name: str) -> bool:
+    return name.lower().endswith("check") and name.lower()[0].isdigit()
 
-def react_is_check(react: Reaction) -> bool:
-    return not react_is_goldcheck(react) and not react_is_checkreq(react) \
-            and any([r in react_name(react).lower() for r in ["check", DEFAULT_CHECK]])
+def react_is_check(name: str) -> bool:
+    return not react_is_goldcheck(name) and not react_is_checkreq(name) \
+            and any([r in name.lower() for r in ["check", DEFAULT_CHECK]])
 
-def react_is_fix(react: Reaction) -> bool:
-    return any([r in react_name(react).lower() for r in ["fix", "wrench", DEFAULT_FIX]])
+def react_is_fix(name: str) -> bool:
+    return any([r in name.lower() for r in ["fix", "wrench", DEFAULT_FIX]])
 
-def react_is_reject(react: Reaction) -> bool:
-    return any([r in react_name(react).lower() for r in ["reject", DEFAULT_REJECT]])
+def react_is_reject(name: str) -> bool:
+    return any([r in name.lower() for r in ["reject", DEFAULT_REJECT]])
 
-def react_is_stop(react: Reaction) -> bool:
-    return any([r in react_name(react).lower() for r in ["stop", "octagonal", DEFAULT_STOP]])
+def react_is_stop(name: str) -> bool:
+    return any([r in name.lower() for r in ["stop", "octagonal", DEFAULT_STOP]])
 
-def react_is_alert(react: Reaction) -> bool:
-    return any([r in react_name(react).lower() for r in ["alert", DEFAULT_ALERT]])
+def react_is_alert(name: str) -> bool:
+    return any([r in name.lower() for r in ["alert", DEFAULT_ALERT]])
 
-def react_is_qoc(react: Reaction) -> bool:
-    return any([r in react_name(react).lower() for r in ["qoc", DEFAULT_QOC]])
+def react_is_qoc(name: str) -> bool:
+    return any([r in name.lower() for r in ["qoc", DEFAULT_QOC]])
 
-def react_is_metadata(react: Reaction) -> bool:
-    return any([r in react_name(react).lower() for r in ["metadata", DEFAULT_METADATA]])
+def react_is_metadata(name: str) -> bool:
+    return any([r in name.lower() for r in ["metadata", DEFAULT_METADATA]])
 
-def react_is_thumbnail(react: Reaction) -> bool:
-    return any([r in react_name(react).lower() for r in ["thumbnail", DEFAULT_THUMBNAIL]])
+def react_is_thumbnail(name: str) -> bool:
+    return any([r in name.lower() for r in ["thumbnail", DEFAULT_THUMBNAIL]])
 
-def react_is_emailsent(react: Reaction) -> bool:
-    return any([r in react_name(react).lower() for r in ["emailsent"]])
+def react_is_emailsent(name: str) -> bool:
+    return any([r in name.lower() for r in ["emailsent"]])
 
 
 KEYCAP_EMOJIS = {'2️⃣': 2, '3️⃣': 3, '4️⃣': 4, '5️⃣': 5, '6️⃣': 6, '7️⃣': 7, '8️⃣': 8, '9️⃣': 9, '🔟': 10}
-def react_is_number(react: Reaction) -> bool:
-    return react_name(react) in KEYCAP_EMOJIS
+def react_is_number(name: str) -> bool:
+    return name in KEYCAP_EMOJIS
 
 
 def rip_is_specs_overdue(message: Message) -> bool:
@@ -1770,7 +1789,6 @@ def rip_is_overdue(message: Message) -> bool:
     Returns true if the message is older than OVERDUE_DAYS
     """
     return datetime.now(timezone.utc) - message.created_at > timedelta(days=_get_config('overdue_days'))
-
 
 async def get_reactions(channel: TextChannel, message: Message) -> typing.Tuple[str, str]:
     """
@@ -1796,35 +1814,29 @@ async def get_reactions(channel: TextChannel, message: Message) -> typing.Tuple[
     
     emote_names = [e.name for e in channel.guild.emojis]
 
-    reactions = []
-    if message.id in REACTION_CACHE:
-        reactions = REACTION_CACHE.get(message.id)
-    else:
-        message = await channel.fetch_message(message.id)
-        reactions = message.reactions
-        REACTION_CACHE.update({message.id: reactions})
+    reactionDatas = await get_reaction_data(message.id, channel)
 
-    for react in reactions:
-        if react_is_goldcheck(react): num_goldchecks += react.count
-        elif react_is_checkreq(react): 
+    for reactData in reactionDatas:
+        if react_is_goldcheck(reactData.name): num_goldchecks += 1
+        elif react_is_checkreq(reactData.name):
             try:
-                checks_required = int(react_name(react).split("check")[0])
+                checks_required = int(reactData.name.split("check")[0])
             except ValueError:
-                print("Error parsing checkreq react: {}".format(react_name(react)))
-        elif react_is_check(react): num_checks += react.count
-        elif react_is_reject(react): num_rejects += react.count
-        elif react_is_fix(react) or react_is_alert(react): fix_or_alert = True
-        elif react_is_stop(react): specs_needed = True
-        elif react_is_number(react):
-            specs_required = KEYCAP_EMOJIS[react_name(react)]
+                print("Error parsing checkreq react: {}".format(reactData.name))
+        elif react_is_check(reactData.name): num_checks += 1
+        elif react_is_reject(reactData.name): num_rejects += 1
+        elif react_is_fix(reactData.name) or react_is_alert(reactData.name): fix_or_alert = True
+        elif react_is_stop(reactData.name): specs_needed = True
+        elif react_is_number(reactData.name):
+            specs_required = KEYCAP_EMOJIS[reactData.name]
         
-        if react_name(react) in emote_names:
+        if reactData.name in emote_names:
             for e in channel.guild.emojis:
-                if e.name == react_name(react):
-                    reacts += f"{e} " * react.count
+                if e.name == reactData.name:
+                    reacts += f"{e} "
                     break
         else:
-            reacts += f"{react.emoji} " * react.count
+            reacts += f":{reactData.name}: "
     
     check_passed = (num_checks - num_rejects >= checks_required) and not fix_or_alert
     specs_passed = (not specs_needed or num_goldchecks >= specs_required)
