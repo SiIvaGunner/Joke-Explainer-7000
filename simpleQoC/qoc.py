@@ -776,6 +776,8 @@ def performQoC(url: str, fullFeedback: bool = True) -> Tuple[int, str]:
     
     else:
         file = parseAudio(filepath)
+        if file is None:
+            return (1, "File cannot be parsed.")
         DEBUG("File metadata: " + file.pprint())
 
         try:
