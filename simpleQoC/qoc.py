@@ -17,6 +17,8 @@ DOWNLOAD_DIR = Path(os.path.abspath(getsourcefile(lambda:0))).parent / 'audioDow
 DEFAULT_CLIPPING_THRESHOLD = 3
 DEFAULT_DS_CLIPPING_THRESHOLD = 5
 
+CLIPPING_FILESIZE_LIMIT = 1024 * 1024 * 500 # 500MB
+
 #=======================================#
 #               DEBUGGING               #
 #=======================================#
@@ -146,7 +148,7 @@ def parseUrl(url: str) -> str:
 
 # https://stackoverflow.com/questions/38511444/python-download-files-from-google-drive-using-url
 def save_response_content(response, destination):
-    CHUNK_SIZE = 32768
+    CHUNK_SIZE = 1024 * 32
 
     with open(destination, "wb") as f:
         for chunk in response.iter_content(CHUNK_SIZE):
@@ -303,6 +305,11 @@ def checkClipping(wav_filepath: Path, threshold: int, doGradientAnalysis: bool) 
     - **threshold**: How many consecutive samples to look for. Recommended value: 3.
     - **doGradientAnalysis**: Set to True if the waveform may contain overflows.
     """
+    if os.path.getsize(wav_filepath) > CLIPPING_FILESIZE_LIMIT:
+        # if WAV file is over 500 MB, skip clipping checking to not nuke the RAM by loading the entire waveform into memory
+        # TODO: change to analyze by chunk?
+        return (True, "Unable to check for clipping due to large file size or audio length. Workaround TBA.")
+    
     wavFile = parseAudio(wav_filepath)
 
     clips = []
@@ -400,7 +407,7 @@ def checkClippingFromFile(file: FileType, filepath: str, threshold: int = DEFAUL
         wav_filepath = "{}_temp.wav".format(Path.joinpath(wav_filepath.parent, wav_filepath.stem))
     else:
         DEBUG('Bits per sample: {}'.format(file.info.bits_per_sample))
-        
+    
     if not os.path.exists(wav_filepath):
         ffmpegToWAV(filepath, wav_filepath)
 
@@ -428,7 +435,7 @@ def checkClippingFromUrl(validUrl: str, threshold: int = DEFAULT_CLIPPING_THRESH
         wav_filepath = downloadAudioFromUrl(validUrl)
     else:
         ffmpegToWAV(validUrl, wav_filepath)
-        
+
     # do gradient analysis if file is 24-bit FLAC
     is24bitFLAC = False
     try:
@@ -769,6 +776,8 @@ def performQoC(url: str, fullFeedback: bool = True) -> Tuple[int, str]:
     
     else:
         file = parseAudio(filepath)
+        if file is None:
+            return (1, "File cannot be parsed.")
         DEBUG("File metadata: " + file.pprint())
 
         try:
