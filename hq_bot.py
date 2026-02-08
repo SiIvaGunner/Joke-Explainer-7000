@@ -73,15 +73,24 @@ async def on_error(event, *args, **kwargs):
 
 @bot.event
 async def on_command_error(ctx: commands.Context, error: commands.CommandError):
+    error_string = str(error)
+    error_data = "".join(traceback.format_exception(type(error), error, error.__traceback__))
+    print(f"\033[91m {error_data}\033[0m")
+
     description = f":boom: Intriging! I have encountered an unexpected error! ```{error}```"
     # NOTE: (Ahmayk) hardcoding message limit to not risk a crash
     #as of writing, current implementation of _get_config() calls to disk
     messages = split_long_message(description, 2000)
     for message in messages:
         await ctx.channel.send(message)
-    error_data = "".join(traceback.format_exception(type(error), error, error.__traceback__))
-    print(f"\033[91m ${error_data}\033[0m")
-    await write_log('{}```py\n{}\n```'.format(error, error_data), embed=True)
+
+    log_channel = await bot.fetch_channel(LOG_CHANNEL)
+    messages = split_long_message(error_data, 2000 - len(error_string))
+    for i, message in enumerate(messages):
+        string = f'```py\n{message}\n```'
+        if i == 0:
+            string = f'**{error_string}**\n{string}'
+        await log_channel.send(string)
 
 _bot_close = bot.close
 async def close_with_log(self: commands.Bot):
