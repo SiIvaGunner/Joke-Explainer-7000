@@ -81,7 +81,7 @@ async def on_command_error(ctx: commands.Context, error: commands.CommandError):
         await ctx.channel.send(message)
     error_data = "".join(traceback.format_exception(type(error), error, error.__traceback__))
     print(f"\033[91m ${error_data}\033[0m")
-    await write_log('{}```py\n{}\n```'.format(error, error_data[:4000]), embed=True)
+    await write_log('{}```py\n{}\n```'.format(error, error_data), embed=True)
 
 _bot_close = bot.close
 async def close_with_log(self: commands.Bot):
