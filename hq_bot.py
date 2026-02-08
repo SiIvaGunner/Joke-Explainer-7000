@@ -984,6 +984,7 @@ def _get_config(config: str):
             try:
                 value = configs[config]
             except KeyError:
+                raise Exception("Unknown Config: " + config)
                 value = None
             return value
     else:
