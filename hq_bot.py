@@ -139,16 +139,30 @@ class ReactionData(NamedTuple):
     name: str
     user_id: int
 
+def init_reaction_data(emoji: Emoji, user_id: int) -> typing.ReactionData:
+    name = emoji
+    if hasattr(emoji, "name"):
+        name = emoji.name
+    return ReactionData(name, user_id)
+
+def get_reaction_data_cache(message_id: int) -> typing.List[ReactionData]:
+    reactionDatas = []
+    if message_id in REACTION_CACHE:
+        reactionDatas = REACTION_CACHE.get(message_id)
+    return reactionDatas
+
 @bot.listen('on_raw_reaction_add')
 async def on_raw_reaction_add(raw_reaction_event: discord.RawReactionActionEvent):
-    name = raw_reaction_event.emoji
-    if hasattr(raw_reaction_event.emoji, "name"):
-        name = raw_reaction_event.emoji.name
-    reactionData = ReactionData(name, raw_reaction_event.user_id)
-    reactionDatas = []
-    if raw_reaction_event.message_id in REACTION_CACHE:
-        reactionDatas = REACTION_CACHE.get(raw_reaction_event.message_id)
+    reactionData = init_reaction_data(raw_reaction_event.emoji, raw_reaction_event.user_id)
+    reactionDatas = get_reaction_data_cache(raw_reaction_event.message_id)
     reactionDatas.append(reactionData)
+    REACTION_CACHE.update({raw_reaction_event.message_id: reactionDatas})
+
+@bot.listen('on_raw_reaction_remove')
+async def on_raw_reaction_remove(raw_reaction_event: discord.RawReactionActionEvent):
+    reactionData = init_reaction_data(raw_reaction_event.emoji, raw_reaction_event.user_id)
+    reactionDatas = get_reaction_data_cache(raw_reaction_event.message_id)
+    reactionDatas.remove(reactionData)
     REACTION_CACHE.update({raw_reaction_event.message_id: reactionDatas})
 
 #===============================================#
@@ -1311,12 +1325,10 @@ async def get_reaction_data(message_id: int, channel: TextChannel) -> typing.Lis
     else:
         message = await channel.fetch_message(message_id)
         for reaction in message.reactions:
-            name = reaction.emoji
-            if hasattr(reaction.emoji, "name"):
-                name = reaction.emoji.name
             user_ids = [user.id async for user in reaction.users()]
             for user_id in user_ids:
-                reactionDatas.append(ReactionData(name, user_id))
+                reactData = init_reaction_data(reaction.emoji, user_id)
+                reactionDatas.append(reactData)
         REACTION_CACHE.update({message_id: reactionDatas})
     return reactionDatas
 
