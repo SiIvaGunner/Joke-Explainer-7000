@@ -123,6 +123,11 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
             link = f"<https://discordapp.com/channels/{str(channel.guild.id)}/{str(channel.id)}/{str(latest_msg.id)}>"
             await channel.send("**Rip**: **[{}]({})**\n**Verdict**: {}\n{}-# React {} if this is resolved.".format(rip_title, link, verdict, msg, DEFAULT_CHECK))
 
+REACTION_CACHE = dict()
+
+@bot.listen('on_raw_reaction_add')
+async def on_raw_reaction_add_update_cache(payload: discord.RawReactionActionEvent):
+    await write_log(payload.emoji.name)
 
 #===============================================#
 #                   COMMANDS                    #
@@ -1678,8 +1683,8 @@ async def get_pinned_msgs_and_react(channel: TextChannel, react_func: typing.Cal
 
         # Get reactions
         if react_func is not None:
-            message = await channel.fetch_message(pinned_message.id)
-            reacts, indicator = await react_func(channel, message)
+            #TODO: (Marc) rearchitect to not pass in a function pointer
+            reacts, indicator = await react_func(channel, pinned_message)
         else:
             reacts, indicator = "", ""
 
@@ -1782,7 +1787,15 @@ async def get_reactions(channel: TextChannel, message: Message) -> typing.Tuple[
     
     emote_names = [e.name for e in channel.guild.emojis]
 
-    for react in message.reactions:
+    reactions = []
+    if message.id in REACTION_CACHE:
+        reactions = REACTION_CACHE.get(message.id)
+    else:
+        message = await channel.fetch_message(message.id)
+        reactions = message.reactions
+        REACTION_CACHE.update({message.id: reactions})
+
+    for react in reactions:
         if react_is_goldcheck(react): num_goldchecks += react.count
         elif react_is_checkreq(react): 
             try:
