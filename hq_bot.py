@@ -71,6 +71,18 @@ async def on_error(event, *args, **kwargs):
     # https://stackoverflow.com/a/60031624
     await write_log('{}```py\n{}\n```'.format(event, traceback.format_exc()), embed=True)
 
+@bot.event
+async def on_command_error(ctx: commands.Context, error: commands.CommandError):
+    description = f":boom: Intriging! I have encountered an unexpected error! ```{error}```"
+    # NOTE: (Ahmayk) hardcoding message limit to not risk a crash
+    #as of writing, current implementation of _get_config() calls to disk
+    messages = split_long_message(description, 2000)
+    for message in messages:
+        await ctx.channel.send(message)
+    error_data = "".join(traceback.format_exception(type(error), error, error.__traceback__))
+    print(f"\033[91m ${error_data[:1000]}\033[0m")
+    await write_log('{}```py\n{}\n```'.format(error, traceback.format_exc()), embed=True)
+
 _bot_close = bot.close
 async def close_with_log(self: commands.Bot):
     await write_log("Good night!")
