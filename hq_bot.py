@@ -140,8 +140,16 @@ class ReactionData(NamedTuple):
     user_id: int
 
 @bot.listen('on_raw_reaction_add')
-async def on_raw_reaction_add_update_cache(payload: discord.RawReactionActionEvent):
-    await write_log(payload.emoji.name)
+async def on_raw_reaction_add(raw_reaction_event: discord.RawReactionActionEvent):
+    name = raw_reaction_event.emoji
+    if hasattr(raw_reaction_event.emoji, "name"):
+        name = raw_reaction_event.emoji.name
+    reactionData = ReactionData(name, raw_reaction_event.user_id)
+    reactionDatas = []
+    if raw_reaction_event.message_id in REACTION_CACHE:
+        reactionDatas = REACTION_CACHE.get(raw_reaction_event.message_id)
+    reactionDatas.append(reactionData)
+    REACTION_CACHE.update({raw_reaction_event.message_id: reactionDatas})
 
 #===============================================#
 #                   COMMANDS                    #
@@ -1837,7 +1845,7 @@ async def get_reactions(channel: TextChannel, message: Message) -> typing.Tuple[
                     reacts += f"{e} "
                     break
         else:
-            reacts += f":{reactData.name}: "
+            reacts += f"{reactData.name} "
     
     check_passed = (num_checks - num_rejects >= checks_required) and not fix_or_alert
     specs_passed = (not specs_needed or num_goldchecks >= specs_required)
