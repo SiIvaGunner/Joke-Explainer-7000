@@ -68,6 +68,16 @@ async def on_ready():
 
     await write_log("Good morning!")
 
+    # Fill up reaction cache
+    qoc_channels = [k for k, v in CHANNELS.items() if 'QOC' in v]
+    # for qoc_channel_id in qoc_channels:
+        # await cache_reactions_bulk(qoc_channel_id, 'pin')
+    queue_channels = [k for k, v in CHANNELS.items() if 'QUEUE' in v]
+    for queue_channel_id in queue_channels:
+        # await cache_reactions_bulk(queue_channel_id, 'msg')
+        await cache_reactions_bulk(queue_channel_id, 'thread')
+    await write_log('Initial reaction caching complete.')
+
 import traceback
 @bot.event
 async def on_error(event, *args, **kwargs):
@@ -1372,6 +1382,26 @@ async def get_reaction_datas(message_id: int, channel: TextChannel) -> typing.Li
         REACTION_CACHE.update({message_id: reaction_data})
     return reaction_data
 
+async def cache_reactions_bulk(channel_id: int, type: typing.Literal['pin', 'msg', 'thread']):
+    rip_count = 0
+    reaction_count = 0
+    channel = bot.get_channel(channel_id)
+    if channel:
+        if type == "thread":
+            thread_rips = await get_rips(channel, 'thread')
+            for thread, rips in thread_rips.items():
+                for rip in rips:
+                    reaction_datas = await get_reaction_datas(rip.id, channel)
+                    rip_count += 1
+                    reaction_count += len(reaction_datas)
+        elif type == "pin" or type == "msg":
+            rips = await get_rips(channel, type)
+            for rip in rips[channel_id]:
+                reaction_datas = await get_reaction_datas(rip.id, channel)
+                rip_count += 1
+                reaction_count += len(reaction_datas)
+    await write_log(f'Cached {reaction_count} reactions from {rip_count} messages in {channel.jump_url}.')
+
 async def react_conditional_command(ctx: Context, cmd_name: str, user_id: str, valid_func: typing.Callable, conditional_message: str, optional_time = None):
     """
     Unified command to roundup messages with user-dependent reactions in QoC channels.
@@ -1552,7 +1582,7 @@ async def fetch_command(ctx: Context, rip_filter_type: RipFilterType, reaction_t
                 valid = False
                 match(rip_filter_type):
                     case RipFilterType.HAS_REACT:
-                        valid = await message_has_reaction(reaction_type)
+                        valid = await message_has_reaction(reaction_type, rip)
                     case RipFilterType.UNSENT:
                         valid = line_contains_substring(get_raw_rip_author(rip), 'email') and not await message_has_reaction(ReactionType.EMAILSENT, rip)
                     case _:
