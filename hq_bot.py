@@ -144,19 +144,13 @@ class ReactionCacheAction(Enum):
     REACTION_REMOVE = auto()
     EMOJI_CLEAR = auto()
 
-def init_reaction_data(emoji: Emoji, user_id: int) -> typing.ReactionData:
-    name = emoji
-    if emoji and hasattr(emoji, "name"):
-        name = emoji.name
-    return ReactionData(name, user_id)
-
 def update_reaction_cache(reaction_cache_action: ReactionCacheAction, message_id: int, user_id: int, partialEmoji: PartialEmoji):
 
     reaction_datas = []
     if message_id in REACTION_CACHE:
         reaction_datas = REACTION_CACHE.get(message_id)
 
-    reaction_data = init_reaction_data(partialEmoji, user_id)
+    reaction_data = ReactionData(partialEmoji.name, user_id)
 
     match(reaction_cache_action):
         case ReactionCacheAction.REACTION_ADD:
@@ -1366,9 +1360,14 @@ async def get_reaction_datas(message_id: int, channel: TextChannel) -> typing.Li
     else:
         message = await channel.fetch_message(message_id)
         for reaction in message.reactions:
+            name = ""
+            if isinstance(reaction.emoji, str):
+                name = reaction.emoji
+            elif hasattr(reaction.emoji, "name"):
+                name = reaction.emoji.name
             user_ids = [user.id async for user in reaction.users()]
             for user_id in user_ids:
-                react_data = init_reaction_data(reaction.emoji, user_id)
+                react_data = ReactionData(name, user_id)
                 reaction_data.append(react_data)
         REACTION_CACHE.update({message_id: reaction_data})
     return reaction_data
