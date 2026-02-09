@@ -40,6 +40,7 @@ QOC_DEFAULT_CLIPPING = '📢'
 
 latest_pin_time = None # Keeps track of the last pinned message's time to distinguish between pins and unpins. To be updated on ready.
 latest_scan_time = None
+REACTION_CACHE = dict()
 
 bot = commands.Bot(
     command_prefix='!',
@@ -133,8 +134,6 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
             rip_title = get_rip_title(latest_msg)
             link = f"<https://discordapp.com/channels/{str(channel.guild.id)}/{str(channel.id)}/{str(latest_msg.id)}>"
             await channel.send("**Rip**: **[{}]({})**\n**Verdict**: {}\n{}-# React {} if this is resolved.".format(rip_title, link, verdict, msg, DEFAULT_CHECK))
-
-REACTION_CACHE = dict()
 
 class ReactionData(NamedTuple):
     name: str
@@ -354,8 +353,8 @@ async def myfixes(ctx: Context, user_id: str = "", optional_time = None):
     """
     Retrieve all messages with fix or alert reactions by the command author.
     """
-    async def reactions_contain_fix_by_user(ID: int, reactionDatas: typing.List[ReactionData]):
-        for r in reactionDatas:
+    async def reactions_contain_fix_by_user(ID: int, reaction_data: typing.List[ReactionData]):
+        for r in reaction_data:
             if (react_is_fix(r.name) or react_is_alert(r.name)) and ID == r.user_id:
                 return True
         return False
@@ -368,8 +367,8 @@ async def myfresh(ctx: Context, user_id: str = "", optional_time = None):
     """
     Retrieve all messages with no review reactions by the command author.
     """
-    async def reactions_all_not_by_user(ID: int, reactionDatas: typing.List[ReactionData]):
-        for r in reactionDatas:
+    async def reactions_all_not_by_user(ID: int, reaction_data: typing.List[ReactionData]):
+        for r in reaction_data:
             if (react_is_check(r.name) or react_is_goldcheck(r.name) or react_is_fix(r.name) or react_is_alert(r.name) or react_is_reject(r.name)) and ID == r.user_id:
                 return False
         return True
@@ -397,9 +396,9 @@ async def fresh(ctx: Context, optional_time = None):
         pin_list = await get_pins(channel)
 
         for pinned_message in pin_list:
-            mesg = await channel.fetch_message(pinned_message.id)
-            if len(mesg.reactions) < 1:
-                title = get_rip_title(mesg)
+            reaction_datas = await get_reaction_datas(pinned_message.id, channel)
+            if len(reaction_datas) < 1:
+                title = get_rip_title(pinned_message)
                 link = f"<https://discordapp.com/channels/{str(channel.guild.id)}/{str(channel.id)}/{str(pinned_message.id)}>"
                 result = result + f'**[{title}]({link})**\n'
 
@@ -652,6 +651,7 @@ async def unsent(ctx: Context, channel_link: str = None, optional_time = None):
     Search queue channel for rips tagged email with no "approval email sent" react.
     """
     heard_command("unsent", ctx.message.author.name)
+    ##TODO: (Ahmayk) This api needs to change for checking is a message has a reaction
     await fetch_command(ctx, 
             lambda rip: line_contains_substring(get_raw_rip_author(rip), 'email') and not any(react_is_emailsent(r) for r in rip.reactions),
             channel_link, optional_time)
@@ -1357,23 +1357,23 @@ async def react_command(ctx: Context, cmd_name: str, check_func: typing.Callable
         else:
             await send_embed(ctx.channel, result, time)
 
-async def get_reaction_data(message_id: int, channel: TextChannel) -> typing.List[ReactionData]:
+async def get_reaction_datas(message_id: int, channel: TextChannel) -> typing.List[ReactionData]:
     """
     Gets reaction data from a message. If not in cache, fetches and caches it.
     Fast if cached, slow if not.
     """
-    reactionDatas = []
+    reaction_data = []
     if message_id in REACTION_CACHE:
-        reactionDatas = REACTION_CACHE.get(message_id)
+        reaction_data = REACTION_CACHE.get(message_id)
     else:
         message = await channel.fetch_message(message_id)
         for reaction in message.reactions:
             user_ids = [user.id async for user in reaction.users()]
             for user_id in user_ids:
                 reactData = init_reaction_data(reaction.emoji, user_id)
-                reactionDatas.append(reactData)
-        REACTION_CACHE.update({message_id: reactionDatas})
-    return reactionDatas
+                reaction_data.append(reactData)
+        REACTION_CACHE.update({message_id: reaction_data})
+    return reaction_data
 
 async def react_conditional_command(ctx: Context, cmd_name: str, user_id: str, valid_func: typing.Callable, conditional_message: str, optional_time = None):
     """
@@ -1407,9 +1407,9 @@ async def react_conditional_command(ctx: Context, cmd_name: str, user_id: str, v
         for pinned_message in pin_list:
             rip_title = get_rip_title(pinned_message)
             author = get_rip_author(pinned_message)        
-            reactionDatas = get_reaction_data(message.id, channel)
+            reaction_data = await get_reaction_datas(message.id, channel)
 
-            valid = await valid_func(ID, reactionDatas)
+            valid = await valid_func(ID, reaction_data)
             if not valid:
                 continue
             
@@ -1505,8 +1505,9 @@ async def filter_sub_command(ctx: Context, cmd_name: str, filter_sub_func: typin
         for rip in rips:
             rip_title = get_rip_title(rip)
             rip_link = f"<https://discordapp.com/channels/{str(ctx.guild.id)}/{str(sub_channel)}/{str(rip.id)}>"
+            rip_reaction_data = await get_reaction_datas(rip, channel)
             if filter_sub_func(rip):
-                if any([react_is_qoc(r) for r in rip.reactions]):
+                if any([react_is_qoc(r.name) for r in rip_reaction_data]):
                     result += f"{qoc_emote} "
                 author = str(rip.author).split('#')[0].replace('_', '\_')
                 result += f'**[{rip_title}]({rip_link})** (by {author})\n'
@@ -1564,7 +1565,8 @@ async def fetch_command(ctx: Context, valid_func: typing.Callable, channel_link 
 
 
 async def fetch_reaction_command(ctx: Context, react_func: typing.Callable, channel_link = None, optional_time = None):
-    await fetch_command(ctx, lambda rip: any(react_func(r) for r in rip.reactions), channel_link, optional_time)
+    rip_reaction_data = await get_reaction_datas(rip.id, rip.channel)
+    await fetch_command(ctx, lambda rip: any(react_func(r.name) for r in rip_reaction_data), channel_link, optional_time)
 
 
 def split_long_message(a_message: str, character_limit: int) -> list[str]:  # avoid Discord's character limit
@@ -1878,29 +1880,29 @@ async def get_reactions(channel: TextChannel, message: Message) -> typing.Tuple[
     
     emote_names = [e.name for e in channel.guild.emojis]
 
-    reactionDatas = await get_reaction_data(message.id, channel)
+    reaction_data = await get_reaction_datas(message.id, channel)
 
-    for reactData in reactionDatas:
-        if react_is_goldcheck(reactData.name): num_goldchecks += 1
-        elif react_is_checkreq(reactData.name):
+    for react_data in reaction_data:
+        if react_is_goldcheck(react_data.name): num_goldchecks += 1
+        elif react_is_checkreq(react_data.name):
             try:
-                checks_required = int(reactData.name.split("check")[0])
+                checks_required = int(react_data.name.split("check")[0])
             except ValueError:
-                print("Error parsing checkreq react: {}".format(reactData.name))
-        elif react_is_check(reactData.name): num_checks += 1
-        elif react_is_reject(reactData.name): num_rejects += 1
-        elif react_is_fix(reactData.name) or react_is_alert(reactData.name): fix_or_alert = True
-        elif react_is_stop(reactData.name): specs_needed = True
-        elif react_is_number(reactData.name):
-            specs_required = KEYCAP_EMOJIS[reactData.name]
+                print("Error parsing checkreq react: {}".format(react_data.name))
+        elif react_is_check(react_data.name): num_checks += 1
+        elif react_is_reject(react_data.name): num_rejects += 1
+        elif react_is_fix(react_data.name) or react_is_alert(react_data.name): fix_or_alert = True
+        elif react_is_stop(react_data.name): specs_needed = True
+        elif react_is_number(react_data.name):
+            specs_required = KEYCAP_EMOJIS[react_data.name]
         
-        if reactData.name in emote_names:
+        if react_data.name in emote_names:
             for e in channel.guild.emojis:
-                if e.name == reactData.name:
+                if e.name == react_data.name:
                     reacts += f"{e} "
                     break
         else:
-            reacts += f"{reactData.name} "
+            reacts += f"{react_data.name} "
     
     check_passed = (num_checks - num_rejects >= checks_required) and not fix_or_alert
     specs_passed = (not specs_needed or num_goldchecks >= specs_required)
