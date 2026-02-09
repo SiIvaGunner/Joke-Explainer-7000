@@ -13,6 +13,7 @@ import re
 import functools
 import typing
 from typing import NamedTuple
+from enum import Enum, auto
 import math
 import json
 import os
@@ -139,31 +140,73 @@ class ReactionData(NamedTuple):
     name: str
     user_id: int
 
+class ReactionCacheAction(Enum):
+    REACTION_ADD = auto()
+    REACTION_REMOVE = auto()
+    EMOJI_CLEAR = auto()
+
 def init_reaction_data(emoji: Emoji, user_id: int) -> typing.ReactionData:
     name = emoji
-    if hasattr(emoji, "name"):
+    if emoji and hasattr(emoji, "name"):
         name = emoji.name
     return ReactionData(name, user_id)
 
-def get_reaction_data_cache(message_id: int) -> typing.List[ReactionData]:
-    reactionDatas = []
+def update_reaction_cache(reaction_cache_action: ReactionCacheAction, message_id: int, user_id: int, emoji: Emoji):
+
+    reaction_datas = []
     if message_id in REACTION_CACHE:
-        reactionDatas = REACTION_CACHE.get(message_id)
-    return reactionDatas
+        reaction_datas = REACTION_CACHE.get(message_id)
+
+    reaction_data = init_reaction_data(emoji, user_id)
+
+    match(reaction_cache_action):
+        case ReactionCacheAction.REACTION_ADD:
+            reaction_datas.append(reaction_data)
+            REACTION_CACHE.update({message_id: reaction_datas})
+
+        case ReactionCacheAction.REACTION_REMOVE:
+            if message_id in REACTION_CACHE and reaction_data in reaction_datas:
+                reaction_datas.remove(reaction_data)
+                if len(reaction_datas) == 0:
+                    del REACTION_CACHE[message_id]
+                else:
+                    REACTION_CACHE.update({message_id: reaction_datas})
+
+        case ReactionCacheAction.EMOJI_CLEAR:
+            if message_id in REACTION_CACHE:
+                for cached_reaction in reaction_datas:
+                    if cached_reaction.name == reaction_data.name:
+                        reaction_datas.remove(cahced_reaction)
+                if len(reaction_datas) == 0:
+                    del REACTION_CACHE[message_id]
+                else:
+                    REACTION_CACHE.update({message_id: reaction_datas})
+
+        case _:
+            write_log("WARNING: Unimplemented ReactionCacheAction: " + reaction_cache_action)
+
 
 @bot.listen('on_raw_reaction_add')
-async def on_raw_reaction_add(raw_reaction_event: discord.RawReactionActionEvent):
-    reactionData = init_reaction_data(raw_reaction_event.emoji, raw_reaction_event.user_id)
-    reactionDatas = get_reaction_data_cache(raw_reaction_event.message_id)
-    reactionDatas.append(reactionData)
-    REACTION_CACHE.update({raw_reaction_event.message_id: reactionDatas})
+async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
+    update_reaction_cache(ReactionCacheAction.REACTION_ADD, payload.message_id, payload.user_id, payload.emoji)
 
 @bot.listen('on_raw_reaction_remove')
-async def on_raw_reaction_remove(raw_reaction_event: discord.RawReactionActionEvent):
-    reactionData = init_reaction_data(raw_reaction_event.emoji, raw_reaction_event.user_id)
-    reactionDatas = get_reaction_data_cache(raw_reaction_event.message_id)
-    reactionDatas.remove(reactionData)
-    REACTION_CACHE.update({raw_reaction_event.message_id: reactionDatas})
+async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
+    update_reaction_cache(ReactionCacheAction.REACTION_REMOVE, payload.message_id, payload.user_id, payload.emoji)
+
+@bot.listen('on_raw_reaction_clear_emoji')
+async def on_raw_reaction_clear_emoji(payload: discord.RawReactionClearEmojiEvent):
+    update_reaction_cache(ReactionCacheAction.EMOJI_CLEAR, payload.message_id, payload.user_id, payload.emoji)
+
+@bot.listen('on_raw_reaction_clear')
+async def on_raw_reaction_clear(payload: discord.RawReactionClearEvent):
+    if payload.message_id in REACTION_CACHE:
+        del REACTION_CACHE[payload.message_id]
+
+@bot.listen('on_raw_message_delete')
+async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
+    if payload.message_id in REACTION_CACHE:
+        del REACTION_CACHE[payload.message_id]
 
 #===============================================#
 #                   COMMANDS                    #
