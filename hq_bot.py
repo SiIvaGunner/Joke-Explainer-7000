@@ -70,11 +70,11 @@ async def on_ready():
 
     # Fill up reaction cache
     qoc_channels = [k for k, v in CHANNELS.items() if 'QOC' in v]
-    # for qoc_channel_id in qoc_channels:
-        # await cache_reactions_bulk(qoc_channel_id, 'pin')
+    for qoc_channel_id in qoc_channels:
+        await cache_reactions_bulk(qoc_channel_id, 'pin')
     queue_channels = [k for k, v in CHANNELS.items() if 'QUEUE' in v]
     for queue_channel_id in queue_channels:
-        # await cache_reactions_bulk(queue_channel_id, 'msg')
+        await cache_reactions_bulk(queue_channel_id, 'msg')
         await cache_reactions_bulk(queue_channel_id, 'thread')
     await write_log('Initial reaction caching complete.')
 
