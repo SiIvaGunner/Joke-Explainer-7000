@@ -150,40 +150,43 @@ def init_reaction_data(emoji: Emoji, user_id: int) -> typing.ReactionData:
         name = emoji.name
     return ReactionData(name, user_id)
 
-def update_reaction_cache(reaction_cache_action: ReactionCacheAction, message_id: int, user_id: int, emoji: Emoji):
+def update_reaction_cache(reaction_cache_action: ReactionCacheAction, message_id: int, user_id: int, partialEmoji: PartialEmoji):
 
     reaction_datas = []
     if message_id in REACTION_CACHE:
         reaction_datas = REACTION_CACHE.get(message_id)
 
-    reaction_data = init_reaction_data(emoji, user_id)
+    reaction_data = init_reaction_data(partialEmoji, user_id)
 
     match(reaction_cache_action):
         case ReactionCacheAction.REACTION_ADD:
-            reaction_datas.append(reaction_data)
-            REACTION_CACHE.update({message_id: reaction_datas})
+            inserted = False
+            for i, cached_reaction_data in enumerate(reaction_datas):
+                if cached_reaction_data.name == reaction_data.name:
+                    reaction_datas.insert(i, reaction_data)
+                    inserted = True
+                    break
+            if not inserted:
+                reaction_datas.append(reaction_data)
 
         case ReactionCacheAction.REACTION_REMOVE:
             if message_id in REACTION_CACHE and reaction_data in reaction_datas:
                 reaction_datas.remove(reaction_data)
-                if len(reaction_datas) == 0:
-                    del REACTION_CACHE[message_id]
-                else:
-                    REACTION_CACHE.update({message_id: reaction_datas})
 
         case ReactionCacheAction.EMOJI_CLEAR:
             if message_id in REACTION_CACHE:
                 for cached_reaction in reaction_datas:
                     if cached_reaction.name == reaction_data.name:
                         reaction_datas.remove(cahced_reaction)
-                if len(reaction_datas) == 0:
-                    del REACTION_CACHE[message_id]
-                else:
-                    REACTION_CACHE.update({message_id: reaction_datas})
 
         case _:
             write_log("WARNING: Unimplemented ReactionCacheAction: " + reaction_cache_action)
 
+    if message_id in REACTION_CACHE:
+        if len(reaction_datas) == 0:
+            del REACTION_CACHE[message_id]
+        else:
+            REACTION_CACHE.update({message_id: reaction_datas})
 
 @bot.listen('on_raw_reaction_add')
 async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
