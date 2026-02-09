@@ -353,10 +353,9 @@ async def myfixes(ctx: Context, user_id: str = "", optional_time = None):
     """
     Retrieve all messages with fix or alert reactions by the command author.
     """
-    ##TODO: (Ahmayk) remove indirection
     async def reactions_contain_fix_by_user(ID: int, reaction_data: typing.List[ReactionData]):
         for r in reaction_data:
-            if react_is_one(ReactionType.FIX, ReactionType.ALERT, r.name) and ID == r.user_id:
+            if react_is_one([ReactionType.FIX, ReactionType.ALERT], r.name) and ID == r.user_id:
                 return True
         return False
 
@@ -368,10 +367,9 @@ async def myfresh(ctx: Context, user_id: str = "", optional_time = None):
     """
     Retrieve all messages with no review reactions by the command author.
     """
-    ##TODO: (Ahmayk) remove indirection
     async def reactions_all_not_by_user(ID: int, reaction_data: typing.List[ReactionData]):
         for r in reaction_data:
-            if react_is_one(ReactionType.CHECK, ReactionType.GOLDCHECK, ReactionType.FIX, ReactionType.ALERT, ReactionType.REJECT, r.name) and ID == r.user_id:
+            if react_is_one([ReactionType.CHECK, ReactionType.GOLDCHECK, ReactionType.FIX, ReactionType.ALERT, ReactionType.REJECT], r.name) and ID == r.user_id:
                 return False
         return True
 
@@ -624,7 +622,7 @@ async def frames(ctx: Context, channel_link: str = None, optional_time = None):
     Search queue channel for rips with "thumbnail needed" react.
     """
     heard_command("frames", ctx.message.author.name)
-    await fetch_reaction_command(ctx, ReactionType.THUMBNAIL, channel_link, optional_time)
+    await fetch_command(ctx, RipFilterType.HAS_REACT, ReactionType.THUMBNAIL, channel_link, optional_time)
 
 
 @bot.command(name='alerts', brief='find approved rips with alert reacts')
@@ -634,7 +632,7 @@ async def alerts(ctx: Context, channel_link: str = None, optional_time = None):
     """
     if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
     heard_command("alerts", ctx.message.author.name)
-    await fetch_reaction_command(ctx, ReactionType.ALERT, channel_link, optional_time)
+    await fetch_command(ctx, RipFilterType.HAS_REACT, ReactionType.ALERT, channel_link, optional_time)
 
 
 @bot.command(name='metadata', brief='find approved rips with metadata reacts')
@@ -644,7 +642,7 @@ async def metadata(ctx: Context, channel_link: str = None, optional_time = None)
     """
     if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
     heard_command("metadata", ctx.message.author.name)
-    await fetch_reaction_command(ctx, ReactionType.METADATA, channel_link, optional_time)
+    await fetch_command(ctx, RipFilterType.HAS_REACT, ReactionType.METADATA, channel_link, optional_time)
 
 
 @bot.command(name='unsent', brief='find approved emails with no emailsent reacts')
@@ -653,10 +651,7 @@ async def unsent(ctx: Context, channel_link: str = None, optional_time = None):
     Search queue channel for rips tagged email with no "approval email sent" react.
     """
     heard_command("unsent", ctx.message.author.name)
-    await fetch_command(ctx, 
-            lambda rip: line_contains_substring(get_raw_rip_author(rip), 'email') and not await message_has_reaction(ReactionType.EMAILSENT, rip),
-            channel_link, optional_time)
-
+    await fetch_command(ctx, RipFilterType.UNSENT, None, channel_link, optional_time)
 
 # ============ Basic QoC commands ============== #
 
@@ -708,10 +703,10 @@ async def vet_from(ctx: Context, from_msg):
             if not vet_all_pins and pinned_message.created_at < from_timestamp:
                 continue
             qcCode, qcMsg, _ = await check_qoc(pinned_message, False)
-            rip_title = get_rip_title(pinned_message)
-            verdict = code_to_verdict(qcCode, qcMsg)
 
             if qcCode != 0:
+                rip_title = get_rip_title(pinned_message)
+                verdict = code_to_verdict(qcCode, qcMsg)
                 link = f"<https://discordapp.com/channels/{str(channel.guild.id)}/{str(channel.id)}/{str(pinned_message.id)}>"
                 await ctx.channel.send("**Rip**: **[{}]({})**\n**Verdict**: {}\n{}\n-# React {} if this is resolved.".format(rip_title, link, verdict, qcMsg, DEFAULT_CHECK))
 
@@ -1406,13 +1401,13 @@ async def react_conditional_command(ctx: Context, cmd_name: str, user_id: str, v
         for pinned_message in pin_list:
             rip_title = get_rip_title(pinned_message)
             author = get_rip_author(pinned_message)        
-            reaction_data = await get_reaction_datas(message.id, channel)
+            reaction_data = await get_reaction_datas(pinned_message.id, channel)
 
             valid = await valid_func(ID, reaction_data)
             if not valid:
                 continue
             
-            reacts, indicator = await get_reactions(channel, message)
+            reacts, indicator = await get_reactions(channel, pinned_message)
             author = author.replace('*', '').replace('_', '')
             pins_in_message[dict_index] = {
                 'Title': rip_title,
@@ -1515,11 +1510,13 @@ async def filter_sub_command(ctx: Context, cmd_name: str, filter_sub_func: typin
         else:
             await send_embed(ctx.channel, result, time)
 
+class RipFilterType(Enum):
+    HAS_REACT = auto()
+    UNSENT = auto()
 
-async def fetch_command(ctx: Context, valid_func: typing.Callable, channel_link = None, optional_time = None):
+async def fetch_command(ctx: Context, rip_filter_type: RipFilterType, reaction_type = None, channel_link = None, optional_time = None):
     """
     Unified command to roundup messages satisfying condition in queues.
-    Uses the react_is_ABC helper functions to filter reacts.
     """
     channel_id, msg = parse_channel_link(channel_link, ['QUEUE'])
     if len(msg) > 0 or channel_link is None:
@@ -1549,9 +1546,19 @@ async def fetch_command(ctx: Context, valid_func: typing.Callable, channel_link 
             count += len(rips)
 
             for rip in rips:
-                rip_title = get_rip_title(rip)
-                rip_link = f"<https://discordapp.com/channels/{str(ctx.guild.id)}/{str(rip.channel.id)}/{str(rip.id)}>"
-                if valid_func(rip):
+
+                valid = False
+                match(rip_filter_type):
+                    case RipFilterType.HAS_REACT:
+                        valid = await message_has_reaction(reaction_type)
+                    case RipFilterType.UNSENT:
+                        valid = line_contains_substring(get_raw_rip_author(rip), 'email') and not await message_has_reaction(ReactionType.EMAILSENT, rip)
+                    case _:
+                        write_log("Unimplemented RipFilterType: " + rip_filter_type)
+
+                if valid:
+                    rip_title = get_rip_title(rip)
+                    rip_link = f"<https://discordapp.com/channels/{str(ctx.guild.id)}/{str(rip.channel.id)}/{str(rip.id)}>"
                     result += f'**[{rip_title}]({rip_link})**\n'
             
             result += '------------------------------\n'
@@ -1560,10 +1567,6 @@ async def fetch_command(ctx: Context, valid_func: typing.Callable, channel_link 
             await ctx.channel.send("No rips found.")
         else:
             await send_embed(ctx.channel, result, time)
-
-
-async def fetch_reaction_command(ctx: Context, reaction_type: ReactionType, channel_link = None, optional_time = None):
-    await fetch_command(ctx, lambda rip: await message_has_reaction(reaction_type, rip), channel_link, optional_time)
 
 
 def split_long_message(a_message: str, character_limit: int) -> list[str]:  # avoid Discord's character limit
@@ -1858,7 +1861,7 @@ def react_is_one(reaction_type_list: List[ReactionType], name: str) -> bool:
 async def message_has_reaction(reaction_type: ReactionType, message: Message) -> bool:
     reaction_datas = await get_reaction_datas(message.id, message.channel)
     for react_data in reaction_datas:
-        if react_is(reaction_type, react_data):
+        if react_is(reaction_type, react_data.name):
             return True
     return False
 
