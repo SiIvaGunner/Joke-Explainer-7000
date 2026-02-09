@@ -353,9 +353,10 @@ async def myfixes(ctx: Context, user_id: str = "", optional_time = None):
     """
     Retrieve all messages with fix or alert reactions by the command author.
     """
+    ##TODO: (Ahmayk) remove indirection
     async def reactions_contain_fix_by_user(ID: int, reaction_data: typing.List[ReactionData]):
         for r in reaction_data:
-            if (react_is_fix(r.name) or react_is_alert(r.name)) and ID == r.user_id:
+            if react_is_one(ReactionType.FIX, ReactionType.ALERT, r.name) and ID == r.user_id:
                 return True
         return False
 
@@ -367,9 +368,10 @@ async def myfresh(ctx: Context, user_id: str = "", optional_time = None):
     """
     Retrieve all messages with no review reactions by the command author.
     """
+    ##TODO: (Ahmayk) remove indirection
     async def reactions_all_not_by_user(ID: int, reaction_data: typing.List[ReactionData]):
         for r in reaction_data:
-            if (react_is_check(r.name) or react_is_goldcheck(r.name) or react_is_fix(r.name) or react_is_alert(r.name) or react_is_reject(r.name)) and ID == r.user_id:
+            if react_is_one(ReactionType.CHECK, ReactionType.GOLDCHECK, ReactionType.FIX, ReactionType.ALERT, ReactionType.REJECT, r.name) and ID == r.user_id:
                 return False
         return True
 
@@ -413,28 +415,28 @@ async def wrenches(ctx: Context, optional_time = None):
     """
     Retrieve all pinned messages (except the first one) with :fix: reactions.
     """
-    await react_command(ctx, 'fix', react_is_fix, "No wrenches found.", optional_time)
+    await react_command(ctx, 'fix', ReactionType.FIX, "No wrenches found.", optional_time)
 
 @bot.command(name='stops')
 async def stops(ctx: Context, optional_time = None):
     """
     Retrieve all pinned messages (except the first one) with :stop: reactions.
     """
-    await react_command(ctx, 'stop', react_is_stop, "No octogons found.", optional_time)
+    await react_command(ctx, 'stop', ReactionType.STOP, "No octogons found.", optional_time)
 
 @bot.command(name='checks')
 async def checks(ctx: Context, optional_time = None):
     """
     Retrieve all pinned messages (except the first one) with :check: reactions.
     """
-    await react_command(ctx, 'check', react_is_check, "No checks found.", optional_time)
+    await react_command(ctx, 'check', ReactionType.CHECK, "No checks found.", optional_time)
 
 @bot.command(name='rejects')
 async def rejects(ctx: Context, optional_time = None):
     """
     Retrieve all pinned messages (except the first one) with :reject: reactions.
     """
-    await react_command(ctx, 'reject', react_is_reject, "No rejected rips found.", optional_time)
+    await react_command(ctx, 'reject', ReactionType.REJECT, "No rejected rips found.", optional_time)
 
 
 @bot.command(name='overdue', brief=f'display rips that have been pinned for over X days')
@@ -622,7 +624,7 @@ async def frames(ctx: Context, channel_link: str = None, optional_time = None):
     Search queue channel for rips with "thumbnail needed" react.
     """
     heard_command("frames", ctx.message.author.name)
-    await fetch_reaction_command(ctx, react_is_thumbnail, channel_link, optional_time)
+    await fetch_reaction_command(ctx, ReactionType.THUMBNAIL, channel_link, optional_time)
 
 
 @bot.command(name='alerts', brief='find approved rips with alert reacts')
@@ -632,7 +634,7 @@ async def alerts(ctx: Context, channel_link: str = None, optional_time = None):
     """
     if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
     heard_command("alerts", ctx.message.author.name)
-    await fetch_reaction_command(ctx, react_is_alert, channel_link, optional_time)
+    await fetch_reaction_command(ctx, ReactionType.ALERT, channel_link, optional_time)
 
 
 @bot.command(name='metadata', brief='find approved rips with metadata reacts')
@@ -642,7 +644,7 @@ async def metadata(ctx: Context, channel_link: str = None, optional_time = None)
     """
     if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
     heard_command("metadata", ctx.message.author.name)
-    await fetch_reaction_command(ctx, react_is_metadata, channel_link, optional_time)
+    await fetch_reaction_command(ctx, ReactionType.METADATA, channel_link, optional_time)
 
 
 @bot.command(name='unsent', brief='find approved emails with no emailsent reacts')
@@ -651,9 +653,8 @@ async def unsent(ctx: Context, channel_link: str = None, optional_time = None):
     Search queue channel for rips tagged email with no "approval email sent" react.
     """
     heard_command("unsent", ctx.message.author.name)
-    ##TODO: (Ahmayk) This api needs to change for checking is a message has a reaction
     await fetch_command(ctx, 
-            lambda rip: line_contains_substring(get_raw_rip_author(rip), 'email') and not any(react_is_emailsent(r) for r in rip.reactions),
+            lambda rip: line_contains_substring(get_raw_rip_author(rip), 'email') and not await message_has_reaction(ReactionType.EMAILSENT, rip),
             channel_link, optional_time)
 
 
@@ -1324,10 +1325,9 @@ def make_markdown(rip_info: dict, display_reacts: bool) -> str:
     return result
 
 
-async def react_command(ctx: Context, cmd_name: str, check_func: typing.Callable, not_found_message: str, optional_time = None): # I've been meaning to simplify this for AGES (7/7/24)
+async def react_command(ctx: Context, cmd_name: str, reaction_type: ReactionType, not_found_message: str, optional_time = None): # I've been meaning to simplify this for AGES (7/7/24)
     """
     Unified command to roundup messages with specific reactions in QoC channels.
-    Uses the react_is_ABC helper functions to filter reacts.
     """
     if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
     heard_command(cmd_name, ctx.message.author.name)
@@ -1340,7 +1340,7 @@ async def react_command(ctx: Context, cmd_name: str, check_func: typing.Callable
 
     async with ctx.channel.typing():
         async def filter_reacts(c: TextChannel, m: Message):
-            if any([check_func(r) for r in m.reactions]):
+            if await message_has_reaction(reaction_type, m):
                 return await get_reactions(c, m)
             # if not, return an indication string to skip from markdown
             return "FILTERED", ""
@@ -1370,15 +1370,14 @@ async def get_reaction_datas(message_id: int, channel: TextChannel) -> typing.Li
         for reaction in message.reactions:
             user_ids = [user.id async for user in reaction.users()]
             for user_id in user_ids:
-                reactData = init_reaction_data(reaction.emoji, user_id)
-                reaction_data.append(reactData)
+                react_data = init_reaction_data(reaction.emoji, user_id)
+                reaction_data.append(react_data)
         REACTION_CACHE.update({message_id: reaction_data})
     return reaction_data
 
 async def react_conditional_command(ctx: Context, cmd_name: str, user_id: str, valid_func: typing.Callable, conditional_message: str, optional_time = None):
     """
     Unified command to roundup messages with user-dependent reactions in QoC channels.
-    Uses the react_is_ABC helper functions to filter reacts.
     """
     if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
     heard_command(cmd_name, ctx.message.author.name)
@@ -1505,9 +1504,8 @@ async def filter_sub_command(ctx: Context, cmd_name: str, filter_sub_func: typin
         for rip in rips:
             rip_title = get_rip_title(rip)
             rip_link = f"<https://discordapp.com/channels/{str(ctx.guild.id)}/{str(sub_channel)}/{str(rip.id)}>"
-            rip_reaction_data = await get_reaction_datas(rip, channel)
             if filter_sub_func(rip):
-                if any([react_is_qoc(r.name) for r in rip_reaction_data]):
+                if await message_has_reaction(ReactionType.QOC, rip):
                     result += f"{qoc_emote} "
                 author = str(rip.author).split('#')[0].replace('_', '\_')
                 result += f'**[{rip_title}]({rip_link})** (by {author})\n'
@@ -1564,9 +1562,8 @@ async def fetch_command(ctx: Context, valid_func: typing.Callable, channel_link 
             await send_embed(ctx.channel, result, time)
 
 
-async def fetch_reaction_command(ctx: Context, react_func: typing.Callable, channel_link = None, optional_time = None):
-    rip_reaction_data = await get_reaction_datas(rip.id, rip.channel)
-    await fetch_command(ctx, lambda rip: any(react_func(r.name) for r in rip_reaction_data), channel_link, optional_time)
+async def fetch_reaction_command(ctx: Context, reaction_type: ReactionType, channel_link = None, optional_time = None):
+    await fetch_command(ctx, lambda rip: await message_has_reaction(reaction_type, rip), channel_link, optional_time)
 
 
 def split_long_message(a_message: str, character_limit: int) -> list[str]:  # avoid Discord's character limit
@@ -1802,47 +1799,68 @@ async def get_pinned_msgs_and_react(channel: TextChannel, react_func: typing.Cal
     return pins_in_message
 
 
-# A bunch of functions to check if react is of specific types
-
-def react_is_goldcheck(name: str) -> bool:
-    return any([r in name.lower() for r in ["goldcheck", DEFAULT_GOLDCHECK]])
-
-def react_is_checkreq(name: str) -> bool:
-    return name.lower().endswith("check") and name.lower()[0].isdigit()
-
-def react_is_check(name: str) -> bool:
-    return not react_is_goldcheck(name) and not react_is_checkreq(name) \
-            and any([r in name.lower() for r in ["check", DEFAULT_CHECK]])
-
-def react_is_fix(name: str) -> bool:
-    return any([r in name.lower() for r in ["fix", "wrench", DEFAULT_FIX]])
-
-def react_is_reject(name: str) -> bool:
-    return any([r in name.lower() for r in ["reject", DEFAULT_REJECT]])
-
-def react_is_stop(name: str) -> bool:
-    return any([r in name.lower() for r in ["stop", "octagonal", DEFAULT_STOP]])
-
-def react_is_alert(name: str) -> bool:
-    return any([r in name.lower() for r in ["alert", DEFAULT_ALERT]])
-
-def react_is_qoc(name: str) -> bool:
-    return any([r in name.lower() for r in ["qoc", DEFAULT_QOC]])
-
-def react_is_metadata(name: str) -> bool:
-    return any([r in name.lower() for r in ["metadata", DEFAULT_METADATA]])
-
-def react_is_thumbnail(name: str) -> bool:
-    return any([r in name.lower() for r in ["thumbnail", DEFAULT_THUMBNAIL]])
-
-def react_is_emailsent(name: str) -> bool:
-    return any([r in name.lower() for r in ["emailsent"]])
-
-
 KEYCAP_EMOJIS = {'2️⃣': 2, '3️⃣': 3, '4️⃣': 4, '5️⃣': 5, '6️⃣': 6, '7️⃣': 7, '8️⃣': 8, '9️⃣': 9, '🔟': 10}
-def react_is_number(name: str) -> bool:
-    return name in KEYCAP_EMOJIS
 
+class ReactionType(Enum):
+    GOLDCHECK = auto()
+    CHECKREQ = auto()
+    CHECK = auto()
+    FIX = auto()
+    REJECT = auto()
+    STOP = auto()
+    ALERT = auto()
+    QOC = auto()
+    METADATA = auto()
+    THUMBNAIL = auto()
+    EMAILSENT = auto()
+    NUMBER = auto()
+
+def react_is(reaction_type: ReactionType, name: str) -> bool:
+    result = False
+    name_lower = name.lower()
+    match (reaction_type):
+        case ReactionType.GOLDCHECK:
+            result = name_lower == "goldcheck" or name_lower == DEFAULT_GOLDCHECK
+        case ReactionType.CHECKREQ:
+            result = name_lower.endswith("check") and name_lower[0].isdigit()
+        case ReactionType.CHECK:
+            if not react_is(ReactionType.GOLDCHECK, name) and not react_is(ReactionType.CHECKREQ, name):
+                result = name_lower == "check" or name_lower == DEFAULT_CHECK
+        case ReactionType.FIX:
+            result = name_lower == "fix" or name_lower == "wrench" or name_lower == DEFAULT_FIX
+        case ReactionType.REJECT:
+            result = name_lower == "reject" or name_lower == DEFAULT_REJECT
+        case ReactionType.STOP:
+            result = name_lower == "stop" or name_lower == "octagonal" or name_lower == DEFAULT_STOP
+        case ReactionType.ALERT:
+            result = name_lower == "alert" or name_lower == DEFAULT_ALERT
+        case ReactionType.QOC:
+            result = name_lower == "qoc" or name_lower == DEFAULT_QOC
+        case ReactionType.METADATA:
+            result = name_lower == "metadata" or name_lower == DEFAULT_METADATA
+        case ReactionType.THUMBNAIL:
+            result = name_lower == "thumbnail" or name_lower == DEFAULT_THUMBNAIL
+        case ReactionType.EMAILSENT:
+            result = name_lower == "thumbnail" or name_lower == DEFAULT_THUMBNAIL
+        case ReactionType.NUMBER:
+            result = name in KEYCAP_EMOJIS
+        case _:
+            write_log("WARNING: Unimplemented ReactionType: " + reaction_type)
+
+    return result
+
+def react_is_one(reaction_type_list: List[ReactionType], name: str) -> bool:
+    for reaction_type in reaction_type_list:
+        if react_is(reaction_type, name):
+            return True
+    return False
+
+async def message_has_reaction(reaction_type: ReactionType, message: Message) -> bool:
+    reaction_datas = await get_reaction_datas(message.id, message.channel)
+    for react_data in reaction_datas:
+        if react_is(reaction_type, react_data):
+            return True
+    return False
 
 def rip_is_specs_overdue(message: Message) -> bool:
     """
@@ -1877,25 +1895,30 @@ async def get_reactions(channel: TextChannel, message: Message) -> typing.Tuple[
     checks_required = 3
     specs_needed = False
     fix_or_alert = False
-    
+
     emote_names = [e.name for e in channel.guild.emojis]
 
     reaction_data = await get_reaction_datas(message.id, channel)
 
     for react_data in reaction_data:
-        if react_is_goldcheck(react_data.name): num_goldchecks += 1
-        elif react_is_checkreq(react_data.name):
+        if react_is(ReactionType.GOLDCHECK, react_data.name):
+            num_goldchecks += 1
+        elif react_is(ReactionType.CHECKREQ, react_data.name):
             try:
                 checks_required = int(react_data.name.split("check")[0])
             except ValueError:
                 print("Error parsing checkreq react: {}".format(react_data.name))
-        elif react_is_check(react_data.name): num_checks += 1
-        elif react_is_reject(react_data.name): num_rejects += 1
-        elif react_is_fix(react_data.name) or react_is_alert(react_data.name): fix_or_alert = True
-        elif react_is_stop(react_data.name): specs_needed = True
-        elif react_is_number(react_data.name):
+        elif react_is(ReactionType.CHECK, react_data.name):
+            num_checks += 1
+        elif react_is(ReactionType.REJECT, react_data.name):
+            num_rejects += 1
+        elif react_is_one([ReactionType.FIX, ReactionType.ALERT], react_data.name):
+            fix_or_alert = True
+        elif react_is(ReactionType.STOP, react_data.name):
+            specs_needed = True
+        elif react_is(ReactionType.NUMBER, react_data.name):
             specs_required = KEYCAP_EMOJIS[react_data.name]
-        
+
         if react_data.name in emote_names:
             for e in channel.guild.emojis:
                 if e.name == react_data.name:
@@ -1903,7 +1926,7 @@ async def get_reactions(channel: TextChannel, message: Message) -> typing.Tuple[
                     break
         else:
             reacts += f"{react_data.name} "
-    
+
     check_passed = (num_checks - num_rejects >= checks_required) and not fix_or_alert
     specs_passed = (not specs_needed or num_goldchecks >= specs_required)
 
