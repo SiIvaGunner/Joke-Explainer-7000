@@ -71,15 +71,15 @@ async def on_ready():
     queue_channel_ids = [k for k, v in CHANNELS.items() if 'QUEUE' in v]
     for channel_id in queue_channel_ids:
         channel = bot.get_channel(channel_id)
-        queued_rips = await get_queued_rips_from_channel(channel)
-        await write_log(f'Cached {len(queued_rips)} queued rips in {channel.jump_url}.')
+        approved_rips = await get_approved_rips_from_channel(channel)
+        await write_log(f'Cached {len(approved_rips)} approved rips in {channel.jump_url}.')
         # await cache_reactions_bulk(queue_channel_id, 'thread')
 
     qoc_channel_ids = [k for k, v in CHANNELS.items() if 'QOC' in v]
     for channel_id in qoc_channel_ids:
         channel = bot.get_channel(channel_id)
-        pinned_rips = await get_pinned_rips(channel)
-        await write_log(f'Cached {len(pinned_rips)} pinned rips in {channel.jump_url}.')
+        qoc_rips = await get_qoc_rips(channel)
+        await write_log(f'Cached {len(qoc_rips)} qoc rips in {channel.jump_url}.')
 
     await write_log('Startup reaction caching complete.')
 
