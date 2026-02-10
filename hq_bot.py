@@ -2187,21 +2187,20 @@ async def get_pins(channel: TextChannel) -> typing.List[Message]:
     return pins[:-1] if _get_config('qoc_contains_pinned_rule') else pins
 
 
-RIP_CACHE_PINS = {}
-RIP_CACHE_QUEUE = {}
+RIP_CACHE_QOC = {}
 
 class ReactsAndUsers(NamedTuple):
     name: str
     user_id: int
 
-class PinnedRip(NamedTuple):
+class QocRip(NamedTuple):
     text: str
     reacts_and_users: List[ReactsAndUsers]
 
-async def get_pinned_rips(channel: TextChannel) -> typing.List[PinnedRip]:
-    pinned_rips = []
-    if channel.id in RIP_CACHE_PINS:
-        pinned_rips = RIP_CACHE_PINS[channel.id]
+async def get_qoc_rips(channel: TextChannel) -> typing.List[QocRip]:
+    qoc_rips = []
+    if channel.id in RIP_CACHE_QOC:
+        qoc_rips = RIP_CACHE_QOC[channel.id]
     else:
         skip_first = _get_config('qoc_contains_pinned_rule')
         count = 0
@@ -2221,19 +2220,21 @@ async def get_pinned_rips(channel: TextChannel) -> typing.List[PinnedRip]:
                     user_ids = [user.id async for user in reaction.users()]
                     for user_id in user_ids:
                         reacts_and_users.append(ReactsAndUsers(name, user_id))
-                pinned_rips.append(PinnedRip(message.content, reacts_and_users))
+                qoc_rips.append(QocRip(message.content, reacts_and_users))
             count += 1
-        RIP_CACHE_PINS[channel.id] = pinned_rips
-    return pinned_rips
+        RIP_CACHE_QOC[channel.id] = qoc_rips
+    return qoc_rips
 
-class QueuedRip(NamedTuple):
+RIP_CACHE_APPROVED = {}
+
+class ApprovedRip(NamedTuple):
     text: str
     react_strings: List[str]
 
-async def get_queued_rips_from_channel(channel: TextChannel) -> typing.List[QueuedRip]:
-    queued_rips = []
-    if channel.id in RIP_CACHE_QUEUE:
-        queued_rips = RIP_CACHE_QUEUE[channel.id]
+async def get_approved_rips_from_channel(channel: TextChannel) -> typing.List[ApprovedRip]:
+    approved_rips = []
+    if channel.id in RIP_CACHE_APPROVED:
+        approved_rips = RIP_CACHE_APPROVED[channel.id]
     else:
         async for message in channel.history(limit = None):
             is_valid_message = channel is Thread or not (message.channel is Thread)
@@ -2247,9 +2248,9 @@ async def get_queued_rips_from_channel(channel: TextChannel) -> typing.List[Queu
                             name = reaction.emoji
                         elif hasattr(reaction.emoji, "name"):
                             name = reaction.emoji.name
-                    queued_rips.append(QueuedRip(message.content, reaction_datas))
-        RIP_CACHE_QUEUE[channel.id] = queued_rips
-    return queued_rips
+                    approved_rips.append(ApprovedRip(message.content, reaction_datas))
+        RIP_CACHE_APPROVED[channel.id] = approved_rips
+    return approved_rips
 
 async def get_rips(channel: TextChannel, type: typing.Literal['pin', 'msg', 'thread']) -> dict[int, typing.List[Message]]:
     """
