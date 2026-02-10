@@ -69,14 +69,14 @@ async def on_ready():
     await write_log("Good morning!")
 
     # Fill up reaction cache
-    qoc_channels = [k for k, v in CHANNELS.items() if 'QOC' in v]
-    for qoc_channel_id in qoc_channels:
+    qoc_channel_ids = [k for k, v in CHANNELS.items() if 'QOC' in v]
+    for qoc_channel_id in qoc_channel_ids:
         await cache_reactions_bulk(qoc_channel_id, 'pin')
-    queue_channels = [k for k, v in CHANNELS.items() if 'QUEUE' in v]
-    for queue_channel_id in queue_channels:
+    queue_channel_ids = [k for k, v in CHANNELS.items() if 'QUEUE' in v]
+    for queue_channel_id in queue_channel_ids:
         await cache_reactions_bulk(queue_channel_id, 'msg')
         await cache_reactions_bulk(queue_channel_id, 'thread')
-    await write_log('Initial reaction caching complete.')
+    await write_log('Startup reaction caching complete.')
 
 import traceback
 @bot.event
@@ -154,13 +154,32 @@ class ReactionCacheAction(Enum):
     REACTION_REMOVE = auto()
     EMOJI_CLEAR = auto()
 
-def update_reaction_cache(reaction_cache_action: ReactionCacheAction, message_id: int, user_id: int, partialEmoji: PartialEmoji):
+async def update_reaction_cache(reaction_cache_action: ReactionCacheAction, message_id: int, user_id: int, partial_emoji: PartialEmoji, channel_id: int):
 
-    reaction_datas = []
-    if message_id in REACTION_CACHE:
-        reaction_datas = REACTION_CACHE.get(message_id)
+    channel = bot.get_channel(channel_id)
 
-    reaction_data = ReactionData(partialEmoji.name, user_id)
+    qoc_channel_ids = [k for k, v in CHANNELS.items() if 'QOC' in v]
+    queue_channel_ids = [k for k, v in CHANNELS.items() if 'QUEUE' in v]
+
+    is_qoc_channel = channel.id in qoc_channel_ids
+    is_queue_channel = channel.id in queue_channel_ids
+    is_queue_thread = False
+    if not is_qoc_channel and not is_queue_channel:
+        async for message in channel.history(limit = None):
+            if message.thread is not None and channel_id == message.thread.id:
+                is_queue_thread = True
+                break
+
+    if not is_qoc_channel and not is_queue_channel and not is_queue_thread:
+        return
+
+    #NOTE: (Ahmayk) If the message in not in the reaction cache we need to get all reactions
+    #this is an api call that will fill up the reaction cache for us so we can stop here
+    if message_id not in REACTION_CACHE:
+        return await get_reaction_datas(message_id, channel)
+
+    reaction_datas = REACTION_CACHE.get(message_id)
+    reaction_data = ReactionData(partial_emoji.name, user_id)
 
     match(reaction_cache_action):
         case ReactionCacheAction.REACTION_ADD:
@@ -192,17 +211,18 @@ def update_reaction_cache(reaction_cache_action: ReactionCacheAction, message_id
         else:
             REACTION_CACHE.update({message_id: reaction_datas})
 
+
 @bot.listen('on_raw_reaction_add')
 async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
-    update_reaction_cache(ReactionCacheAction.REACTION_ADD, payload.message_id, payload.user_id, payload.emoji)
+     await update_reaction_cache(ReactionCacheAction.REACTION_ADD, payload.message_id, payload.user_id, payload.emoji, payload.channel_id)
 
 @bot.listen('on_raw_reaction_remove')
 async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
-    update_reaction_cache(ReactionCacheAction.REACTION_REMOVE, payload.message_id, payload.user_id, payload.emoji)
+    await update_reaction_cache(ReactionCacheAction.REACTION_REMOVE, payload.message_id, payload.user_id, payload.emoji, payload.channel_id)
 
 @bot.listen('on_raw_reaction_clear_emoji')
 async def on_raw_reaction_clear_emoji(payload: discord.RawReactionClearEmojiEvent):
-    update_reaction_cache(ReactionCacheAction.EMOJI_CLEAR, payload.message_id, payload.user_id, payload.emoji)
+    await update_reaction_cache(ReactionCacheAction.EMOJI_CLEAR, payload.message_id, payload.user_id, payload.emoji, payload.channel_id)
 
 @bot.listen('on_raw_reaction_clear')
 async def on_raw_reaction_clear(payload: discord.RawReactionClearEvent):
