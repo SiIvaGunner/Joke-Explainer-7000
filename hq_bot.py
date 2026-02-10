@@ -332,40 +332,13 @@ async def roundup_new(ctx: Context, optional_time = None):
             await ctx.channel.send("No rips.")
 
 
-@bot.command(name='roundup', aliases = ['down_taunt', 'qoc', 'qocparty', 'roudnup'], brief='displays all rips in QoC')
+@bot.command(name='roundup', aliases = ['down_taunt', 'qoc', 'qocparty', 'roudnup', 'links', 'list', 'ls'], brief='displays all rips in QoC')
 async def roundup(ctx: Context, optional_time = None):
     """
     Roundup command. Retrieve all pinned messages (except the first one) and their reactions.
     Accepts an optional argument to control embed's display time *in hours*.
     """
     await roundup_new(ctx, optional_time)
-
-
-@bot.command(name='links', aliases = ['list', 'ls'], brief='roundup but quicker')
-async def links(ctx: Context, optional_time = None):
-    """
-    Retrieve all pinned messages (except the first one) without showing reactions.
-    """
-    if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
-    heard_command("links", ctx.message.author.name)
-
-    time, msg = parse_optional_time(ctx.channel, optional_time)
-    if msg is not None: await ctx.channel.send(msg)
-
-    channel = await get_roundup_channel(ctx)
-    if channel is None: return
-
-    async with ctx.channel.typing():
-        all_pins = await process_pins(channel, False)
-        result = ""
-        for rip_id, rip_info in all_pins.items():
-            result += make_markdown(rip_info, False)
-        
-        if result != "":
-            await send_embed(ctx.channel, result, time)
-        else:
-            await ctx.channel.send("No rips.")
-
 
 @bot.command(name='mypins', brief='displays rips you\'ve pinned')
 async def mypins(ctx: Context, optional_time = None):
@@ -1137,7 +1110,6 @@ def _get_config(config: str):
 async def help(ctx: Context):    
     async with ctx.channel.typing():
         result = "_**YOU ARE NOW QoCING:**_\n`!roundup [embed_minutes: float]`" + roundup.brief \
-            + "\n`!links` " + links.brief \
             + "\n_**Special lists:**_\n`!mypins` " + mypins.brief \
             + "\n`!myfixes <user_id: str>` " + myfixes.brief + "\n`!myfresh <user_id: str>` " + myfresh.brief\
             + "\n`!search <arg1: str|arg2: str|...>` " + search.brief \
