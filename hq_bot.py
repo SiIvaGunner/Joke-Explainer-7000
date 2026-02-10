@@ -244,12 +244,7 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
 
 # ============ Aggregate commands ============= #
 
-@bot.command(name='roundup', aliases = ['down_taunt', 'qoc', 'qocparty', 'roudnup'], brief='displays all rips in QoC')
-async def roundup(ctx: Context, optional_time = None):
-    """
-    Roundup command. Retrieve all pinned messages (except the first one) and their reactions.
-    Accepts an optional argument to control embed's display time *in hours*.
-    """
+async def roundup_new(ctx: Context, optional_time = None):
     if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
     heard_command("roundup", ctx.message.author.name)
 
@@ -260,15 +255,90 @@ async def roundup(ctx: Context, optional_time = None):
     if channel is None: return
 
     async with ctx.channel.typing():
-        all_pins = await process_pins(channel, True)
+
+        qoc_rips = await get_qoc_rips(channel)
+
+        dict_index = 1
+        pins_list = {}
+        ##NOTE: (Ahmayk) pulling this out of loop cause calling to disk is slow
+        is_spec_overdue_days = _get_config('spec_overdue_days')
+
         result = ""
-        for rip_id, rip_info in all_pins.items():
-            result += make_markdown(rip_info, True)
-        
+
+        for qoc_rip in qoc_rips:
+            rip_title = get_rip_title(qoc_rip.text)
+            author = get_rip_author(qoc_rip.text, qoc_rip.message_author)
+            author = author.replace('*', '').replace('_', '')
+            emote_names = [e.name for e in channel.guild.emojis]
+
+            reacts = ""
+            num_checks = 0
+            num_rejects = 0
+            num_goldchecks = 0
+            specs_required = 1
+            checks_required = 3
+            specs_needed = False
+            fix_or_alert = False
+
+            for react_and_user in qoc_rip.react_and_users:
+                if react_is(ReactionType.GOLDCHECK, react_and_user.name):
+                    num_goldchecks += 1
+                elif react_is(ReactionType.CHECKREQ, react_and_user.name):
+                    try:
+                        checks_required = int(react_and_user.name.split("check")[0])
+                    except ValueError:
+                        print("Error parsing checkreq react: {}".format(react_and_user.name))
+                elif react_is(ReactionType.CHECK, react_and_user.name):
+                    num_checks += 1
+                elif react_is(ReactionType.REJECT, react_and_user.name):
+                    num_rejects += 1
+                elif react_is_one([ReactionType.FIX, ReactionType.ALERT], react_and_user.name):
+                    fix_or_alert = True
+                elif react_is(ReactionType.STOP, react_and_user.name):
+                    specs_needed = True
+                elif react_is(ReactionType.NUMBER, react_and_user.name):
+                    specs_required = KEYCAP_EMOJIS[react_and_user.name]
+
+                if react_and_user.name in emote_names:
+                    for e in channel.guild.emojis:
+                        if e.name == react_and_user.name:
+                            reacts += f"{e} "
+                            break
+                else:
+                    reacts += f"{react_and_user.name} "
+
+            indicator = ""
+            check_passed = (num_checks - num_rejects >= checks_required) and not fix_or_alert
+            specs_passed = (not specs_needed or num_goldchecks >= specs_required)
+            is_overdue = (datetime.now(timezone.utc) - qoc_rip.created_at) > timedelta(days=is_spec_overdue_days)
+            if check_passed:
+                indicator = APPROVED_INDICATOR if specs_passed else AWAITING_SPECIALIST_INDICATOR
+            elif specs_needed and not specs_passed and is_overdue:
+                indicator = SPECS_OVERDUE_INDICATOR
+            elif is_overdue:
+                indicator = OVERDUE_INDICATOR
+
+            link = format_message_link(channel.guild.id, channel.id, qoc_rip.message_id)
+
+            base_message = f'**[{rip_title}]({link})**\n{author}'
+            if len(indicator) > 0:
+                base_message = f'{indicator} **[{rip_title}]({link})** {indicator}\n{author}'
+            result += base_message + f' | {reacts}\n'
+            result += "━━━━━━━━━━━━━━━━━━\n" # a line for readability!
+
         if result != "":
             await send_embed(ctx.channel, result, time)
         else:
             await ctx.channel.send("No rips.")
+
+
+@bot.command(name='roundup', aliases = ['down_taunt', 'qoc', 'qocparty', 'roudnup'], brief='displays all rips in QoC')
+async def roundup(ctx: Context, optional_time = None):
+    """
+    Roundup command. Retrieve all pinned messages (except the first one) and their reactions.
+    Accepts an optional argument to control embed's display time *in hours*.
+    """
+    await roundup_new(ctx, optional_time)
 
 
 @bot.command(name='links', aliases = ['list', 'ls'], brief='roundup but quicker')
@@ -1899,11 +1969,10 @@ def suborqueue_rip_has_reaction(reaction_type: ReactionType, suborqueue_rip: Sub
             return True
     return False
 
-def rip_is_specs_overdue(message: Message) -> bool:
+def rip_is_specs_overdue(message: datetime.datetime) -> bool:
     """
     Returns true if the message is older than SPECS_OVERDUE_DAYS
     """
-    return datetime.now(timezone.utc) - message.created_at > timedelta(days=_get_config('spec_overdue_days'))
 
 def rip_is_overdue(message: Message) -> bool:
     """
@@ -2179,6 +2248,7 @@ class QocRip(NamedTuple):
     channel_id: int
     message_author: str
     react_and_users: List[ReactAndUser]
+    created_at: datetime.datetime
 
 async def get_qoc_rips(channel: TextChannel) -> typing.List[QocRip]:
     qoc_rips = []
@@ -2204,7 +2274,7 @@ async def get_qoc_rips(channel: TextChannel) -> typing.List[QocRip]:
                     user_ids = [user.id async for user in reaction.users()]
                     for user_id in user_ids:
                         react_and_users.append(ReactAndUser(name, user_id))
-                qoc_rip = QocRip(message.content, message.id, channel.id, str(message.author), react_and_users)
+                qoc_rip = QocRip(message.content, message.id, channel.id, str(message.author), react_and_users, message.created_at)
                 qoc_rips.append(qoc_rip)
             count += 1
         RIP_CACHE_QOC[channel.id] = qoc_rips
