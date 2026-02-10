@@ -97,7 +97,7 @@ async def on_command_error(ctx: commands.Context, error: commands.CommandError):
     for message in messages:
         await ctx.channel.send(message)
 
-    log_channel = await bot.fetch_channel(LOG_CHANNEL)
+    log_channel = bot.get_channel(LOG_CHANNEL)
     messages = split_long_message(error_data, 2000 - len(error_string))
     for i, message in enumerate(messages):
         string = f'```py\n{message}\n```'
@@ -2287,7 +2287,7 @@ async def write_log(msg: str = "Placeholder message", embed: bool = False):
     Also write to a log file as backup.
     """
     try:
-        log_channel = await bot.fetch_channel(LOG_CHANNEL)
+        log_channel = bot.get_channel(LOG_CHANNEL)
         if embed:
             await send_embed(log_channel, msg)
         else:
