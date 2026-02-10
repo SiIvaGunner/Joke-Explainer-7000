@@ -567,16 +567,12 @@ async def scout(ctx: Context, prefix: str = None, channel_link: str = None, opti
     if channel is None: await ctx.channel.send("Error: Invalid channel found. Contact bot developers to update list of channels.")
 
     async with ctx.channel.typing():
-        rips: typing.List[Message] = []
-        for t in ['msg', 'thread']:
-            t_rips = await get_rips(channel, t)
-            for k, v in t_rips.items():
-                rips.extend(v)
-        
+        approved_rips = await get_approved_rips(channel)
+
         result = ""
-        for rip in rips:
-            rip_title = get_rip_title(rip.content)
-            rip_link = f"<https://discordapp.com/channels/{str(ctx.guild.id)}/{str(channel_id)}/{str(rip.id)}>"
+        for approved_rip in approved_rips:
+            rip_title = get_rip_title(approved_rip.text)
+            rip_link = f"<https://discordapp.com/channels/{str(ctx.guild.id)}/{str(channel_id)}/{str(approved_rip.message_id)}>"
             if rip_title.lower().startswith(prefix.lower()):
                 result += f'**[{rip_title}]({rip_link})**\n'
 
@@ -606,18 +602,14 @@ async def scout_stats(ctx: Context, channel_link: str = None, optional_time = No
     if channel is None: await ctx.channel.send("Error: Invalid channel found. Contact bot developers to update list of channels.")
 
     async with ctx.channel.typing():
-        rips: typing.List[Message] = []
-        for t in ['msg', 'thread']:
-            t_rips = await get_rips(channel, t)
-            for k, v in t_rips.items():
-                rips.extend(v)
-        
+        approved_rips = await get_approved_rips(channel)
+
         count = {}
         for letter in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ': # could have done string.ascii_uppercase but i dont think the alphabet is getting any updates
             count[letter] = 0
 
-        for rip in rips:
-            rip_title = get_raw_rip_title(rip.content)
+        for approved_rip in approved_rips:
+            rip_title = get_raw_rip_title(approved_rip.text)
             prefix = rip_title.lower()[0]
             if prefix in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ':  # isalpha becomes fucked with unicode characters i think
                 count[prefix.upper()] += 1
@@ -632,7 +624,7 @@ async def scout_stats(ctx: Context, channel_link: str = None, optional_time = No
         for k, v in sorted(count.items()):
             result += f"{k}: " + ("▮" * int(v / maxCount * 20)) + f" ({v})\n"
 
-        if len(rips) == 0:
+        if len(approved_rips) == 0:
             await ctx.channel.send("No approved rips found.")
         else:
             await send_embed(ctx.channel, result, time)
