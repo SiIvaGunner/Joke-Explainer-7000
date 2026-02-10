@@ -424,13 +424,13 @@ async def fresh(ctx: Context, optional_time = None):
     result = ""
 
     async with ctx.channel.typing():
-        pin_list = await get_pins(channel)
+        qoc_rips = await get_qoc_rips(channel)
 
-        for pinned_message in pin_list:
-            reaction_datas = await get_reaction_datas(pinned_message.id, channel)
-            if len(reaction_datas) < 1:
-                title = get_rip_title(pinned_message.content)
-                link = format_message_link(channel.guild.id, channel.id, pinned_message.id)
+        ##TODO: (Ahmayk) compress roundup formatting into one thing, it's sad you don't see all the info here
+        for qoc_rip in qoc_rips:
+            if len(qoc_rip.react_and_users) < 1:
+                title = get_rip_title(qoc_rip.text)
+                link = format_message_link(channel.guild.id, channel.id, qoc_rip.message_id)
                 result = result + f'**[{title}]({link})**\n'
 
         if result != "":
