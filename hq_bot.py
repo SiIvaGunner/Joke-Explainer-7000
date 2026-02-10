@@ -71,11 +71,14 @@ async def on_ready():
     # Fill up reaction cache
     qoc_channel_ids = [k for k, v in CHANNELS.items() if 'QOC' in v]
     for qoc_channel_id in qoc_channel_ids:
-        await cache_reactions_bulk(qoc_channel_id, 'pin')
-    queue_channel_ids = [k for k, v in CHANNELS.items() if 'QUEUE' in v]
-    for queue_channel_id in queue_channel_ids:
-        await cache_reactions_bulk(queue_channel_id, 'msg')
-        await cache_reactions_bulk(queue_channel_id, 'thread')
+        channel = bot.get_channel(qoc_channel_id)
+        rips = await get_rips_new(channel, RipChannelType.PIN)
+        await write_log(f'Cached {len(rips[channel.id])} pinned rips in {channel.jump_url}.')
+
+    # queue_channel_ids = [k for k, v in CHANNELS.items() if 'QUEUE' in v]
+    # for queue_channel_id in queue_channel_ids:
+        # await cache_reactions_bulk(queue_channel_id, 'msg')
+        # await cache_reactions_bulk(queue_channel_id, 'thread')
     await write_log('Startup reaction caching complete.')
 
 import traceback
@@ -2184,6 +2187,63 @@ async def get_pins(channel: TextChannel) -> typing.List[Message]:
     """
     pins = [message async for message in channel.pins(limit=None)]
     return pins[:-1] if _get_config('qoc_contains_pinned_rule') else pins
+
+
+RIP_CACHE_PINS = {}
+RIP_CACHE_MSG = {}
+RIP_CACHE_THREAD = {}
+
+class RipMessageData(NamedTuple):
+    text: str
+    reactions: List[ReactionData]
+
+class RipChannelType(Enum):
+    PIN = auto()
+    MSG = auto()
+    THREAD = auto()
+
+async def get_rips_new(channel: TextChannel, rip_channel_type: RipChannelType) -> dict[int, typing.List[RipMessageData]]:
+    rips = {}
+    match (rip_channel_type):
+        case RipChannelType.PIN:
+
+            if channel.id in RIP_CACHE_PINS:
+                rips = RIP_CACHE_PINS[channel.id]
+            else:
+                rip_message_data = []
+                skip_first = _get_config('qoc_contains_pinned_rule')
+                count = 0
+                async for message in channel.pins(limit=None):
+                    if not (skip_first and count == 0):
+                        # NOTE: (Ahmayk) channel.pins does not return reaction data,
+                        # so we have to fetch it manually. This is slow! But neccessary.
+                        message = await channel.fetch_message(message.id)
+                        reaction_datas = []
+                        for reaction in message.reactions:
+                            if isinstance(reaction.emoji, str):
+                                name = reaction.emoji
+                            elif hasattr(reaction.emoji, "name"):
+                                name = reaction.emoji.name
+                            user_ids = [user.id async for user in reaction.users()]
+                            for user_id in user_ids:
+                                react_data = ReactionData(name, user_id)
+                                reaction_datas.append(react_data)
+                        rip_message_data.append(RipMessageData(message.content, reaction_datas))
+                    count += 1
+                rips[channel.id] = rip_message_data
+
+        case RipChannelType.MSG:
+            #TODO
+            pass
+
+        case RipChannelType.THREAD:
+            #TODO
+            pass
+
+        case _:
+            write_log("WARNING: Unimplemented RipChannelType: " + rip_channel_type)
+
+    return rips
 
 
 async def get_rips(channel: TextChannel, type: typing.Literal['pin', 'msg', 'thread']) -> dict[int, typing.List[Message]]:
