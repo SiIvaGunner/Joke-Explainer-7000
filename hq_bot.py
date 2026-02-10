@@ -148,7 +148,7 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
         # Send msg
         if len(verdict) > 0:
             rip_title = get_rip_title(latest_msg.content)
-            link = f"<https://discordapp.com/channels/{str(channel.guild.id)}/{str(channel.id)}/{str(latest_msg.id)}>"
+            link = format_message_link(channel.guild.id, channel.id, latest_msg.id)
             await channel.send("**Rip**: **[{}]({})**\n**Verdict**: {}\n{}-# React {} if this is resolved.".format(rip_title, link, verdict, msg, DEFAULT_CHECK))
 
 class ReactionCacheAction(Enum):
@@ -423,7 +423,7 @@ async def fresh(ctx: Context, optional_time = None):
             reaction_datas = await get_reaction_datas(pinned_message.id, channel)
             if len(reaction_datas) < 1:
                 title = get_rip_title(pinned_message.content)
-                link = f"<https://discordapp.com/channels/{str(channel.guild.id)}/{str(channel.id)}/{str(pinned_message.id)}>"
+                link = format_message_link(channel.guild.id, channel.id, pinned_message.id)
                 result = result + f'**[{title}]({link})**\n'
 
         if result != "":
@@ -574,7 +574,7 @@ async def scout(ctx: Context, prefix: str = None, channel_link: str = None, opti
         result = ""
         for approved_rip in approved_rips:
             rip_title = get_rip_title(approved_rip.text)
-            rip_link = f"<https://discordapp.com/channels/{str(ctx.guild.id)}/{str(channel_id)}/{str(approved_rip.message_id)}>"
+            rip_link = format_message_link(ctx.guild.id, channel_id, approved_rip.message_id)
             if rip_title.lower().startswith(prefix.lower()):
                 result += f'**[{rip_title}]({rip_link})**\n'
 
@@ -723,7 +723,7 @@ async def vet_from(ctx: Context, from_msg):
             if qcCode != 0:
                 rip_title = get_rip_title(pinned_message.content)
                 verdict = code_to_verdict(qcCode, qcMsg)
-                link = f"<https://discordapp.com/channels/{str(channel.guild.id)}/{str(channel.id)}/{str(pinned_message.id)}>"
+                link = format_message_link(channel.guild.id, channel.id, pinned_message.id)
                 await ctx.channel.send("**Rip**: **[{}]({})**\n**Verdict**: {}\n{}\n-# React {} if this is resolved.".format(rip_title, link, verdict, qcMsg, DEFAULT_CHECK))
 
         if len(pin_list) == 0:
@@ -936,7 +936,7 @@ async def scan(ctx: Context, channel_link: str = None, start_index: int = None, 
                 await write_log("Warning: cannot check metadata of message\nRip: {}\n{}".format(rip_title, mtMsg))
 
             if mtCode == 1:
-                link = f"<https://discordapp.com/channels/{str(ctx.guild.id)}/{str(channel_id)}/{str(rip.message_id)}>"
+                link = format_message_link(ctx.guild.id, channel_id, rip.message_id)
                 await ctx.channel.send("**Rip**: **[{}]({})**\n**Verdict**: {}\n{}".format(rip_title, link, DEFAULT_METADATA, mtMsg))
         
         latest_scan_time = datetime.now(timezone.utc)
@@ -1451,7 +1451,7 @@ async def react_conditional_command(ctx: Context, cmd_name: str, user_id: str, v
                 'Reacts': reacts,
                 'PinMiser': pinned_message.author.name,  # im mister rip christmas, im mister qoc
                 'Indicator': indicator,
-                'Link': f"<https://discordapp.com/channels/{str(channel.guild.id)}/{str(channel.id)}/{str(pinned_message.id)}>"
+                'Link': format_message_link(channel.guild.id, channel.id, pinned_message.id)
             }
             dict_index += 1
 
@@ -1534,7 +1534,7 @@ async def filter_sub_command(ctx: Context, cmd_name: str, filter_sub_func: typin
         result = ""
         for rip in rips:
             rip_title = get_rip_title(rip.content)
-            rip_link = f"<https://discordapp.com/channels/{str(ctx.guild.id)}/{str(sub_channel)}/{str(rip.id)}>"
+            rip_link = format_message_link(ctx.guild.id, sub_channel, rip.id)
             if filter_sub_func(rip):
                 if await message_has_reaction(ReactionType.QOC, rip):
                     result += f"{qoc_emote} "
@@ -1592,7 +1592,7 @@ async def fetch_command(ctx: Context, rip_filter_type: RipFilterType, reaction_t
 
                 if valid:
                     rip_title = get_rip_title(approved_rip.text)
-                    rip_link = f"<https://discordapp.com/channels/{str(ctx.guild.id)}/{str(approved_rip.channel_id)}/{str(approved_rip.message_id)}>"
+                    rip_link = format_message_link(ctx.guild.id, approved_rip.channel_id, approved_rip.message_id)
                     result += f'**[{rip_title}]({rip_link})**\n'
             
             result += '------------------------------\n'
@@ -1792,6 +1792,8 @@ def get_rip_description(text: str) -> str:
     else:
         return ""  # Return empty string if no match was found
 
+def format_message_link(guild_id: int, channel_id: int, message_id: int):
+    return  f"<https://discordapp.com/channels/{str(guild_id)}/{str(channel_id)}/{str(message_id)}>"
 
 async def get_pinned_msgs_and_react(channel: TextChannel, react_func: typing.Callable | None = None) -> dict:
     """
@@ -1829,7 +1831,7 @@ async def get_pinned_msgs_and_react(channel: TextChannel, react_func: typing.Cal
             'Reacts': reacts,
             'PinMiser': pinned_message.author.name,  # im mister rip christmas, im mister qoc
             'Indicator': indicator,
-            'Link': f"<https://discordapp.com/channels/{str(channel.guild.id)}/{str(channel.id)}/{str(pinned_message.id)}>"
+            'Link': format_message_link(channel.guild.id, channel_id, pinned_message.id)
         }
         dict_index += 1
 
