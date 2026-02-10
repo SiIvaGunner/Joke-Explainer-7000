@@ -72,10 +72,17 @@ async def on_ready():
     for channel_id in queue_channel_ids:
         channel = bot.get_channel(channel_id)
         if channel:
-            approved_rips = await get_approved_rips(channel)
+            approved_rips = await get_approved_rips(channel, True)
             await write_log(f'Cached {len(approved_rips)} approved rips in {channel.jump_url}.')
 
-    qoc_channel_ids = [k for k, v in CHANNELS.items() if 'QOC' in v]
+    sub_channel_ids = [k for k, v in CHANNELS.items() if 'SUBS' in v]
+    for channel_id in sub_channel_ids:
+        channel = bot.get_channel(channel_id)
+        if channel:
+            approved_rips = await get_approved_rips(channel, False)
+            await write_log(f'Cached {len(approved_rips)} subbed rips in {channel.jump_url}.')
+
+    qoc_channel_ids = [k for k, v in CHANNELS.items() if 'QOC' in v or 'SUBS_PIN' in v]
     for channel_id in qoc_channel_ids:
         channel = bot.get_channel(channel_id)
         if channel:
@@ -326,7 +333,7 @@ async def search_subs(ctx: Context, search_key: str, sub_channel_link: str = Non
     """
     search_keys = search_key.split('|')
     await filter_sub_command(ctx, 'search_subs', 
-            (lambda rip: any([line_contains_substring(get_raw_rip_title(rip.content), key) for key in search_keys])), 
+            (lambda rip: any([line_contains_substring(get_raw_rip_title(rip.text), key) for key in search_keys])), 
             sub_channel_link, optional_time)
 
 
@@ -368,7 +375,7 @@ async def event_subs(ctx: Context, event: str = None, sub_channel_link: str = No
     
     event_keys = event.split('|')
     await filter_sub_command(ctx, 'event_subs', 
-            (lambda rip: any([line_contains_substring(get_raw_rip_author(rip.content), e) for e in event_keys])), 
+            (lambda rip: any([line_contains_substring(get_raw_rip_author(rip.text), e) for e in event_keys])), 
             sub_channel_link, optional_time)
 
 
@@ -569,7 +576,7 @@ async def scout(ctx: Context, prefix: str = None, channel_link: str = None, opti
     if channel is None: await ctx.channel.send("Error: Invalid channel found. Contact bot developers to update list of channels.")
 
     async with ctx.channel.typing():
-        approved_rips = await get_approved_rips(channel)
+        approved_rips = await get_approved_rips(channel, True)
 
         result = ""
         for approved_rip in approved_rips:
@@ -604,7 +611,7 @@ async def scout_stats(ctx: Context, channel_link: str = None, optional_time = No
     if channel is None: await ctx.channel.send("Error: Invalid channel found. Contact bot developers to update list of channels.")
 
     async with ctx.channel.typing():
-        approved_rips = await get_approved_rips(channel)
+        approved_rips = await get_approved_rips(channel, True)
 
         count = {}
         for letter in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ': # could have done string.ascii_uppercase but i dont think the alphabet is getting any updates
@@ -838,7 +845,7 @@ async def count_dupe(ctx: Context, msg_link: str = None, check_queues: str = Non
             for queue_channel_id in queue_channels:
                 queue_channel = server.get_channel(queue_channel_id)
                 if queue_channel:
-                    approved_rips = await get_approved_rips(queue_channel)
+                    approved_rips = await get_approved_rips(queue_channel, True)
                     q += sum([isDupe(description, get_rip_description(r.text)) for r in approved_rips if r.message_id != message.id])
 
         # https://codegolf.stackexchange.com/questions/4707/outputting-ordinal-numbers-1st-2nd-3rd#answer-4712 how
@@ -880,16 +887,8 @@ async def scan(ctx: Context, channel_link: str = None, start_index: int = None, 
     channel = bot.get_channel(channel_id)
     if channel is None: await ctx.channel.send("Error: Invalid channel found. Contact bot developers to update list of channels.")
 
-    rips = []
-    if channel_is_type(channel, 'SUBS_PIN'):
-        qoc_rips = await get_qoc_rips(channel)
-        qoc_rips_converted = qoc_rips_to_approved_rips(qoc_rips)
-        rips.extend(qoc_rips_converted)
-
-    if channel_is_types(channel, ['SUBS', 'SUBS_THREAD', 'QUEUE']):
-        approved_rips = await get_approved_rips(channel)
-        rips.extend(approved_rips)
-
+    include_threads = not channel_is_types(channel, ['SUBS', 'SUBS_PIN'])
+    rips = await get_approved_or_converted_qoc_rips(channel, include_threads)
     rips.reverse()
     num_rips = len(rips)
 
@@ -1508,37 +1507,30 @@ async def filter_sub_command(ctx: Context, cmd_name: str, filter_sub_func: typin
     time, msg = parse_optional_time(ctx.channel, optional_time)
     if msg is not None: await ctx.channel.send(msg)
 
-    sub_channel, msg = parse_channel_link(sub_channel_link, ['SUBS', 'SUBS_PIN', 'SUBS_THREAD'])
+    sub_channel_id, msg = parse_channel_link(sub_channel_link, ['SUBS', 'SUBS_PIN', 'SUBS_THREAD'])
     if len(msg) > 0:
         await ctx.channel.send(msg)
-        if sub_channel == -1: return
+        if sub_channel_id == -1: return
 
     async with ctx.channel.typing():
-        server = ctx.guild
-        channel = server.get_channel(sub_channel)
+        channel = bot.get_channel(sub_channel_id)
 
         qoc_emote = DEFAULT_QOC
-        for e in server.emojis:
+        for e in ctx.guild.emojis:
             if e.name.lower() == "qoc":
                 qoc_emote = e
 
-        if channel_is_type(channel, 'SUBS'): t = 'msg'
-        elif channel_is_type(channel, 'SUBS_PIN'): t = 'pin'
-        elif channel_is_type(channel, 'SUBS_THREAD'): t = 'thread'
+        rips = await get_approved_or_converted_qoc_rips(channel, False)
 
-        rips: typing.List[Message] = []
-        t_rips = await get_rips(channel, t)
-        for k, v in t_rips.items():
-            rips.extend(v)
-        
         result = ""
         for rip in rips:
-            rip_title = get_rip_title(rip.content)
-            rip_link = format_message_link(ctx.guild.id, sub_channel, rip.id)
+            rip_title = get_rip_title(rip.text)
+            rip_link = format_message_link(ctx.guild.id, sub_channel_id, rip.message_id)
+            print(f'{rip_title}')
             if filter_sub_func(rip):
-                if await message_has_reaction(ReactionType.QOC, rip):
+                if approved_rip_has_reaction(ReactionType.QOC, rip):
                     result += f"{qoc_emote} "
-                author = str(rip.author).split('#')[0].replace('_', '\_')
+                author = rip.message_author.split('#')[0].replace('_', '\_')
                 result += f'**[{rip_title}]({rip_link})** (by {author})\n'
 
         if len(result) == 0:
@@ -1573,7 +1565,7 @@ async def fetch_command(ctx: Context, rip_filter_type: RipFilterType, reaction_t
             approved_rips = []
             channel = bot.get_channel(queue_channel_id)
             if channel:
-                approved_rips = await get_approved_rips(channel)
+                approved_rips = await get_approved_rips(channel, True)
 
             result += f'<#{queue_channel_id}>:\n'
             count += len(approved_rips)
@@ -2078,7 +2070,7 @@ async def check_metadata(text: str, message_id: int, message_author: str, fullFe
         for channel_id in queue_channel_ids:
             channel = bot.get_channel(channel_id)
             if channel:
-                approved_rips = await get_approved_rips(channel)
+                approved_rips = await get_approved_rips(channel, True)
                 rips.extend(rips)
 
         qoc_channel_ids = [k for k, v in CHANNELS.items() if 'QOC' in v]
@@ -2227,15 +2219,15 @@ class ApprovedRip(NamedTuple):
     message_author: str
     react_names: List[str]
 
-async def get_approved_rips(channel: TextChannel) -> typing.List[ApprovedRip]:
+async def get_approved_rips(channel: TextChannel, include_threads: bool) -> typing.List[ApprovedRip]:
     approved_rips = []
     thread_dict = {}
     if channel.id in RIP_CACHE_APPROVED:
         approved_rips = RIP_CACHE_APPROVED[channel.id]
     else:
         async for message in channel.history(limit = None):
-            if message.thread is not None:
-                approved_rips = await get_approved_rips(message.thread)
+            if message.thread is not None and include_threads:
+                approved_rips = await get_approved_rips(message.thread, False)
                 thread_dict[message.thread.id] = approved_rips
             is_valid_message = channel is Thread or not (message.channel is Thread)
             has_quotes = '```' in message.content
@@ -2266,6 +2258,18 @@ def qoc_rips_to_approved_rips(qoc_rips: List[QocRip]) -> List[ApprovedRip]:
         approved_rip = ApprovedRip(r.text, r.message_id, r.channel_id, r.message_author, react_names)
         approved_rips.append(approved_rip)
     return approved_rips
+
+async def get_approved_or_converted_qoc_rips(channel: TextChannel, include_threads: bool) -> typing.List[ApprovedRip]:
+    rips = []
+    if channel_is_type(channel, 'SUBS_PIN'):
+        qoc_rips = await get_qoc_rips(channel)
+        qoc_rips_converted = qoc_rips_to_approved_rips(qoc_rips)
+        rips.extend(qoc_rips_converted)
+    if channel_is_types(channel, ['SUBS', 'SUBS_THREAD', 'QUEUE']):
+        approved_rips = await get_approved_rips(channel, include_threads)
+        rips.extend(approved_rips)
+    return rips
+
 
 async def get_rips(channel: TextChannel, type: typing.Literal['pin', 'msg', 'thread']) -> dict[int, typing.List[Message]]:
     """
