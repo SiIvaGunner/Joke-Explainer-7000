@@ -146,7 +146,7 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
 
         # Send msg
         if len(verdict) > 0:
-            rip_title = get_rip_title(latest_msg)
+            rip_title = get_rip_title(latest_msg.content)
             link = f"<https://discordapp.com/channels/{str(channel.guild.id)}/{str(channel.id)}/{str(latest_msg.id)}>"
             await channel.send("**Rip**: **[{}]({})**\n**Verdict**: {}\n{}-# React {} if this is resolved.".format(rip_title, link, verdict, msg, DEFAULT_CHECK))
 
@@ -325,7 +325,7 @@ async def search_subs(ctx: Context, search_key: str, sub_channel_link: str = Non
     """
     search_keys = search_key.split('|')
     await filter_sub_command(ctx, 'search_subs', 
-            (lambda rip: any([line_contains_substring(get_raw_rip_title(rip), key) for key in search_keys])), 
+            (lambda rip: any([line_contains_substring(get_raw_rip_title(rip.content), key) for key in search_keys])), 
             sub_channel_link, optional_time)
 
 
@@ -367,7 +367,7 @@ async def event_subs(ctx: Context, event: str = None, sub_channel_link: str = No
     
     event_keys = event.split('|')
     await filter_sub_command(ctx, 'event_subs', 
-            (lambda rip: any([line_contains_substring(get_raw_rip_author(rip), e) for e in event_keys])), 
+            (lambda rip: any([line_contains_substring(get_raw_rip_author(rip.content), e) for e in event_keys])), 
             sub_channel_link, optional_time)
 
 
@@ -421,7 +421,7 @@ async def fresh(ctx: Context, optional_time = None):
         for pinned_message in pin_list:
             reaction_datas = await get_reaction_datas(pinned_message.id, channel)
             if len(reaction_datas) < 1:
-                title = get_rip_title(pinned_message)
+                title = get_rip_title(pinned_message.content)
                 link = f"<https://discordapp.com/channels/{str(channel.guild.id)}/{str(channel.id)}/{str(pinned_message.id)}>"
                 result = result + f'**[{title}]({link})**\n'
 
@@ -576,7 +576,7 @@ async def scout(ctx: Context, prefix: str = None, channel_link: str = None, opti
         
         result = ""
         for rip in rips:
-            rip_title = get_rip_title(rip)
+            rip_title = get_rip_title(rip.content)
             rip_link = f"<https://discordapp.com/channels/{str(ctx.guild.id)}/{str(channel_id)}/{str(rip.id)}>"
             if rip_title.lower().startswith(prefix.lower()):
                 result += f'**[{rip_title}]({rip_link})**\n'
@@ -618,7 +618,7 @@ async def scout_stats(ctx: Context, channel_link: str = None, optional_time = No
             count[letter] = 0
 
         for rip in rips:
-            rip_title = get_raw_rip_title(rip)
+            rip_title = get_raw_rip_title(rip.content)
             prefix = rip_title.lower()[0]
             if prefix in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ':  # isalpha becomes fucked with unicode characters i think
                 count[prefix.upper()] += 1
@@ -728,7 +728,7 @@ async def vet_from(ctx: Context, from_msg):
             qcCode, qcMsg, _ = await check_qoc(pinned_message, False)
 
             if qcCode != 0:
-                rip_title = get_rip_title(pinned_message)
+                rip_title = get_rip_title(pinned_message.content)
                 verdict = code_to_verdict(qcCode, qcMsg)
                 link = f"<https://discordapp.com/channels/{str(channel.guild.id)}/{str(channel.id)}/{str(pinned_message.id)}>"
                 await ctx.channel.send("**Rip**: **[{}]({})**\n**Verdict**: {}\n{}\n-# React {} if this is resolved.".format(rip_title, link, verdict, qcMsg, DEFAULT_CHECK))
@@ -786,7 +786,7 @@ async def vet_msg(ctx: Context, msg_link: str = None):
             return
 
         verdict, msg = await check_qoc_and_metadata(message, True)
-        rip_title = get_rip_title(message)
+        rip_title = get_rip_title(message.content)
 
         await ctx.channel.send("**Rip**: **{}**\n**Verdict**: {}\n**Comments**:\n{}".format(rip_title, verdict, msg))
 
@@ -832,7 +832,7 @@ async def count_dupe(ctx: Context, msg_link: str = None, check_queues: str = Non
 
         playlistId = extract_playlist_id('\n'.join(message.content.splitlines()[1:])) # ignore author line
         description = get_rip_description(message)
-        rip_title = get_rip_title(message)
+        rip_title = get_rip_title(message.content)
 
         p, msg = await run_blocking(countDupe, description, YOUTUBE_CHANNEL_NAME, playlistId, YOUTUBE_API_KEY)
         if len(msg) > 0:
@@ -941,7 +941,7 @@ async def scan(ctx: Context, channel_link: str = None, start_index: int = None, 
             if (index > eInd):
                 break
             
-            rip_title = get_rip_title(message)
+            rip_title = get_rip_title(message.content)
 
             mtCode, mtMsg = await check_metadata(message)
             if mtCode == -1:
@@ -974,7 +974,7 @@ async def peek_msg(ctx: Context, msg_link: str = None, use_ffprobe = None):
             await ctx.channel.send(status)
             return
         
-        rip_title = get_rip_title(message)
+        rip_title = get_rip_title(message.content)
         
         urls = extract_rip_link(message.content)
         errs = []
@@ -1447,7 +1447,7 @@ async def react_conditional_command(ctx: Context, cmd_name: str, user_id: str, v
         pins_in_message = {}  # make a dict for everything
 
         for pinned_message in pin_list:
-            rip_title = get_rip_title(pinned_message)
+            rip_title = get_rip_title(pinned_message.content)
             author = get_rip_author(pinned_message)        
             reaction_data = await get_reaction_datas(pinned_message.id, channel)
 
@@ -1545,7 +1545,7 @@ async def filter_sub_command(ctx: Context, cmd_name: str, filter_sub_func: typin
         
         result = ""
         for rip in rips:
-            rip_title = get_rip_title(rip)
+            rip_title = get_rip_title(rip.content)
             rip_link = f"<https://discordapp.com/channels/{str(ctx.guild.id)}/{str(sub_channel)}/{str(rip.id)}>"
             if filter_sub_func(rip):
                 if await message_has_reaction(ReactionType.QOC, rip):
@@ -1582,31 +1582,37 @@ async def fetch_command(ctx: Context, rip_filter_type: RipFilterType, reaction_t
         count = 0
 
         for queue_channel_id in queue_channel_ids:
-            rips: typing.List[Message] = []
-            for t in ['msg', 'thread']:
-                channel = bot.get_channel(queue_channel_id)
-                if channel is None: continue
-                t_rips = await get_rips(channel, t)
-                for k, v in t_rips.items():
-                    rips.extend(v)
-        
-            result += f'<#{queue_channel_id}>:\n'
-            count += len(rips)
+            # rips: typing.List[Message] = []
+            # for t in ['msg', 'thread']:
+                # channel = bot.get_channel(queue_channel_id)
+                # if channel is None: continue
+                # t_rips = await get_rips(channel, t)
+                # for k, v in t_rips.items():
+                    # rips.extend(v)
 
-            for rip in rips:
+            approved_rips = []
+            channel = bot.get_channel(queue_channel_id)
+            if channel:
+                approved_rips = await get_approved_rips_from_channel(channel)
+
+            result += f'<#{queue_channel_id}>:\n'
+            count += len(approved_rips)
+
+            for approved_rip in approved_rips:
 
                 valid = False
                 match(rip_filter_type):
                     case RipFilterType.HAS_REACT:
-                        valid = await message_has_reaction(reaction_type, rip)
+                        valid = approved_rip_has_reaction(reaction_type, approved_rip)
                     case RipFilterType.UNSENT:
-                        valid = line_contains_substring(get_raw_rip_author(rip), 'email') and not await message_has_reaction(ReactionType.EMAILSENT, rip)
+                        valid = line_contains_substring(get_raw_rip_author(approved_rip.text), 'email') and \
+                                not approved_rip_has_reaction(ReactionType.EMAILSENT, approved_rip)
                     case _:
                         write_log("Unimplemented RipFilterType: " + rip_filter_type)
 
                 if valid:
-                    rip_title = get_rip_title(rip)
-                    rip_link = f"<https://discordapp.com/channels/{str(ctx.guild.id)}/{str(rip.channel.id)}/{str(rip.id)}>"
+                    rip_title = get_rip_title(approved_rip.text)
+                    rip_link = f"<https://discordapp.com/channels/{str(ctx.guild.id)}/{str(approved_rip.channel_id)}/{str(approved_rip.message_id)}>"
                     result += f'**[{rip_title}]({rip_link})**\n'
             
             result += '------------------------------\n'
@@ -1732,14 +1738,14 @@ def extract_playlist_id(text: str) -> str:
         return ""  # Return empty string if no valid links are found
 
 
-def get_raw_rip_title(message: Message) -> str:
+def get_raw_rip_title(text: str) -> str:
     """
     Return the rip title line of a Discord message.
     Assumes the message follows the format where the rip title is after the first instance of ```
     """
     # Update: now use regex to find the first instance of "```[\n][text][\n]"
     pattern = r'\`\`\`\n*.*\n'
-    rip_title = re.search(pattern, message.content)
+    rip_title = re.search(pattern, text)
     if rip_title is not None:
         rip_title = rip_title.group(0)
         rip_title = rip_title.replace('`', '')
@@ -1748,26 +1754,26 @@ def get_raw_rip_title(message: Message) -> str:
     return rip_title
 
 
-def get_rip_title(message: Message) -> str:
+def get_rip_title(text: str) -> str:
     """
     Wrapper function to format unusual or spoiler rip titles
     """
-    rip_title = get_raw_rip_title(message)
+    rip_title = get_raw_rip_title(text)
     if rip_title is None:
         return "`[Unusual Pin Format]`"
-    elif '||' in message.content.split('```')[0]:
+    elif '||' in text.split('```')[0]:
         # if || is detected in the message before the first ```, make the rip title into spoiler
         return "`[Rip Contains Spoiler]`"
     else:
         return rip_title
 
 
-def get_raw_rip_author(message: Message) -> str:
+def get_raw_rip_author(text: str) -> str:
     """
     Return the rip author line of a Discord message.
     Assumes the message follows the format where the rip author is after the first instance of ```
     """
-    author = message.content.split("```")[0]
+    author = text.split("```")[0]
     author = author.replace('\n', '')
     author = author.replace('||', '') # in case of spoilered rips
 
@@ -1779,7 +1785,7 @@ def get_rip_author(message: Message) -> str:
     Wrapper function to format author line.
     If the line contains "by me", append the message sender's name to the author line.
     """
-    author = get_raw_rip_author(message)
+    author = get_raw_rip_author(message.content)
     
     if len(re.findall(r'\bby\b', author.lower())) == 0:
         # If "by" is not found, notify that the "author line" might be unusual
@@ -1821,7 +1827,7 @@ async def get_pinned_msgs_and_react(channel: TextChannel, react_func: typing.Cal
 
     for pinned_message in pin_list:
         # Get the rip title
-        rip_title = get_rip_title(pinned_message)
+        rip_title = get_rip_title(pinned_message.content)
 
         # Find the rip's author
         author = get_rip_author(pinned_message)        
@@ -1892,7 +1898,7 @@ def react_is(reaction_type: ReactionType, name: str) -> bool:
         case ReactionType.THUMBNAIL:
             result = name_lower == "thumbnail" or name_lower == DEFAULT_THUMBNAIL
         case ReactionType.EMAILSENT:
-            result = name_lower == "thumbnail" or name_lower == DEFAULT_THUMBNAIL
+            result = name_lower == "emailsent"
         case ReactionType.NUMBER:
             result = name in KEYCAP_EMOJIS
         case _:
@@ -1910,6 +1916,12 @@ async def message_has_reaction(reaction_type: ReactionType, message: Message) ->
     reaction_datas = await get_reaction_datas(message.id, message.channel)
     for react_data in reaction_datas:
         if react_is(reaction_type, react_data.name):
+            return True
+    return False
+
+def approved_rip_has_reaction(reaction_type: ReactionType, approved_rip: ApprovedRip) -> bool:
+    for name in approved_rip.react_names:
+        if react_is(reaction_type, name):
             return True
     return False
 
@@ -2079,12 +2091,12 @@ async def check_metadata(message: Message, fullFeedback: bool = False) -> typing
 
     if mtCode != -1 and not skipCheck:
         server = message.guild
-        title = get_raw_rip_title(message)
+        title = get_raw_rip_title(message.content)
         desc = get_rip_description(message)
 
         def checkDupes(queue, rips):
             msgs = []
-            if any([title == get_raw_rip_title(r) for r in rips if r.id != message.id]):
+            if any([title == get_raw_rip_title(r.content) for r in rips if r.id != message.id]):
                 msgs.append(f"Video title already exists in <#{queue}>.")
             elif any([isDupe(desc, get_rip_description(r), True) for r in rips if r.id != message.id]):
                 msgs.append(f"Main mix detected in <#{queue}>. Add something on the author line to avoid uploading this early.")
@@ -2128,7 +2140,7 @@ async def check_qoc_and_metadata(message: Message, fullFeedback: bool = False) -
     """
     verdict = ""
     msg = ""
-    rip_title = get_rip_title(message)
+    rip_title = get_rip_title(message.content)
     
     # QoC
     qcCode, qcMsg, detectedUrl = await check_qoc(message, fullFeedback)
@@ -2229,7 +2241,9 @@ RIP_CACHE_APPROVED = {}
 
 class ApprovedRip(NamedTuple):
     text: str
-    react_strings: List[str]
+    message_id: int
+    channel_id: int
+    react_names: List[str]
 
 async def get_approved_rips_from_channel(channel: TextChannel) -> typing.List[ApprovedRip]:
     approved_rips = []
@@ -2242,13 +2256,16 @@ async def get_approved_rips_from_channel(channel: TextChannel) -> typing.List[Ap
             if is_valid_message and has_quotes:
                 rip_link = extract_rip_link(message.content)
                 if len(rip_link) > 0:
-                    reaction_datas = []
+                    react_names = []
                     for reaction in message.reactions:
+                        name = ""
                         if isinstance(reaction.emoji, str):
                             name = reaction.emoji
                         elif hasattr(reaction.emoji, "name"):
                             name = reaction.emoji.name
-                    approved_rips.append(ApprovedRip(message.content, reaction_datas))
+                        react_names.append(name)
+                    approved_rip = ApprovedRip(message.content, message.id, channel.id, react_names)
+                    approved_rips.append(approved_rip)
         RIP_CACHE_APPROVED[channel.id] = approved_rips
     return approved_rips
 
