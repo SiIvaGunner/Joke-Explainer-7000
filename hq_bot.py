@@ -12,7 +12,7 @@ from simpleQoC.metadata import checkMetadata, countDupe, isDupe
 import re
 import functools
 import typing
-from typing import NamedTuple
+from typing import NamedTuple, List
 from enum import Enum, auto
 import math
 import json
@@ -66,19 +66,21 @@ async def on_ready():
     global latest_pin_time
     latest_pin_time = datetime.now(timezone.utc)
 
-    await write_log("Good morning!")
+    await write_log("Good morning! Caching rips...")
 
-    # Fill up reaction cache
-    qoc_channel_ids = [k for k, v in CHANNELS.items() if 'QOC' in v]
-    for qoc_channel_id in qoc_channel_ids:
-        channel = bot.get_channel(qoc_channel_id)
-        rips = await get_rips_new(channel, RipChannelType.PIN)
-        await write_log(f'Cached {len(rips[channel.id])} pinned rips in {channel.jump_url}.')
-
-    # queue_channel_ids = [k for k, v in CHANNELS.items() if 'QUEUE' in v]
-    # for queue_channel_id in queue_channel_ids:
-        # await cache_reactions_bulk(queue_channel_id, 'msg')
+    queue_channel_ids = [k for k, v in CHANNELS.items() if 'QUEUE' in v]
+    for channel_id in queue_channel_ids:
+        channel = bot.get_channel(channel_id)
+        queued_rips = await get_queued_rips_from_channel(channel)
+        await write_log(f'Cached {len(queued_rips)} queued rips in {channel.jump_url}.')
         # await cache_reactions_bulk(queue_channel_id, 'thread')
+
+    qoc_channel_ids = [k for k, v in CHANNELS.items() if 'QOC' in v]
+    for channel_id in qoc_channel_ids:
+        channel = bot.get_channel(channel_id)
+        pinned_rips = await get_pinned_rips(channel)
+        await write_log(f'Cached {len(pinned_rips)} pinned rips in {channel.jump_url}.')
+
     await write_log('Startup reaction caching complete.')
 
 import traceback
@@ -147,10 +149,6 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
             rip_title = get_rip_title(latest_msg)
             link = f"<https://discordapp.com/channels/{str(channel.guild.id)}/{str(channel.id)}/{str(latest_msg.id)}>"
             await channel.send("**Rip**: **[{}]({})**\n**Verdict**: {}\n{}-# React {} if this is resolved.".format(rip_title, link, verdict, msg, DEFAULT_CHECK))
-
-class ReactionData(NamedTuple):
-    name: str
-    user_id: int
 
 class ReactionCacheAction(Enum):
     REACTION_ADD = auto()
@@ -2190,61 +2188,68 @@ async def get_pins(channel: TextChannel) -> typing.List[Message]:
 
 
 RIP_CACHE_PINS = {}
-RIP_CACHE_MSG = {}
-RIP_CACHE_THREAD = {}
+RIP_CACHE_QUEUE = {}
 
-class RipMessageData(NamedTuple):
+class ReactsAndUsers(NamedTuple):
+    name: str
+    user_id: int
+
+class PinnedRip(NamedTuple):
     text: str
-    reactions: List[ReactionData]
+    reacts_and_users: List[ReactsAndUsers]
 
-class RipChannelType(Enum):
-    PIN = auto()
-    MSG = auto()
-    THREAD = auto()
+async def get_pinned_rips(channel: TextChannel) -> typing.List[PinnedRip]:
+    pinned_rips = []
+    if channel.id in RIP_CACHE_PINS:
+        pinned_rips = RIP_CACHE_PINS[channel.id]
+    else:
+        skip_first = _get_config('qoc_contains_pinned_rule')
+        count = 0
+        async for message in channel.pins(limit=None):
+            if not (skip_first and count == 0):
+                # NOTE: (Ahmayk) channel.pins does not return reaction data,
+                # so we have to fetch it manually. This is slow! But neccessary.
+                message = await channel.fetch_message(message.id)
+                reacts_and_users = []
+                for reaction in message.reactions:
+                    if isinstance(reaction.emoji, str):
+                        name = reaction.emoji
+                    elif hasattr(reaction.emoji, "name"):
+                        name = reaction.emoji.name
+                    # NOTE: (Ahmayk) this is slow too! We have to do an api call for each user.
+                    # But is also neccessary
+                    user_ids = [user.id async for user in reaction.users()]
+                    for user_id in user_ids:
+                        reacts_and_users.append(ReactsAndUsers(name, user_id))
+                pinned_rips.append(PinnedRip(message.content, reacts_and_users))
+            count += 1
+        RIP_CACHE_PINS[channel.id] = pinned_rips
+    return pinned_rips
 
-async def get_rips_new(channel: TextChannel, rip_channel_type: RipChannelType) -> dict[int, typing.List[RipMessageData]]:
-    rips = {}
-    match (rip_channel_type):
-        case RipChannelType.PIN:
+class QueuedRip(NamedTuple):
+    text: str
+    react_strings: List[str]
 
-            if channel.id in RIP_CACHE_PINS:
-                rips = RIP_CACHE_PINS[channel.id]
-            else:
-                rip_message_data = []
-                skip_first = _get_config('qoc_contains_pinned_rule')
-                count = 0
-                async for message in channel.pins(limit=None):
-                    if not (skip_first and count == 0):
-                        # NOTE: (Ahmayk) channel.pins does not return reaction data,
-                        # so we have to fetch it manually. This is slow! But neccessary.
-                        message = await channel.fetch_message(message.id)
-                        reaction_datas = []
-                        for reaction in message.reactions:
-                            if isinstance(reaction.emoji, str):
-                                name = reaction.emoji
-                            elif hasattr(reaction.emoji, "name"):
-                                name = reaction.emoji.name
-                            user_ids = [user.id async for user in reaction.users()]
-                            for user_id in user_ids:
-                                react_data = ReactionData(name, user_id)
-                                reaction_datas.append(react_data)
-                        rip_message_data.append(RipMessageData(message.content, reaction_datas))
-                    count += 1
-                rips[channel.id] = rip_message_data
-
-        case RipChannelType.MSG:
-            #TODO
-            pass
-
-        case RipChannelType.THREAD:
-            #TODO
-            pass
-
-        case _:
-            write_log("WARNING: Unimplemented RipChannelType: " + rip_channel_type)
-
-    return rips
-
+async def get_queued_rips_from_channel(channel: TextChannel) -> typing.List[QueuedRip]:
+    queued_rips = []
+    if channel.id in RIP_CACHE_QUEUE:
+        queued_rips = RIP_CACHE_QUEUE[channel.id]
+    else:
+        async for message in channel.history(limit = None):
+            is_valid_message = channel is Thread or not (message.channel is Thread)
+            has_quotes = '```' in message.content
+            if is_valid_message and has_quotes:
+                rip_link = extract_rip_link(message.content)
+                if len(rip_link) > 0:
+                    reaction_datas = []
+                    for reaction in message.reactions:
+                        if isinstance(reaction.emoji, str):
+                            name = reaction.emoji
+                        elif hasattr(reaction.emoji, "name"):
+                            name = reaction.emoji.name
+                    queued_rips.append(QueuedRip(message.content, reaction_datas))
+        RIP_CACHE_QUEUE[channel.id] = queued_rips
+    return queued_rips
 
 async def get_rips(channel: TextChannel, type: typing.Literal['pin', 'msg', 'thread']) -> dict[int, typing.List[Message]]:
     """
