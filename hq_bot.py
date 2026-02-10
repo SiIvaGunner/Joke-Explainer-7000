@@ -72,15 +72,15 @@ async def on_ready():
     for channel_id in queue_channel_ids:
         channel = bot.get_channel(channel_id)
         if channel:
-            approved_rips = await get_approved_rips(channel, True)
-            await write_log(f'Cached {len(approved_rips)} approved rips in {channel.jump_url}.')
+            suborqueue_rips = await get_suborqueue_rips(channel, True)
+            await write_log(f'Cached {len(suborqueue_rips)} queued rips in {channel.jump_url}.')
 
     sub_channel_ids = [k for k, v in CHANNELS.items() if 'SUBS' in v]
     for channel_id in sub_channel_ids:
         channel = bot.get_channel(channel_id)
         if channel:
-            approved_rips = await get_approved_rips(channel, False)
-            await write_log(f'Cached {len(approved_rips)} subbed rips in {channel.jump_url}.')
+            suborqueue_rips = await get_suborqueue_rips(channel, False)
+            await write_log(f'Cached {len(suborqueue_rips)} subbed rips in {channel.jump_url}.')
 
     qoc_channel_ids = [k for k, v in CHANNELS.items() if 'QOC' in v or 'SUBS_PIN' in v]
     for channel_id in qoc_channel_ids:
@@ -576,12 +576,12 @@ async def scout(ctx: Context, prefix: str = None, channel_link: str = None, opti
     if channel is None: await ctx.channel.send("Error: Invalid channel found. Contact bot developers to update list of channels.")
 
     async with ctx.channel.typing():
-        approved_rips = await get_approved_rips(channel, True)
+        suborqueue_rips = await get_suborqueue_rips(channel, True)
 
         result = ""
-        for approved_rip in approved_rips:
-            rip_title = get_rip_title(approved_rip.text)
-            rip_link = format_message_link(ctx.guild.id, channel_id, approved_rip.message_id)
+        for suborqueue_rip in suborqueue_rips:
+            rip_title = get_rip_title(suborqueue_rip.text)
+            rip_link = format_message_link(ctx.guild.id, channel_id, suborqueue_rip.message_id)
             if rip_title.lower().startswith(prefix.lower()):
                 result += f'**[{rip_title}]({rip_link})**\n'
 
@@ -611,14 +611,14 @@ async def scout_stats(ctx: Context, channel_link: str = None, optional_time = No
     if channel is None: await ctx.channel.send("Error: Invalid channel found. Contact bot developers to update list of channels.")
 
     async with ctx.channel.typing():
-        approved_rips = await get_approved_rips(channel, True)
+        suborqueue_rips = await get_suborqueue_rips(channel, True)
 
         count = {}
         for letter in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ': # could have done string.ascii_uppercase but i dont think the alphabet is getting any updates
             count[letter] = 0
 
-        for approved_rip in approved_rips:
-            rip_title = get_raw_rip_title(approved_rip.text)
+        for suborqueue_rip in suborqueue_rips:
+            rip_title = get_raw_rip_title(suborqueue_rip.text)
             prefix = rip_title.lower()[0]
             if prefix in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ':  # isalpha becomes fucked with unicode characters i think
                 count[prefix.upper()] += 1
@@ -633,7 +633,7 @@ async def scout_stats(ctx: Context, channel_link: str = None, optional_time = No
         for k, v in sorted(count.items()):
             result += f"{k}: " + ("▮" * int(v / maxCount * 20)) + f" ({v})\n"
 
-        if len(approved_rips) == 0:
+        if len(suborqueue_rips) == 0:
             await ctx.channel.send("No approved rips found.")
         else:
             await send_embed(ctx.channel, result, time)
@@ -845,8 +845,8 @@ async def count_dupe(ctx: Context, msg_link: str = None, check_queues: str = Non
             for queue_channel_id in queue_channels:
                 queue_channel = server.get_channel(queue_channel_id)
                 if queue_channel:
-                    approved_rips = await get_approved_rips(queue_channel, True)
-                    q += sum([isDupe(description, get_rip_description(r.text)) for r in approved_rips if r.message_id != message.id])
+                    suborqueue_rips = await get_suborqueue_rips(queue_channel, True)
+                    q += sum([isDupe(description, get_rip_description(r.text)) for r in suborqueue_rips if r.message_id != message.id])
 
         # https://codegolf.stackexchange.com/questions/4707/outputting-ordinal-numbers-1st-2nd-3rd#answer-4712 how
         ordinal = lambda n: "%d%s" % (n,"tsnrhtdd"[(n//10%10!=1)*(n%10<4)*n%10::4])
@@ -888,7 +888,7 @@ async def scan(ctx: Context, channel_link: str = None, start_index: int = None, 
     if channel is None: await ctx.channel.send("Error: Invalid channel found. Contact bot developers to update list of channels.")
 
     include_threads = not channel_is_types(channel, ['SUBS', 'SUBS_PIN'])
-    rips = await get_approved_or_converted_qoc_rips(channel, include_threads)
+    rips = await get_suborqueue_or_converted_qoc_rips(channel, include_threads)
     rips.reverse()
     num_rips = len(rips)
 
@@ -1520,7 +1520,7 @@ async def filter_sub_command(ctx: Context, cmd_name: str, filter_sub_func: typin
             if e.name.lower() == "qoc":
                 qoc_emote = e
 
-        rips = await get_approved_or_converted_qoc_rips(channel, False)
+        rips = await get_suborqueue_or_converted_qoc_rips(channel, False)
 
         result = ""
         for rip in rips:
@@ -1528,7 +1528,7 @@ async def filter_sub_command(ctx: Context, cmd_name: str, filter_sub_func: typin
             rip_link = format_message_link(ctx.guild.id, sub_channel_id, rip.message_id)
             print(f'{rip_title}')
             if filter_sub_func(rip):
-                if approved_rip_has_reaction(ReactionType.QOC, rip):
+                if suborqueue_rip_has_reaction(ReactionType.QOC, rip):
                     result += f"{qoc_emote} "
                 author = rip.message_author.split('#')[0].replace('_', '\_')
                 result += f'**[{rip_title}]({rip_link})** (by {author})\n'
@@ -1562,29 +1562,29 @@ async def fetch_command(ctx: Context, rip_filter_type: RipFilterType, reaction_t
         count = 0
 
         for queue_channel_id in queue_channel_ids:
-            approved_rips = []
+            suborqueue_rips = []
             channel = bot.get_channel(queue_channel_id)
             if channel:
-                approved_rips = await get_approved_rips(channel, True)
+                suborqueue_rips = await get_suborqueue_rips(channel, True)
 
             result += f'<#{queue_channel_id}>:\n'
-            count += len(approved_rips)
+            count += len(suborqueue_rips)
 
-            for approved_rip in approved_rips:
+            for suborqueue_rip in suborqueue_rips:
 
                 valid = False
                 match(rip_filter_type):
                     case RipFilterType.HAS_REACT:
-                        valid = approved_rip_has_reaction(reaction_type, approved_rip)
+                        valid = suborqueue_rip_has_reaction(reaction_type, suborqueue_rip)
                     case RipFilterType.UNSENT:
-                        valid = line_contains_substring(get_raw_rip_author(approved_rip.text), 'email') and \
-                                not approved_rip_has_reaction(ReactionType.EMAILSENT, approved_rip)
+                        valid = line_contains_substring(get_raw_rip_author(suborqueue_rip.text), 'email') and \
+                                not suborqueue_rip_has_reaction(ReactionType.EMAILSENT, suborqueue_rip)
                     case _:
                         write_log("Unimplemented RipFilterType: " + rip_filter_type)
 
                 if valid:
-                    rip_title = get_rip_title(approved_rip.text)
-                    rip_link = format_message_link(ctx.guild.id, approved_rip.channel_id, approved_rip.message_id)
+                    rip_title = get_rip_title(suborqueue_rip.text)
+                    rip_link = format_message_link(ctx.guild.id, suborqueue_rip.channel_id, suborqueue_rip.message_id)
                     result += f'**[{rip_title}]({rip_link})**\n'
             
             result += '------------------------------\n'
@@ -1893,8 +1893,8 @@ async def message_has_reaction(reaction_type: ReactionType, message: Message) ->
             return True
     return False
 
-def approved_rip_has_reaction(reaction_type: ReactionType, approved_rip: ApprovedRip) -> bool:
-    for name in approved_rip.react_names:
+def suborqueue_rip_has_reaction(reaction_type: ReactionType, suborqueue_rip: SubOrQueueRip) -> bool:
+    for name in suborqueue_rip.react_names:
         if react_is(reaction_type, name):
             return True
     return False
@@ -2070,7 +2070,7 @@ async def check_metadata(text: str, message_id: int, message_author: str, fullFe
         for channel_id in queue_channel_ids:
             channel = bot.get_channel(channel_id)
             if channel:
-                approved_rips = await get_approved_rips(channel, True)
+                suborqueue_rips = await get_suborqueue_rips(channel, True)
                 rips.extend(rips)
 
         qoc_channel_ids = [k for k, v in CHANNELS.items() if 'QOC' in v]
@@ -2078,7 +2078,7 @@ async def check_metadata(text: str, message_id: int, message_author: str, fullFe
             channel = bot.get_channel(channel_id)
             if channel:
                 qoc_rips = await get_qoc_rips(channel)
-                qoc_rips_converted = qoc_rips_to_approved_rips(qoc_rips)
+                qoc_rips_converted = qoc_rips_to_suborqueue_rips(qoc_rips)
                 rips.extend(qoc_rips_converted)
 
         title = get_raw_rip_title(text)
@@ -2210,25 +2210,25 @@ async def get_qoc_rips(channel: TextChannel) -> typing.List[QocRip]:
         RIP_CACHE_QOC[channel.id] = qoc_rips
     return qoc_rips
 
-RIP_CACHE_APPROVED = {}
+RIP_CACHE_SUBORQUEUE = {}
 
-class ApprovedRip(NamedTuple):
+class SubOrQueueRip(NamedTuple):
     text: str
     message_id: int
     channel_id: int
     message_author: str
     react_names: List[str]
 
-async def get_approved_rips(channel: TextChannel, include_threads: bool) -> typing.List[ApprovedRip]:
-    approved_rips = []
+async def get_suborqueue_rips(channel: TextChannel, include_threads: bool) -> typing.List[SubOrQueueRip]:
+    suborqueue_rips = []
     thread_dict = {}
-    if channel.id in RIP_CACHE_APPROVED:
-        approved_rips = RIP_CACHE_APPROVED[channel.id]
+    if channel.id in RIP_CACHE_SUBORQUEUE:
+        suborqueue_rips = RIP_CACHE_SUBORQUEUE[channel.id]
     else:
         async for message in channel.history(limit = None):
             if message.thread is not None and include_threads:
-                approved_rips = await get_approved_rips(message.thread, False)
-                thread_dict[message.thread.id] = approved_rips
+                suborqueue_rips = await get_suborqueue_rips(message.thread, False)
+                thread_dict[message.thread.id] = suborqueue_rips
             is_valid_message = channel is Thread or not (message.channel is Thread)
             has_quotes = '```' in message.content
             if is_valid_message and has_quotes:
@@ -2242,32 +2242,32 @@ async def get_approved_rips(channel: TextChannel, include_threads: bool) -> typi
                         elif hasattr(reaction.emoji, "name"):
                             name = reaction.emoji.name
                         react_names.append(name)
-                    approved_rip = ApprovedRip(message.content, message.id, channel.id, str(message.author), react_names)
-                    approved_rips.append(approved_rip)
+                    suborqueue_rip = SubOrQueueRip(message.content, message.id, channel.id, str(message.author), react_names)
+                    suborqueue_rips.append(suborqueue_rip)
         for k, v in thread_dict.items():
-            approved_rips.extend(v)
-        RIP_CACHE_APPROVED[channel.id] = approved_rips
-    return approved_rips
+            suborqueue_rips.extend(v)
+        RIP_CACHE_SUBORQUEUE[channel.id] = suborqueue_rips
+    return suborqueue_rips
 
-def qoc_rips_to_approved_rips(qoc_rips: List[QocRip]) -> List[ApprovedRip]:
-    approved_rips = []
+def qoc_rips_to_suborqueue_rips(qoc_rips: List[QocRip]) -> List[SubOrQueueRip]:
+    suborqueue_rips = []
     for r in qoc_rips:
         react_names = []
         for react_and_user in r.react_and_users:
             react_names.append(react_and_user.name)
-        approved_rip = ApprovedRip(r.text, r.message_id, r.channel_id, r.message_author, react_names)
-        approved_rips.append(approved_rip)
-    return approved_rips
+        suborqueue_rip = SubOrQueueRip(r.text, r.message_id, r.channel_id, r.message_author, react_names)
+        suborqueue_rips.append(suborqueue_rip)
+    return suborqueue_rips
 
-async def get_approved_or_converted_qoc_rips(channel: TextChannel, include_threads: bool) -> typing.List[ApprovedRip]:
+async def get_suborqueue_or_converted_qoc_rips(channel: TextChannel, include_threads: bool) -> typing.List[SubOrQueueRip]:
     rips = []
     if channel_is_type(channel, 'SUBS_PIN'):
         qoc_rips = await get_qoc_rips(channel)
-        qoc_rips_converted = qoc_rips_to_approved_rips(qoc_rips)
+        qoc_rips_converted = qoc_rips_to_suborqueue_rips(qoc_rips)
         rips.extend(qoc_rips_converted)
     if channel_is_types(channel, ['SUBS', 'SUBS_THREAD', 'QUEUE']):
-        approved_rips = await get_approved_rips(channel, include_threads)
-        rips.extend(approved_rips)
+        suborqueue_rips = await get_suborqueue_rips(channel, include_threads)
+        rips.extend(suborqueue_rips)
     return rips
 
 
