@@ -156,21 +156,16 @@ class ReactionCacheAction(Enum):
 
 async def update_reaction_cache(reaction_cache_action: ReactionCacheAction, message_id: int, user_id: int, partial_emoji: PartialEmoji, channel_id: int):
 
+    should_cache = False
+
     channel = bot.get_channel(channel_id)
-
-    qoc_channel_ids = [k for k, v in CHANNELS.items() if 'QOC' in v]
     queue_channel_ids = [k for k, v in CHANNELS.items() if 'QUEUE' in v]
+    qoc_channel_ids = [k for k, v in CHANNELS.items() if 'QOC' in v]
+    should_cache |= channel.id in qoc_channel_ids or channel.id in queue_channel_ids
+    if type(channel) == discord.threads.Thread:
+        should_cache |= channel.parent.id in queue_channel_ids
 
-    is_qoc_channel = channel.id in qoc_channel_ids
-    is_queue_channel = channel.id in queue_channel_ids
-    is_queue_thread = False
-    if not is_qoc_channel and not is_queue_channel:
-        async for message in channel.history(limit = None):
-            if message.thread is not None and channel_id == message.thread.id:
-                is_queue_thread = True
-                break
-
-    if not is_qoc_channel and not is_queue_channel and not is_queue_thread:
+    if not should_cache:
         return
 
     #NOTE: (Ahmayk) If the message in not in the reaction cache we need to get all reactions
