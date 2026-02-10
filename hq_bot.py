@@ -71,10 +71,7 @@ async def on_ready():
     queue_channel_ids = [k for k, v in CHANNELS.items() if 'QUEUE' in v]
     for channel_id in queue_channel_ids:
         channel = bot.get_channel(channel_id)
-        approved_rips = await get_approved_rips_from_channel(channel)
-        thread_dict = await get_approved_rips_from_threads(channel)
-        for k, v in thread_dict.items():
-            approved_rips.extend(v)
+        approved_rips = await get_approved_rips(channel)
         await write_log(f'Cached {len(approved_rips)} approved rips in {channel.jump_url}.')
 
     qoc_channel_ids = [k for k, v in CHANNELS.items() if 'QOC' in v]
@@ -1587,10 +1584,7 @@ async def fetch_command(ctx: Context, rip_filter_type: RipFilterType, reaction_t
             approved_rips = []
             channel = bot.get_channel(queue_channel_id)
             if channel:
-                approved_rips = await get_approved_rips_from_channel(channel)
-                thread_dict = await get_approved_rips_from_threads(channel)
-                for k, v in thread_dict.items():
-                    approved_rips.extend(v)
+                approved_rips = await get_approved_rips(channel)
 
             result += f'<#{queue_channel_id}>:\n'
             count += len(approved_rips)
@@ -2243,12 +2237,16 @@ class ApprovedRip(NamedTuple):
     channel_id: int
     react_names: List[str]
 
-async def get_approved_rips_from_channel(channel: TextChannel) -> typing.List[ApprovedRip]:
+async def get_approved_rips(channel: TextChannel) -> typing.List[ApprovedRip]:
     approved_rips = []
+    thread_dict = {}
     if channel.id in RIP_CACHE_APPROVED:
         approved_rips = RIP_CACHE_APPROVED[channel.id]
     else:
         async for message in channel.history(limit = None):
+            if message.thread is not None:
+                approved_rips = await get_approved_rips(message.thread)
+                thread_dict[message.thread.id] = approved_rips
             is_valid_message = channel is Thread or not (message.channel is Thread)
             has_quotes = '```' in message.content
             if is_valid_message and has_quotes:
@@ -2264,22 +2262,10 @@ async def get_approved_rips_from_channel(channel: TextChannel) -> typing.List[Ap
                         react_names.append(name)
                     approved_rip = ApprovedRip(message.content, message.id, channel.id, react_names)
                     approved_rips.append(approved_rip)
+        for k, v in thread_dict.items():
+            approved_rips.extend(v)
         RIP_CACHE_APPROVED[channel.id] = approved_rips
     return approved_rips
-
-RIP_CACHE_THREADS = {}
-
-async def get_approved_rips_from_threads(channel: TextChannel) -> dict[int, typing.List[ApprovedRip]]:
-    thread_dict = {}
-    if channel.id in RIP_CACHE_THREADS:
-        approved_rips = RIP_CACHE_THREADS[channel.id]
-    else:
-        async for message in channel.history(limit = None):
-            if message.thread is not None:
-                approved_rips = await get_approved_rips_from_channel(message.thread)
-                thread_dict[message.thread.id] = approved_rips
-        RIP_CACHE_THREADS[channel.id] = thread_dict
-    return thread_dict
 
 async def get_rips(channel: TextChannel, type: typing.Literal['pin', 'msg', 'thread']) -> dict[int, typing.List[Message]]:
     """
