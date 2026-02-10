@@ -2093,11 +2093,14 @@ async def check_metadata(text: str, message_id: int, message_author: str, fullFe
         desc = get_rip_description(text)
         for rip in rips:
             if rip.message_id != message_id:
-                if title == get_raw_rip_title(rip.text):
-                    mtMsgs.append(f"Video title already exists in <#{rip.channel_id}>: <#{rip.message_id}>.")
+                rip_title = get_raw_rip_title(rip.text)
+                if title == rip_title:
+                    link = format_message_link(channel.guild.id, channel.id, rip.message_id)
+                    mtMsgs.append(f"Video title already exists in <#{rip.channel_id}>: [{rip_title}]({link}).")
                     mtCode = 1
                 if isDupe(desc, get_rip_description(rip.text), True):
-                    mtMsgs.append(f"Main mix detected in <#{rip.channel_id}>: <#{rip.message_id}>. Add something on the author line to avoid uploading this early.")
+                    link = format_message_link(channel.guild.id, channel.id, rip.message_id)
+                    mtMsgs.append(f"Main mix detected in <#{rip.channel_id}>: [{rip_title}]({link}). Add something on the author line to avoid uploading this early.")
 
     mtMsg = '\n'.join(["- " + m for m in mtMsgs]) if len(mtMsgs) > 0 else ("- Metadata is OK." if fullFeedback else "")
 
