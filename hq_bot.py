@@ -71,14 +71,16 @@ async def on_ready():
     queue_channel_ids = [k for k, v in CHANNELS.items() if 'QUEUE' in v]
     for channel_id in queue_channel_ids:
         channel = bot.get_channel(channel_id)
-        approved_rips = await get_approved_rips(channel)
-        await write_log(f'Cached {len(approved_rips)} approved rips in {channel.jump_url}.')
+        if channel:
+            approved_rips = await get_approved_rips(channel)
+            await write_log(f'Cached {len(approved_rips)} approved rips in {channel.jump_url}.')
 
     qoc_channel_ids = [k for k, v in CHANNELS.items() if 'QOC' in v]
     for channel_id in qoc_channel_ids:
         channel = bot.get_channel(channel_id)
-        qoc_rips = await get_qoc_rips(channel)
-        await write_log(f'Cached {len(qoc_rips)} qoc rips in {channel.jump_url}.')
+        if channel:
+            qoc_rips = await get_qoc_rips(channel)
+            await write_log(f'Cached {len(qoc_rips)} qoc rips in {channel.jump_url}.')
 
     await write_log('Startup reaction caching complete.')
 
@@ -822,7 +824,7 @@ async def count_dupe(ctx: Context, msg_link: str = None, check_queues: str = Non
             return
 
         playlistId = extract_playlist_id('\n'.join(message.content.splitlines()[1:])) # ignore author line
-        description = get_rip_description(message)
+        description = get_rip_description(message.content)
         rip_title = get_rip_title(message.content)
 
         p, msg = await run_blocking(countDupe, description, YOUTUBE_CHANNEL_NAME, playlistId, YOUTUBE_API_KEY)
@@ -835,13 +837,9 @@ async def count_dupe(ctx: Context, msg_link: str = None, check_queues: str = Non
             queue_channels = [k for k, v in CHANNELS.items() if 'QUEUE' in v]
             for queue_channel_id in queue_channels:
                 queue_channel = server.get_channel(queue_channel_id)
-                if queue_channel is None: continue
-                queue_rips = await get_rips(queue_channel, 'msg')
-                q += sum([isDupe(description, get_rip_description(r)) for r in queue_rips[queue_channel_id] if r.id != message.id])
-
-                queue_thread_rips = await get_rips(queue_channel, 'thread')
-                for thread, rips in queue_thread_rips.items():
-                    q += sum([isDupe(description, get_rip_description(r)) for r in rips if r.id != message.id])
+                if queue_channel:
+                    approved_rips = await get_approved_rips(queue_channel)
+                    q += sum([isDupe(description, get_rip_description(r.text)) for r in approved_rips if r.message_id != message.id])
 
         # https://codegolf.stackexchange.com/questions/4707/outputting-ordinal-numbers-1st-2nd-3rd#answer-4712 how
         ordinal = lambda n: "%d%s" % (n,"tsnrhtdd"[(n//10%10!=1)*(n%10<4)*n%10::4])
@@ -882,18 +880,17 @@ async def scan(ctx: Context, channel_link: str = None, start_index: int = None, 
     channel = bot.get_channel(channel_id)
     if channel is None: await ctx.channel.send("Error: Invalid channel found. Contact bot developers to update list of channels.")
 
-    if channel_is_type(channel, 'SUBS'): types = ['msg']
-    elif channel_is_type(channel, 'SUBS_PIN'): types = ['pin']
-    elif channel_is_type(channel, 'SUBS_THREAD'): types = ['thread']
-    elif channel_is_type(channel, 'QUEUE'): types = ['msg', 'thread']
-
     rips = []
-    for t in types:
-        t_rips = await get_rips(channel, t)
-        for k, v in t_rips.items():
-            rips.extend(v)
+    if channel_is_type(channel, 'SUBS_PIN'):
+        qoc_rips = await get_qoc_rips(channel)
+        qoc_rips_converted = qoc_rips_to_approved_rips(qoc_rips)
+        rips.extend(qoc_rips_converted)
 
-    rips = rips.reverse()
+    if channel_is_types(channel, ['SUBS', 'SUBS_THREAD', 'QUEUE']):
+        approved_rips = await get_approved_rips(channel)
+        rips.extend(approved_rips)
+
+    rips.reverse()
     num_rips = len(rips)
 
     if start_index is not None:
@@ -925,21 +922,21 @@ async def scan(ctx: Context, channel_link: str = None, start_index: int = None, 
 
     async with ctx.channel.typing():
         index = 0
-        for message in rips:
+        for rip in rips:
             index += 1
             if (index < sInd):
                 continue
             if (index > eInd):
                 break
             
-            rip_title = get_rip_title(message.content)
+            rip_title = get_rip_title(rip.text)
 
-            mtCode, mtMsg = await check_metadata(message)
+            mtCode, mtMsg = await check_metadata(rip.text, rip.message_id, rip.message_author)
             if mtCode == -1:
                 await write_log("Warning: cannot check metadata of message\nRip: {}\n{}".format(rip_title, mtMsg))
 
             if mtCode == 1:
-                link = f"<https://discordapp.com/channels/{str(ctx.guild.id)}/{str(channel_id)}/{str(message.id)}>"
+                link = f"<https://discordapp.com/channels/{str(ctx.guild.id)}/{str(channel_id)}/{str(rip.message_id)}>"
                 await ctx.channel.send("**Rip**: **[{}]({})**\n**Verdict**: {}\n{}".format(rip_title, link, DEFAULT_METADATA, mtMsg))
         
         latest_scan_time = datetime.now(timezone.utc)
@@ -1206,7 +1203,7 @@ async def stats(ctx: Context, optional_arg = None):
             pin_list = await get_pins(channel)
 
             for pinned_message in pin_list:
-                author = get_rip_author(pinned_message)
+                author = get_rip_author(pinned_message.content, str(pinned_message.author))
                 if 'email' in author.lower():
                     email_count += 1
                 else:
@@ -1439,7 +1436,7 @@ async def react_conditional_command(ctx: Context, cmd_name: str, user_id: str, v
 
         for pinned_message in pin_list:
             rip_title = get_rip_title(pinned_message.content)
-            author = get_rip_author(pinned_message)        
+            author = get_rip_author(pinned_message.content, str(pinned_message.author))
             reaction_data = await get_reaction_datas(pinned_message.id, channel)
 
             valid = await valid_func(ID, reaction_data)
@@ -1763,12 +1760,12 @@ def get_raw_rip_author(text: str) -> str:
     return author
 
 
-def get_rip_author(message: Message) -> str:
+def get_rip_author(text: str, message_author: str) -> str:
     """
     Wrapper function to format author line.
     If the line contains "by me", append the message sender's name to the author line.
     """
-    author = get_raw_rip_author(message.content)
+    author = get_raw_rip_author(text)
     
     if len(re.findall(r'\bby\b', author.lower())) == 0:
         # If "by" is not found, notify that the "author line" might be unusual
@@ -1776,18 +1773,18 @@ def get_rip_author(message: Message) -> str:
 
     elif len(re.findall(r'\bby me\b', author.lower())) > 0: 
         # Overwrite it and do something else if the rip's author and the pinner are the same
-        cleaned_author = str(message.author).split('#')[0]
+        cleaned_author = message_author.split('#')[0]
         author += (f' (**{cleaned_author}**)')
 
     return author
 
 
-def get_rip_description(message: Message) -> str:
+def get_rip_description(text: str) -> str:
     """
     Return the description of a rip, i.e. the part inside ```
     """
     # Use a regular expression to find text between two ``` markers
-    match = re.search(r'```(.*?)```', message.content, re.DOTALL)
+    match = re.search(r'```(.*?)```', text, re.DOTALL)
 
     if match:
         # Return the extracted text, stripping any leading/trailing whitespace
@@ -1813,7 +1810,7 @@ async def get_pinned_msgs_and_react(channel: TextChannel, react_func: typing.Cal
         rip_title = get_rip_title(pinned_message.content)
 
         # Find the rip's author
-        author = get_rip_author(pinned_message)        
+        author = get_rip_author(pinned_message.content, str(pinned_message.author))
 
         # Get reactions
         if react_func is not None:
@@ -2053,64 +2050,55 @@ async def check_qoc(message: Message, fullFeedback: bool = False) -> typing.Tupl
             break
     return qcCode, qcMsg, detectedUrl
 
-
-async def check_metadata(message: Message, fullFeedback: bool = False) -> typing.Tuple[str, str]:
+##TODO: (Ahmayk) Now that checking rip metadata is fast due to being in cache, have this run on every qoc pin without the youtube check
+async def check_metadata(text: str, message_id: int, message_author: str, fullFeedback: bool = False) -> typing.Tuple[str, str]:
     """
-    Perform metadata checking on a message.
-    If message contains the phrase "unusual metadata", skip most checks
+    Perform metadata checking on rip info.
+    If info contains the phrase "unusual metadata", skip most checks
     """
-    playlistId = extract_playlist_id('\n'.join(message.content.splitlines()[1:])) # ignore author line
-    description = get_rip_description(message)
+    playlistId = extract_playlist_id('\n'.join(text.splitlines()[1:])) # ignore author line
+    description = get_rip_description(text)
     advancedCheck = _get_config('metadata')
-    skipCheck = "unusual metadata" in message.content.lower()
+    skipCheck = "unusual metadata" in text.lower()
+    mtCode = 0
+    mtMsgs = []
     if not skipCheck and len(description) > 0:
         mtCode, mtMsgs = await run_blocking(checkMetadata, description, YOUTUBE_CHANNEL_NAME, playlistId, YOUTUBE_API_KEY, advancedCheck)
-    else:
-        mtCode, mtMsgs = 0, []
+        pass
 
-    if mtCode != -1 and "[Unusual Pin Format]" in get_rip_author(message):
+    if mtCode != -1 and "[Unusual Pin Format]" in get_rip_author(text, message_author):
         mtCode = 1
         mtMsgs.append("Rip author is missing.")
 
     if mtCode != -1 and not skipCheck:
-        server = message.guild
-        title = get_raw_rip_title(message.content)
-        desc = get_rip_description(message)
+        rips = []
+        queue_channel_ids = [k for k, v in CHANNELS.items() if 'QUEUE' in v]
+        for channel_id in queue_channel_ids:
+            channel = bot.get_channel(channel_id)
+            if channel:
+                approved_rips = await get_approved_rips(channel)
+                rips.extend(rips)
 
-        def checkDupes(queue, rips):
-            msgs = []
-            if any([title == get_raw_rip_title(r.content) for r in rips if r.id != message.id]):
-                msgs.append(f"Video title already exists in <#{queue}>.")
-            elif any([isDupe(desc, get_rip_description(r), True) for r in rips if r.id != message.id]):
-                msgs.append(f"Main mix detected in <#{queue}>. Add something on the author line to avoid uploading this early.")
-            return msgs
+        qoc_channel_ids = [k for k, v in CHANNELS.items() if 'QOC' in v]
+        for channel_id in qoc_channel_ids:
+            channel = bot.get_channel(channel_id)
+            if channel:
+                qoc_rips = await get_qoc_rips(channel)
+                qoc_rips_converted = qoc_rips_to_approved_rips(qoc_rips)
+                rips.extend(qoc_rips_converted)
 
-        queue_channels = [k for k, v in CHANNELS.items() if 'QUEUE' in v]
-        for queue_channel_id in queue_channels:
-            queue_channel = server.get_channel(queue_channel_id)
-            if queue_channel is None: continue
-            queue_rips = await get_rips(queue_channel, 'msg')
-            for m in checkDupes(queue_channel_id, queue_rips[queue_channel_id]):
-                if "Video" in m: mtCode = 1
-                mtMsgs.append(m)
-
-            queue_thread_rips = await get_rips(queue_channel, 'thread')
-            for thread, rips in queue_thread_rips.items():
-                for m in checkDupes(thread, rips):
-                    if "Video" in m: mtCode = 1
-                    mtMsgs.append(m)
-        
-        qoc_channels = [k for k, v in CHANNELS.items() if 'QOC' in v]
-        for qoc_channel_id in qoc_channels:
-            qoc_channel = server.get_channel(qoc_channel_id)
-            if qoc_channel is None: continue
-            qoc_rips = await get_rips(qoc_channel, 'pin')
-            for m in checkDupes(qoc_channel_id, qoc_rips[qoc_channel_id]):
-                if "Video" in m: mtCode = 1
-                mtMsgs.append(m)
+        title = get_raw_rip_title(text)
+        desc = get_rip_description(text)
+        for rip in rips:
+            if rip.message_id != message_id:
+                if title == get_raw_rip_title(rip.text):
+                    mtMsgs.append(f"Video title already exists in <#{rip.channel_id}>: <#{rip.message_id}>.")
+                    mtCode = 1
+                if isDupe(desc, get_rip_description(rip.text), True):
+                    mtMsgs.append(f"Main mix detected in <#{rip.channel_id}>: <#{rip.message_id}>. Add something on the author line to avoid uploading this early.")
 
     mtMsg = '\n'.join(["- " + m for m in mtMsgs]) if len(mtMsgs) > 0 else ("- Metadata is OK." if fullFeedback else "")
-    
+
     return mtCode, mtMsg
 
 
@@ -2134,7 +2122,7 @@ async def check_qoc_and_metadata(message: Message, fullFeedback: bool = False) -
         msg += qcMsg + "\n"
 
     # Metadata
-    mtCode, mtMsg = await check_metadata(message, fullFeedback)
+    mtCode, mtMsg = await check_metadata(message.content, message.id, str(message.author), fullFeedback)
     if mtCode == -1:
         await write_log("Warning: cannot check metadata of message\nRip: {}\n{}".format(rip_title, mtMsg))
     elif mtCode == 1:
@@ -2184,13 +2172,16 @@ async def get_pins(channel: TextChannel) -> typing.List[Message]:
 
 RIP_CACHE_QOC = {}
 
-class ReactsAndUsers(NamedTuple):
+class ReactAndUser(NamedTuple):
     name: str
     user_id: int
 
 class QocRip(NamedTuple):
     text: str
-    reacts_and_users: List[ReactsAndUsers]
+    message_id: int
+    channel_id: int
+    message_author: str
+    react_and_users: List[ReactAndUser]
 
 async def get_qoc_rips(channel: TextChannel) -> typing.List[QocRip]:
     qoc_rips = []
@@ -2204,7 +2195,7 @@ async def get_qoc_rips(channel: TextChannel) -> typing.List[QocRip]:
                 # NOTE: (Ahmayk) channel.pins does not return reaction data,
                 # so we have to fetch it manually. This is slow! But neccessary.
                 message = await channel.fetch_message(message.id)
-                reacts_and_users = []
+                react_and_users = []
                 for reaction in message.reactions:
                     name = ""
                     if isinstance(reaction.emoji, str):
@@ -2215,8 +2206,9 @@ async def get_qoc_rips(channel: TextChannel) -> typing.List[QocRip]:
                     # But is also neccessary
                     user_ids = [user.id async for user in reaction.users()]
                     for user_id in user_ids:
-                        reacts_and_users.append(ReactsAndUsers(name, user_id))
-                qoc_rips.append(QocRip(message.content, reacts_and_users))
+                        react_and_users.append(ReactAndUser(name, user_id))
+                qoc_rip = QocRip(message.content, message.id, channel.id, str(message.author), react_and_users)
+                qoc_rips.append(qoc_rip)
             count += 1
         RIP_CACHE_QOC[channel.id] = qoc_rips
     return qoc_rips
@@ -2227,6 +2219,7 @@ class ApprovedRip(NamedTuple):
     text: str
     message_id: int
     channel_id: int
+    message_author: str
     react_names: List[str]
 
 async def get_approved_rips(channel: TextChannel) -> typing.List[ApprovedRip]:
@@ -2252,11 +2245,21 @@ async def get_approved_rips(channel: TextChannel) -> typing.List[ApprovedRip]:
                         elif hasattr(reaction.emoji, "name"):
                             name = reaction.emoji.name
                         react_names.append(name)
-                    approved_rip = ApprovedRip(message.content, message.id, channel.id, react_names)
+                    approved_rip = ApprovedRip(message.content, message.id, channel.id, str(message.author), react_names)
                     approved_rips.append(approved_rip)
         for k, v in thread_dict.items():
             approved_rips.extend(v)
         RIP_CACHE_APPROVED[channel.id] = approved_rips
+    return approved_rips
+
+def qoc_rips_to_approved_rips(qoc_rips: List[QocRip]) -> List[ApprovedRip]:
+    approved_rips = []
+    for r in qoc_rips:
+        react_names = []
+        for react_and_user in r.react_and_users:
+            react_names.append(react_and_user.name)
+        approved_rip = ApprovedRip(r.text, r.message_id, r.channel_id, r.message_author, react_names)
+        approved_rips.append(approved_rip)
     return approved_rips
 
 async def get_rips(channel: TextChannel, type: typing.Literal['pin', 'msg', 'thread']) -> dict[int, typing.List[Message]]:
