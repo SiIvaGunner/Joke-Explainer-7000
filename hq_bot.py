@@ -1423,38 +1423,6 @@ def make_markdown(rip_info: dict, display_reacts: bool) -> str:
     return result
 
 
-async def react_command(ctx: Context, cmd_name: str, reaction_type: ReactionType, not_found_message: str, optional_time = None): # I've been meaning to simplify this for AGES (7/7/24)
-    """
-    Unified command to roundup messages with specific reactions in QoC channels.
-    """
-    if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
-    heard_command(cmd_name, ctx.message.author.name)
-
-    time, msg = parse_optional_time(ctx.channel, optional_time)
-    if msg is not None: await ctx.channel.send(msg)
-
-    channel = await get_roundup_channel(ctx)
-    if channel is None: return
-
-    async with ctx.channel.typing():
-        async def filter_reacts(c: TextChannel, m: Message):
-            if await message_has_reaction(reaction_type, m):
-                return await get_reactions(c, m)
-            # if not, return an indication string to skip from markdown
-            return "FILTERED", ""
-
-        filtered_pins = await get_pinned_msgs_and_react(channel, filter_reacts)
-        
-        result = ""
-        for rip_id, rip_info in filtered_pins.items():
-            if rip_info["Reacts"] != "FILTERED":
-                result += make_markdown(rip_info, True)
-
-        if result == "":
-            await ctx.channel.send(not_found_message)
-        else:
-            await send_embed(ctx.channel, result, time)
-
 async def get_reaction_datas(message_id: int, channel: TextChannel) -> typing.List[ReactionData]:
     """
     Gets reaction data from a message. If not in cache, fetches and caches it.
@@ -1477,84 +1445,6 @@ async def get_reaction_datas(message_id: int, channel: TextChannel) -> typing.Li
                 reaction_data.append(react_data)
         REACTION_CACHE.update({message_id: reaction_data})
     return reaction_data
-
-async def cache_reactions_bulk(channel_id: int, type: typing.Literal['pin', 'msg', 'thread']):
-    rip_count = 0
-    reaction_count = 0
-    channel = bot.get_channel(channel_id)
-    if channel:
-        if type == "thread":
-            thread_rips = await get_rips(channel, 'thread')
-            for thread, rips in thread_rips.items():
-                for rip in rips:
-                    reaction_datas = await get_reaction_datas(rip.id, channel)
-                    rip_count += 1
-                    reaction_count += len(reaction_datas)
-        elif type == "pin" or type == "msg":
-            rips = await get_rips(channel, type)
-            for rip in rips[channel_id]:
-                reaction_datas = await get_reaction_datas(rip.id, channel)
-                rip_count += 1
-                reaction_count += len(reaction_datas)
-    await write_log(f'Cached {reaction_count} reactions from {rip_count} messages in {channel.jump_url}.')
-
-async def react_conditional_command(ctx: Context, cmd_name: str, user_id: str, valid_func: typing.Callable, conditional_message: str, optional_time = None):
-    """
-    Unified command to roundup messages with user-dependent reactions in QoC channels.
-    """
-    if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
-    heard_command(cmd_name, ctx.message.author.name)
-
-    match = re.search(r'\d+', user_id)
-    if match:
-        ID = int(match.group(0))
-        search_author = ctx.guild.get_member(ID)
-        if search_author:
-            await ctx.channel.send(f"Searching for rips {conditional_message} by {search_author.name}")
-    else:
-        ID = ctx.author.id
-    
-    time, msg = parse_optional_time(ctx.channel, optional_time)
-    if msg is not None: await ctx.channel.send(msg)
-
-    channel = await get_roundup_channel(ctx)
-    if channel is None: return
-
-    async with ctx.channel.typing():
-        pin_list = await get_pins(channel)
-
-        dict_index = 1
-        pins_in_message = {}  # make a dict for everything
-
-        for pinned_message in pin_list:
-            rip_title = get_rip_title(pinned_message.content)
-            author = get_rip_author(pinned_message.content, str(pinned_message.author))
-            reaction_data = await get_reaction_datas(pinned_message.id, channel)
-
-            valid = await valid_func(ID, reaction_data)
-            if not valid:
-                continue
-            
-            reacts, indicator = await get_reactions(channel, pinned_message)
-            author = author.replace('*', '').replace('_', '')
-            pins_in_message[dict_index] = {
-                'Title': rip_title,
-                'Author': author,
-                'Reacts': reacts,
-                'PinMiser': pinned_message.author.name,  # im mister rip christmas, im mister qoc
-                'Indicator': indicator,
-                'Link': format_message_link(channel.guild.id, channel.id, pinned_message.id)
-            }
-            dict_index += 1
-
-        result = ""
-        for rip_id, rip_info in pins_in_message.items():
-            result += make_markdown(rip_info, True) # a match!
-        if result == "":
-            await ctx.channel.send('No rips found.')
-        else:
-            await send_embed(ctx.channel, result, time)
-
 
 NO_RIP_DESCRIPTOR = {
     'search': 'pinned rips containing indicated text in title',
