@@ -250,6 +250,7 @@ class RoundupFilterType(Enum):
     SEARCH = auto()
     EVENTS = auto()
     HASREACT = auto()
+    OVERDUE = auto()
 
 class RoundupDesc(NamedTuple):
     roundup_filter_type: RoundupFilterType = None
@@ -273,9 +274,10 @@ async def send_roundup(roundup_desc: RoundupDesc, optional_time: float, ctx: Con
 
         qoc_rips = await get_qoc_rips(channel)
 
-        ##NOTE: (Ahmayk) pulling this out of loop cause calling to disk is slow
         is_spec_overdue_days = _get_config('spec_overdue_days')
         is_overdue_days = _get_config('overdue_days')
+        search_keys = roundup_desc.search_key.split('|')
+        emote_names = [e.name for e in channel.guild.emojis]
 
         ##TODO: (Ahmayk) fuzzy username input (ie typing "ahmayk" and matching to their username or display name)
         user_id = ctx.author.id
@@ -287,14 +289,61 @@ async def send_roundup(roundup_desc: RoundupDesc, optional_time: float, ctx: Con
                 if search_author:
                     await ctx.channel.send(f"Searching for rips {roundup_desc.conditional_string} by {search_author.name}")
 
-        search_keys = roundup_desc.search_key.split('|')
-
         result = ""
 
         for qoc_rip in qoc_rips:
 
+            reacts = ""
+            num_checks = 0
+            num_rejects = 0
+            num_goldchecks = 0
+            specs_required = 1
+            checks_required = 3
+            specs_needed = False
+            fix_or_alert = False
+
+            for react_and_user in qoc_rip.react_and_users:
+                if react_is(ReactionType.GOLDCHECK, react_and_user.name):
+                    num_goldchecks += 1
+                elif react_is(ReactionType.CHECKREQ, react_and_user.name):
+                    try:
+                        checks_required = int(react_and_user.name.split("check")[0])
+                    except ValueError:
+                        print("Error parsing checkreq react: {}".format(react_and_user.name))
+                elif react_is(ReactionType.CHECK, react_and_user.name):
+                    num_checks += 1
+                elif react_is(ReactionType.REJECT, react_and_user.name):
+                    num_rejects += 1
+                elif react_is_one([ReactionType.FIX, ReactionType.ALERT], react_and_user.name):
+                    fix_or_alert = True
+                elif react_is(ReactionType.STOP, react_and_user.name):
+                    specs_needed = True
+                elif react_is(ReactionType.NUMBER, react_and_user.name):
+                    specs_required = KEYCAP_EMOJIS[react_and_user.name]
+
+                if react_and_user.name in emote_names:
+                    for e in channel.guild.emojis:
+                        if e.name == react_and_user.name:
+                            reacts += f"{e} "
+                            break
+                else:
+                    reacts += f"{react_and_user.name} "
+
+            indicator = ""
+            check_passed = (num_checks - num_rejects >= checks_required) and not fix_or_alert
+            specs_passed = (not specs_needed or num_goldchecks >= specs_required)
+            is_spec_overdue = (datetime.now(timezone.utc) - qoc_rip.created_at) > timedelta(days=is_spec_overdue_days)
+            is_overdue =      (datetime.now(timezone.utc) - qoc_rip.created_at) > timedelta(days=is_overdue_days)
+            if check_passed:
+                indicator = APPROVED_INDICATOR if specs_passed else AWAITING_SPECIALIST_INDICATOR
+            elif specs_needed and not specs_passed and is_spec_overdue:
+                indicator = SPECS_OVERDUE_INDICATOR
+            elif is_overdue:
+                indicator = OVERDUE_INDICATOR
+
             rip_title = get_rip_title(qoc_rip.text)
             author = get_rip_author(qoc_rip.text, qoc_rip.message_author)
+            author = author.replace('*', '').replace('_', '')
 
             is_valid = True
             match (roundup_desc.roundup_filter_type):
@@ -318,61 +367,11 @@ async def send_roundup(roundup_desc: RoundupDesc, optional_time: float, ctx: Con
                             break
                 case RoundupFilterType.HASREACT:
                     is_valid = qoc_rip_has_reaction(roundup_desc.reaction_type, qoc_rip)
+                case RoundupFilterType.OVERDUE:
+                    is_valid = is_overdue
 
             if is_valid:
-                author = author.replace('*', '').replace('_', '')
-                emote_names = [e.name for e in channel.guild.emojis]
-
-                reacts = ""
-                num_checks = 0
-                num_rejects = 0
-                num_goldchecks = 0
-                specs_required = 1
-                checks_required = 3
-                specs_needed = False
-                fix_or_alert = False
-
-                for react_and_user in qoc_rip.react_and_users:
-                    if react_is(ReactionType.GOLDCHECK, react_and_user.name):
-                        num_goldchecks += 1
-                    elif react_is(ReactionType.CHECKREQ, react_and_user.name):
-                        try:
-                            checks_required = int(react_and_user.name.split("check")[0])
-                        except ValueError:
-                            print("Error parsing checkreq react: {}".format(react_and_user.name))
-                    elif react_is(ReactionType.CHECK, react_and_user.name):
-                        num_checks += 1
-                    elif react_is(ReactionType.REJECT, react_and_user.name):
-                        num_rejects += 1
-                    elif react_is_one([ReactionType.FIX, ReactionType.ALERT], react_and_user.name):
-                        fix_or_alert = True
-                    elif react_is(ReactionType.STOP, react_and_user.name):
-                        specs_needed = True
-                    elif react_is(ReactionType.NUMBER, react_and_user.name):
-                        specs_required = KEYCAP_EMOJIS[react_and_user.name]
-
-                    if react_and_user.name in emote_names:
-                        for e in channel.guild.emojis:
-                            if e.name == react_and_user.name:
-                                reacts += f"{e} "
-                                break
-                    else:
-                        reacts += f"{react_and_user.name} "
-
-                indicator = ""
-                check_passed = (num_checks - num_rejects >= checks_required) and not fix_or_alert
-                specs_passed = (not specs_needed or num_goldchecks >= specs_required)
-                is_spec_overdue = (datetime.now(timezone.utc) - qoc_rip.created_at) > timedelta(days=is_spec_overdue_days)
-                is_overdue =      (datetime.now(timezone.utc) - qoc_rip.created_at) > timedelta(days=is_overdue_days)
-                if check_passed:
-                    indicator = APPROVED_INDICATOR if specs_passed else AWAITING_SPECIALIST_INDICATOR
-                elif specs_needed and not specs_passed and is_spec_overdue:
-                    indicator = SPECS_OVERDUE_INDICATOR
-                elif is_overdue:
-                    indicator = OVERDUE_INDICATOR
-
                 link = format_message_link(channel.guild.id, channel.id, qoc_rip.message_id)
-
                 base_message = f'**[{rip_title}]({link})**\n{author}'
                 if len(indicator) > 0:
                     base_message = f'{indicator} **[{rip_title}]({link})** {indicator}\n{author}'
@@ -567,30 +566,8 @@ async def overdue(ctx: Context, optional_time = None):
     """
     Retrieve all pinned messages (except the first one) that are overdue.
     """
-    if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
-    heard_command("overdue", ctx.message.author.name)
-
-    channel = await get_roundup_channel(ctx)
-    if channel is None: return
-
-    time, msg = parse_optional_time(ctx.channel, optional_time)
-    if msg is not None: await ctx.channel.send(msg)
-
-    result = ""
-
-    async with ctx.channel.typing():
-        all_pins = await process_pins(channel, True)
-        result = ""
-
-        for rip_id, rip_info in all_pins.items():
-            if rip_info["Indicator"] == OVERDUE_INDICATOR:
-                result += make_markdown(rip_info, True)
-        
-        if result != "":
-            await send_embed(ctx.channel, result, time)
-        else:
-            await ctx.channel.send("No overdue rips.")
-
+    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.OVERDUE, not_found_message="No overdue rips.")
+    await send_roundup(roundup_desc, optional_time, ctx)
 
 # ============ Pin count commands ============== #
 
