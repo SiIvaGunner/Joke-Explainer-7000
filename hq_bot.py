@@ -2121,39 +2121,6 @@ async def get_fast_converted_qoc_rips(channel: TextChannel) -> typing.List[SubOr
             qoc_fast_converted_rips = qoc_fast_converted_rips[:-1]
     return qoc_fast_converted_rips
 
-async def get_rips(channel: TextChannel, type: typing.Literal['pin', 'msg', 'thread']) -> dict[int, typing.List[Message]]:
-    """
-    Retrieve all rips in a channel, depending on the type: rips are in pins, messages or threads.
-    `type` argument specifies what type of messages to retrieve:
-    - 'pin': Pinned messages. Assumes first pinned message is not a rip for simplicity.
-    - 'msg': Messages in channel, ignoring threads. Only count messages with ```.
-    - 'thread': Messages in threads.
-
-    Return value is a dictionary of channel IDs as key and list of messages as values.
-
-    Notes:
-    - `msg` might take a long time for big channels. Limit this to submissions or queue channels.
-    """
-    rips = {
-        channel.id: []
-    }
-    if type == 'pin':
-        rips[channel.id] = await get_pins(channel)
-    elif type == 'msg':
-        async for message in channel.history(limit = None):
-            if channel is Thread or not (message.channel is Thread):
-                if '```' in message.content and len(extract_rip_link(message.content)) > 0:
-                    rips[channel.id].append(message)
-    elif type == 'thread':
-        rips = {}
-        async for message in channel.history(limit = None):
-            if message.thread is not None:
-                thread_rips = await get_rips(message.thread, 'msg')
-                rips[message.thread.id] = thread_rips[message.thread.id]
-    
-    return rips
-
-
 def parse_channel_link(link: str | None, types: typing.List[str]) -> typing.Tuple[int, str]:
     """
     Parse the channel link and return the channel ID if it matches the specified types.
