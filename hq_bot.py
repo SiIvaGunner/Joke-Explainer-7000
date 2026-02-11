@@ -2051,28 +2051,27 @@ async def get_qoc_rips(channel: TextChannel) -> typing.List[QocRip]:
     if channel.id in RIP_CACHE_QOC:
         qoc_rips = RIP_CACHE_QOC[channel.id]
     else:
-        skip_first = _get_config('qoc_contains_pinned_rule')
         count = 0
         async for message in channel.pins(limit=None):
-            if not (skip_first and count == 0):
-                # NOTE: (Ahmayk) channel.pins does not return reaction data,
-                # so we have to fetch it manually. This is slow! But neccessary.
-                message = await channel.fetch_message(message.id)
-                react_and_users = []
-                for reaction in message.reactions:
-                    name = ""
-                    if isinstance(reaction.emoji, str):
-                        name = reaction.emoji
-                    elif hasattr(reaction.emoji, "name"):
-                        name = reaction.emoji.name
-                    # NOTE: (Ahmayk) this is slow too! We have to do an api call for each user.
-                    # But is also neccessary
-                    user_ids = [user.id async for user in reaction.users()]
-                    for user_id in user_ids:
-                        react_and_users.append(ReactAndUser(name, user_id))
-                qoc_rip = QocRip(message.content, message.id, channel.id, message.author.id, str(message.author), react_and_users, message.created_at)
-                qoc_rips.append(qoc_rip)
-            count += 1
+            # NOTE: (Ahmayk) channel.pins does not return reaction data,
+            # so we have to fetch it manually. This is slow! But neccessary.
+            message = await channel.fetch_message(message.id)
+            react_and_users = []
+            for reaction in message.reactions:
+                name = ""
+                if isinstance(reaction.emoji, str):
+                    name = reaction.emoji
+                elif hasattr(reaction.emoji, "name"):
+                    name = reaction.emoji.name
+                # NOTE: (Ahmayk) this is slow too! We have to do an api call for each user.
+                # But is also neccessary
+                user_ids = [user.id async for user in reaction.users()]
+                for user_id in user_ids:
+                    react_and_users.append(ReactAndUser(name, user_id))
+            qoc_rip = QocRip(message.content, message.id, channel.id, message.author.id, str(message.author), react_and_users, message.created_at)
+            qoc_rips.append(qoc_rip)
+        if _get_config('qoc_contains_pinned_rule'):
+            qoc_rips = qoc_rips[:-1]
         RIP_CACHE_QOC[channel.id] = qoc_rips
     return qoc_rips
 
@@ -2127,10 +2126,10 @@ async def get_fast_converted_qoc_rips(channel: TextChannel) -> typing.List[SubOr
         skip_first = _get_config('qoc_contains_pinned_rule')
         count = 0
         async for message in channel.pins(limit=None):
-            if not (skip_first and count == 0):
-                qoc_rip = SubOrQueueRip(message.content, message.id, channel.id, message.author.id, str(message.author), [])
-                qoc_fast_converted_rips.append(qoc_rip)
-            count += 1
+            qoc_rip = SubOrQueueRip(message.content, message.id, channel.id, message.author.id, str(message.author), [])
+            qoc_fast_converted_rips.append(qoc_rip)
+        if _get_config('qoc_contains_pinned_rule'):
+            qoc_fast_converted_rips = qoc_fast_converted_rips[:-1]
     return qoc_fast_converted_rips
 
 async def get_rips(channel: TextChannel, type: typing.Literal['pin', 'msg', 'thread']) -> dict[int, typing.List[Message]]:
