@@ -571,19 +571,6 @@ async def overdue(ctx: Context, optional_time = None):
 
 # ============ Pin count commands ============== #
 
-async def count_pinned_qoc_messages(channel):
-    pincount = 0
-    if channel.id in RIP_CACHE_QOC:
-        pincount = len(RIP_CACHE_QOC[channel.id])
-    else:
-        async for message in channel.pins(limit=None):
-            pincount += 1
-
-    if _get_config('qoc_contains_pinned_rule'):
-        pincount -= 1
-
-    return pincount
-
 @bot.command(name='count', brief="counts all pinned rips")
 async def count(ctx: Context):
     """
@@ -601,7 +588,8 @@ async def count(ctx: Context):
 
     async with ctx.channel.typing():
 
-        pincount = await count_pinned_qoc_messages(channel)
+        rips = await get_fast_converted_qoc_rips(channel)
+        pincount = len(rips)
 
         if (pincount < 1):
             result = "`* Determination.`"
@@ -628,8 +616,8 @@ async def limitcheck(ctx: Context):
         proxy = ""
 
     async with ctx.channel.typing():
-        pincount = await count_pinned_qoc_messages(channel)
-        result = f"You can pin {_get_config('soft_pin_limit') - pincount} more rips until I start complaining about pin space."
+        rips = await get_fast_converted_qoc_rips(channel)
+        result = f"You can pin {_get_config('soft_pin_limit') - len(rips)} more rips until I start complaining about pin space."
 
         result += proxy
         await ctx.channel.send(result)
@@ -972,7 +960,15 @@ async def scan(ctx: Context, channel_link: str = None, start_index: int = None, 
     if channel is None: await ctx.channel.send("Error: Invalid channel found. Contact bot developers to update list of channels.")
 
     include_threads = not channel_is_types(channel, ['SUBS', 'SUBS_PIN'])
-    rips = await get_suborqueue_or_converted_qoc_rips(channel, include_threads)
+
+    rips = []
+    if channel_is_type(channel, 'SUBS_PIN'):
+        rips = await get_fast_converted_qoc_rips(channel)
+    elif channel_is_types(channel, ['SUBS']):
+        rips = await get_suborqueue_rips(channel, False)
+    elif channel_is_types(channel, ['QUEUE', 'SUBS_THREAD']):
+        rips = await get_suborqueue_rips(channel, True)
+
     rips.reverse()
     num_rips = len(rips)
 
@@ -1238,22 +1234,20 @@ async def count_subs(ctx: Context, sub_channel_link: str = None):
     if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
     heard_command("count_subs", ctx.message.author.name)
 
-    sub_channel, msg = parse_channel_link(sub_channel_link, ['SUBS', 'SUBS_PIN', 'SUBS_THREAD'])
+    sub_channel_id, msg = parse_channel_link(sub_channel_link, ['SUBS', 'SUBS_PIN', 'SUBS_THREAD'])
     if len(msg) > 0:
         await ctx.channel.send(msg)
         if sub_channel == -1: return
 
     async with ctx.channel.typing():
-        server = ctx.guild
-        channel = server.get_channel(sub_channel)
+        channel = bot.get_channel(sub_channel_id)
 
-        if channel_is_type(channel, 'SUBS'): t = 'msg'
-        elif channel_is_type(channel, 'SUBS_PIN'): t = 'pin'
-        elif channel_is_type(channel, 'SUBS_THREAD'): t = 'thread'
-
-        count = await count_rips(channel, t)
-        if t == 'thread':
-            count = sum(count.values())
+        rips = 0
+        if channel_is_types(channel, ['QOC', 'SUBS_PIN']):
+            rips = await get_fast_converted_qoc_rips(channel)
+        else:
+            rips = await get_suborqueue_rips(channel, True)
+        count = len(rips)
 
         if (count < 1):
             result = "```ansi\n\u001b[0;31m* Determination.\u001b[0;0m```"
@@ -1261,6 +1255,39 @@ async def count_subs(ctx: Context, sub_channel_link: str = None):
             result = f"```ansi\n\u001b[0;31m* {count} left.\u001b[0;0m```"
 
         await ctx.channel.send(result)
+
+async def get_suborqueue_rip_stats_string(channel_id) -> str:
+    ret = ""
+    channel = bot.get_channel(channel_id)
+    if channel:
+
+        if channel_is_type(channel, 'SUBS_PIN'):
+            rips = await get_fast_converted_qoc_rips(channel)
+            ret += f"- <#{channel_id}>: **{len(rips)}** rips\n"
+
+        elif channel_is_type(channel, 'SUBS'):
+            rips = await get_suborqueue_rips(channel, False)
+            ret += f"- <#{channel_id}>: **{len(rips)}** rips\n"
+
+        elif channel_is_types(channel, ['QUEUE', 'SUBS_THREAD']):
+            rips = await get_suborqueue_rips(channel, True)
+
+            thread_count_dict = {}
+            for rip in rips:
+                if rip.channel_id:
+                    if rip.channel_id not in thread_dict:
+                        thread_count_dict[rip.channel_id] = 0
+                    thread_count_dict[rip.channel_id] += 1
+
+            if len(rips) > 0 and (channel_is_type(channel, 'SUBS_THREAD') or thread_count_dict > 1):
+                ret += f"- <#{channel_id}>:\n"
+                for channel_id, count in thread_count_dict:
+                    if count > 0:
+                        ret += f"  - <#{channel_id}>: **{count}** rips\n"
+            else:
+                ret += f"- <#{channel_id}>: **{len(rips)}** rips\n"
+
+    return ret
 
 @bot.command(name='stats', brief='display remaining number of rips across channels')
 async def stats(ctx: Context, optional_arg = None):
@@ -1279,52 +1306,27 @@ async def stats(ctx: Context, optional_arg = None):
         for channel_id in qoc_channels:
             team_count = 0
             email_count = 0
-
             channel = server.get_channel(channel_id)
-            if channel is None: continue
-            pin_list = await get_pins(channel)
-
-            for pinned_message in pin_list:
-                author = get_rip_author(pinned_message.content, str(pinned_message.author))
-                if 'email' in author.lower():
-                    email_count += 1
-                else:
-                    team_count += 1
-            
-            ret += f"- <#{channel_id}>: **{team_count + email_count}** rips\n  - {team_count} team subs\n  - {email_count} email subs\n"
+            if channel:
+                rips = await get_fast_converted_qoc_rips(channel)
+                for rip in rips:
+                    author = get_rip_author(rip.text, rip.message_author_name)
+                    if 'email' in author.lower():
+                        email_count += 1
+                    else:
+                        team_count += 1
+                ret += f"- <#{channel_id}>: **{team_count + email_count}** rips\n  - {team_count} team subs\n  - {email_count} email subs\n"
 
         ret += "**Submission channels**\n"
         sub_channels = [k for k, v in CHANNELS.items() if any(t in v for t in ['SUBS', 'SUBS_PIN', 'SUBS_THREAD'])]
         for channel_id in sub_channels:
-            channel = server.get_channel(channel_id)
-            if channel is None: continue
-
-            if channel_is_type(channel, 'SUBS'): t = 'msg'
-            elif channel_is_type(channel, 'SUBS_PIN'): t = 'pin'
-            elif channel_is_type(channel, 'SUBS_THREAD'): t = 'thread'
-
-            sub_count = await count_rips(channel, t)
-            if t =='thread':
-                ret += f"- <#{channel_id}>:\n"
-                for thread, count in sub_count.items():
-                    if count > 0:
-                        ret += f"  - <#{thread}>: **{count}** rips\n"
-            else:
-                ret += f"- <#{channel_id}>: **{sub_count}** rips\n"
+            ret += await get_suborqueue_rip_stats_string(channel_id)
 
         if optional_arg is not None:
             ret += "**Queues**\n"
             queue_channels = [k for k, v in CHANNELS.items() if 'QUEUE' in v]
             for channel_id in queue_channels:
-                channel = server.get_channel(channel_id)
-                if channel is None: continue
-                rip_count = await count_rips(channel, 'msg')
-                ret += f"- <#{channel_id}>: **{rip_count}** rips\n"
-
-                rip_thread_counts = await count_rips(channel, 'thread')
-                for thread, count in rip_thread_counts.items():
-                    if count > 0:
-                        ret += f"  - <#{thread}>: **{count}** rips\n"
+                ret += await get_suborqueue_rip_stats_string(channel_id)
 
         long_message = split_long_message(ret, _get_config('character_limit'))
         for line in long_message:
@@ -1467,7 +1469,12 @@ async def filter_sub_command(ctx: Context, cmd_name: str, filter_sub_func: typin
             if e.name.lower() == "qoc":
                 qoc_emote = e
 
-        rips = await get_suborqueue_or_converted_qoc_rips(channel, False)
+        ##TODO: (Ahmayk) this broke
+        rips = []
+        if channel_is_type(channel, 'SUBS_PIN'):
+            rips = await get_qoc_rips(channel)
+        elif channel_is_types(channel, ['SUBS', 'SUBS_THREAD']):
+            rips = await get_suborqueue_rips(channel, True)
 
         result = ""
         for rip in rips:
@@ -1950,9 +1957,8 @@ async def check_metadata(text: str, message_id: int, message_author_name: str, f
         for channel_id in qoc_channel_ids:
             channel = bot.get_channel(channel_id)
             if channel:
-                qoc_rips = await get_qoc_rips(channel)
-                qoc_rips_converted = qoc_rips_to_suborqueue_rips(qoc_rips)
-                rips.extend(qoc_rips_converted)
+                fast_qoc_rips = await get_fast_converted_qoc_rips(channel)
+                rips.extend(fast_qoc_rips)
 
         title = get_raw_rip_title(text)
         desc = get_rip_description(text)
@@ -2015,21 +2021,6 @@ async def check_qoc_and_metadata(message: Message, fullFeedback: bool = False) -
             pass
 
     return verdict, msg
-
-
-async def count_rips(channel: TextChannel, type: typing.Literal['pin', 'msg', 'thread']) -> int | dict:
-    """
-    Returns the number of rips in a channel.
-    `type` argument specifies what type of messages to retrieve (see get_rips).
-    """
-    rips = await get_rips(channel, type)
-    if len(rips) == 1:
-        return len(rips[channel.id])
-    else:
-        count = {}
-        for k, v in rips.items():
-            count[k] = len(v)
-        return count
 
 
 async def get_pins(channel: TextChannel) -> typing.List[Message]:
@@ -2125,27 +2116,22 @@ async def get_suborqueue_rips(channel: TextChannel, include_threads: bool) -> ty
         RIP_CACHE_SUBORQUEUE[channel.id] = suborqueue_rips
     return suborqueue_rips
 
-def qoc_rips_to_suborqueue_rips(qoc_rips: List[QocRip]) -> List[SubOrQueueRip]:
-    suborqueue_rips = []
-    for r in qoc_rips:
-        react_names = []
-        for react_and_user in r.react_and_users:
-            react_names.append(react_and_user.name)
-        suborqueue_rip = SubOrQueueRip(r.text, r.message_id, r.channel_id, r.message_author_name, react_names)
-        suborqueue_rips.append(suborqueue_rip)
-    return suborqueue_rips
-
-async def get_suborqueue_or_converted_qoc_rips(channel: TextChannel, include_threads: bool) -> typing.List[SubOrQueueRip]:
-    rips = []
-    if channel_is_type(channel, 'SUBS_PIN'):
-        qoc_rips = await get_qoc_rips(channel)
-        qoc_rips_converted = qoc_rips_to_suborqueue_rips(qoc_rips)
-        rips.extend(qoc_rips_converted)
-    if channel_is_types(channel, ['SUBS', 'SUBS_THREAD', 'QUEUE']):
-        suborqueue_rips = await get_suborqueue_rips(channel, include_threads)
-        rips.extend(suborqueue_rips)
-    return rips
-
+async def get_fast_converted_qoc_rips(channel: TextChannel) -> typing.List[SubOrQueueRip]:
+    qoc_fast_converted_rips = []
+    if channel.id in RIP_CACHE_QOC:
+        qoc_rips = RIP_CACHE_QOC[channel.id]
+        for r in qoc_rips:
+            suborqueue_rip = SubOrQueueRip(r.text, r.message_id, r.channel_id, r.message_author_id, r.message_author_name, [])
+            qoc_fast_converted_rips.append(suborqueue_rip)
+    else:
+        skip_first = _get_config('qoc_contains_pinned_rule')
+        count = 0
+        async for message in channel.pins(limit=None):
+            if not (skip_first and count == 0):
+                qoc_rip = SubOrQueueRip(message.content, message.id, channel.id, message.author.id, str(message.author), [])
+                qoc_fast_converted_rips.append(qoc_rip)
+            count += 1
+    return qoc_fast_converted_rips
 
 async def get_rips(channel: TextChannel, type: typing.Literal['pin', 'msg', 'thread']) -> dict[int, typing.List[Message]]:
     """
