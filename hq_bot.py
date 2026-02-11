@@ -248,6 +248,7 @@ class RoundupFilterType(Enum):
     MYFIXES = auto()
     MYFRESH = auto()
     SEARCH = auto()
+    EVENTS = auto()
 
 class RoundupDesc(NamedTuple):
     roundup_filter_type: RoundupFilterType = None
@@ -290,6 +291,7 @@ async def send_roundup(roundup_desc: RoundupDesc, optional_time: float, ctx: Con
         for qoc_rip in qoc_rips:
 
             rip_title = get_rip_title(qoc_rip.text)
+            author = get_rip_author(qoc_rip.text, qoc_rip.message_author)
 
             is_valid = True
             match (roundup_desc.roundup_filter_type):
@@ -305,9 +307,14 @@ async def send_roundup(roundup_desc: RoundupDesc, optional_time: float, ctx: Con
                         if line_contains_substring(rip_title, key):
                             is_valid = True
                             break
+                case RoundupFilterType.EVENTS:
+                    is_valid = False
+                    for key in search_keys:
+                        if line_contains_substring(author, key):
+                            is_valid = True
+                            break
 
             if is_valid:
-                author = get_rip_author(qoc_rip.text, qoc_rip.message_author)
                 author = author.replace('*', '').replace('_', '')
                 emote_names = [e.name for e in channel.guild.emojis]
 
@@ -438,11 +445,9 @@ async def events(ctx: Context, event: str = None, optional_time = None):
     if channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']) and event is None:
         await ctx.channel.send("Error: Please indicate the event name. Rips should be tagged with this name.")
         return
-    
-    event_keys = event.split('|')
-    await filter_command(ctx, 'events', 
-            (lambda ctx, rip_info: any([line_contains_substring(rip_info["Author"], e) for e in event_keys])), 
-            True, optional_time)
+
+    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.EVENTS, search_key=event)
+    await send_roundup(roundup_desc, optional_time, ctx)
 
 
 @bot.command(name='event_subs', aliases = ['event_sub'], brief='displays event submissions from linked channel')
