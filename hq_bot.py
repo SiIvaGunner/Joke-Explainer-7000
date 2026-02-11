@@ -431,10 +431,11 @@ async def search_subs(ctx: Context, search_key: str, sub_channel_link: str = Non
     Search for submissions by rip title.
     Supports `|` for multiple search keys.
     """
-    search_keys = search_key.split('|')
-    await filter_sub_command(ctx, 'search_subs', 
-            (lambda rip: any([line_contains_substring(get_raw_rip_title(rip.text), key) for key in search_keys])), 
-            sub_channel_link, optional_time)
+    desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.SEARCH, \
+                              channel_types = ['SUBS', 'SUBS_PIN', 'SUBS_THREAD'], \
+                              search_key = search_key, \
+                              not_found_message = "No submissions containing indicated text in title found.")
+    await send_suborqueue_rips(desc, sub_channel_link, optional_time, ctx)
 
 
 @bot.command(name='emails', brief='displays emails')
@@ -471,11 +472,12 @@ async def event_subs(ctx: Context, event: str = None, sub_channel_link: str = No
     if channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']) and event is None:
         await ctx.channel.send("Error: Please indicate the event name. Rips should be tagged with this name.")
         return
-    
-    event_keys = event.split('|')
-    await filter_sub_command(ctx, 'event_subs', 
-            (lambda rip: any([line_contains_substring(get_raw_rip_author(rip.text), e) for e in event_keys])), 
-            sub_channel_link, optional_time)
+
+    desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.EVENT, \
+                              channel_types = ['SUBS', 'SUBS_PIN', 'SUBS_THREAD'], \
+                              search_key = event, \
+                              not_found_message = "No submissions containing indicated text in author line found.")
+    await send_suborqueue_rips(desc, sub_channel_link, optional_time, ctx)
 
 
 @bot.command(name='myfixes', brief='displays rips you\'ve wrenched')
@@ -698,7 +700,11 @@ async def frames(ctx: Context, channel_link: str = None, optional_time = None):
     Search queue channel for rips with "thumbnail needed" react.
     """
     heard_command("frames", ctx.message.author.name)
-    await send_suborqueue_rips(ctx, SubOrQueueRipFilterType.HAS_REACT, ReactionType.THUMBNAIL, channel_link, optional_time)
+
+    desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.HASREACT, \
+                              channel_types = ["QUEUE"], \
+                              reaction_type = ReactionType.THUMBNAIL)
+    await send_suborqueue_rips(desc, channel_link, optional_time, ctx)
 
 
 @bot.command(name='alerts', brief='find approved rips with alert reacts')
@@ -708,7 +714,11 @@ async def alerts(ctx: Context, channel_link: str = None, optional_time = None):
     """
     if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
     heard_command("alerts", ctx.message.author.name)
-    await send_suborqueue_rips(ctx, SubOrQueueRipFilterType.HAS_REACT, ReactionType.ALERT, channel_link, optional_time)
+
+    desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.HASREACT, \
+                              channel_types = ["QUEUE"], \
+                              reaction_type = ReactionType.ALERT)
+    await send_suborqueue_rips(desc, channel_link, optional_time, ctx)
 
 
 @bot.command(name='metadata', brief='find approved rips with metadata reacts')
@@ -718,8 +728,11 @@ async def metadata(ctx: Context, channel_link: str = None, optional_time = None)
     """
     if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
     heard_command("metadata", ctx.message.author.name)
-    await send_suborqueue_rips(ctx, SubOrQueueRipFilterType.HAS_REACT, ReactionType.METADATA, channel_link, optional_time)
 
+    desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.HASREACT, \
+                              channel_types = ["QUEUE"], \
+                              reaction_type = ReactionType.METADATA)
+    await send_suborqueue_rips(desc, channel_link, optional_time, ctx)
 
 @bot.command(name='unsent', brief='find approved emails with no emailsent reacts')
 async def unsent(ctx: Context, channel_link: str = None, optional_time = None):
@@ -727,7 +740,10 @@ async def unsent(ctx: Context, channel_link: str = None, optional_time = None):
     Search queue channel for rips tagged email with no "approval email sent" react.
     """
     heard_command("unsent", ctx.message.author.name)
-    await send_suborqueue_rips(ctx, SubOrQueueRipFilterType.UNSENT, None, channel_link, optional_time)
+
+    desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.UNSENT, \
+                              channel_types = ["QUEUE"])
+    await send_suborqueue_rips(desc, channel_link, optional_time, ctx)
 
 # ============ Basic QoC commands ============== #
 
@@ -1421,75 +1437,31 @@ async def get_reaction_datas(message_id: int, channel: TextChannel) -> typing.Li
         REACTION_CACHE.update({message_id: reaction_data})
     return reaction_data
 
-NO_RIP_DESCRIPTOR = {
-    'search': 'pinned rips containing indicated text in title',
-    'search_subs': 'submissions containing indicated text in title',
-    'events': 'pinned rips containing indicated text in author line',
-    'event_subs': 'submissions containing indicated text in author line',
-}
-
-async def filter_sub_command(ctx: Context, cmd_name: str, filter_sub_func: typing.Callable, sub_channel_link: str = None, optional_time = None):
-    """
-    Unified command to roundup submissions according to a predicate.
-    `filter_sub_func` is a function accepting 1 parameter: `rip` (type Message)
-    """
-    if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
-    heard_command(cmd_name, ctx.message.author.name)
-
-    time, msg = parse_optional_time(ctx.channel, optional_time)
-    if msg is not None: await ctx.channel.send(msg)
-
-    sub_channel_id, msg = parse_channel_link(sub_channel_link, ['SUBS', 'SUBS_PIN', 'SUBS_THREAD'])
-    if len(msg) > 0:
-        await ctx.channel.send(msg)
-        if sub_channel_id == -1: return
-
-    async with ctx.channel.typing():
-        channel = bot.get_channel(sub_channel_id)
-
-        qoc_emote = DEFAULT_QOC
-        for e in ctx.guild.emojis:
-            if e.name.lower() == "qoc":
-                qoc_emote = e
-
-        ##TODO: (Ahmayk) this broke
-        rips = []
-        if channel_is_type(channel, 'SUBS_PIN'):
-            rips = await get_qoc_rips(channel)
-        elif channel_is_types(channel, ['SUBS', 'SUBS_THREAD']):
-            rips = await get_suborqueue_rips(channel, True)
-
-        result = ""
-        for rip in rips:
-            rip_title = get_rip_title(rip.text)
-            rip_link = format_message_link(ctx.guild.id, sub_channel_id, rip.message_id)
-            print(f'{rip_title}')
-            if filter_sub_func(rip):
-                if suborqueue_rip_has_reaction(ReactionType.QOC, rip):
-                    result += f"{qoc_emote} "
-                author = rip.message_author_name.split('#')[0].replace('_', '\_')
-                result += f'**[{rip_title}]({rip_link})** (by {author})\n'
-
-        if len(result) == 0:
-            await ctx.channel.send("No {} found.".format(NO_RIP_DESCRIPTOR[cmd_name] if cmd_name in NO_RIP_DESCRIPTOR.keys() else 'rips'))
-        else:
-            await send_embed(ctx.channel, result, time)
-
 class SubOrQueueRipFilterType(Enum):
-    HAS_REACT = auto()
+    HASREACT = auto()
     UNSENT = auto()
+    SEARCH = auto()
+    EVENT = auto()
 
-async def send_suborqueue_rips(ctx: Context, suborqueue_rip_filter_type: SubOrQueueRipFilterType, reaction_type = None, channel_link = None, optional_time = None):
-    """
-    Unified command to roundup messages satisfying condition in queues.
-    """
-    channel_id, msg = parse_channel_link(channel_link, ['QUEUE'])
+class SendSubOrQueueDesc(NamedTuple):
+    suborqueue_rip_filter_type: SubOrQueueRipFilterType = None
+    reaction_type: ReactionType = None
+    channel_types: List[str] = []
+    search_key: str = ""
+    not_found_message: str = ""
+
+async def send_suborqueue_rips(send_suborqueue_desc: SendSubOrQueueDesc, channel_link: str, optional_time: float, ctx: Context):
+    channel_id, msg = parse_channel_link(channel_link, send_suborqueue_desc.channel_types)
     if len(msg) > 0 or channel_link is None:
         if channel_link is not None:
             await ctx.channel.send("Warning: something went wrong parsing channel link. Defaulting to showing from all known queues.")
-        queue_channel_ids = [k for k, v in CHANNELS.items() if 'QUEUE' in v]
+        channel_ids = []
+        for k, v in CHANNELS.items():
+            for type in send_suborqueue_desc.channel_types:
+                if type in v:
+                    channel_ids.append(k)
     else:
-        queue_channel_ids = [channel_id]
+        channel_ids = [channel_id]
 
     time, msg = parse_optional_time(ctx.channel, optional_time)
     if msg is not None: await ctx.channel.send(msg)
@@ -1498,36 +1470,71 @@ async def send_suborqueue_rips(ctx: Context, suborqueue_rip_filter_type: SubOrQu
         result = ""
         count = 0
 
-        for queue_channel_id in queue_channel_ids:
-            suborqueue_rips = []
-            channel = bot.get_channel(queue_channel_id)
+        search_keys = send_suborqueue_desc.search_key.split('|')
+
+        qoc_emote = DEFAULT_QOC
+        for e in ctx.guild.emojis:
+            if e.name.lower() == "qoc":
+                qoc_emote = e
+
+        for channel_id in channel_ids:
+            print(channel_id)
+            channel = bot.get_channel(channel_id)
+
+            rips = []
             if channel:
-                suborqueue_rips = await get_suborqueue_rips(channel, True)
+                if channel_is_type(channel, 'SUBS_PIN'):
+                    ##NOTE: (Ahmayk) Does not return reaction data
+                    ## but this doesn't affect anything as of writing
+                    ## since we do not call any filtertypes that check reactions
+                    ## (besdies checking for qoc react, but this does not happen in pratice)
+                    rips = await get_fast_converted_qoc_rips(channel)
+                elif channel_is_types(channel, ['SUBS']):
+                    rips = await get_suborqueue_rips(channel, False)
+                elif channel_is_types(channel, ['QUEUE', 'SUBS_THREAD']):
+                    rips = await get_suborqueue_rips(channel, True)
 
-            result += f'<#{queue_channel_id}>:\n'
-            count += len(suborqueue_rips)
+            result += f'<#{channel_id}>:\n'
 
-            for suborqueue_rip in suborqueue_rips:
+            for suborqueue_rip in rips:
 
-                valid = False
-                match(suborqueue_rip_filter_type):
-                    case SubOrQueueRipFilterType.HAS_REACT:
-                        valid = suborqueue_rip_has_reaction(reaction_type, suborqueue_rip)
+                rip_title = get_rip_title(suborqueue_rip.text)
+                rip_author = get_raw_rip_author(suborqueue_rip.text)
+
+                is_valid = False
+                match(send_suborqueue_desc.suborqueue_rip_filter_type):
+                    case SubOrQueueRipFilterType.HASREACT:
+                        is_valid = suborqueue_rip_has_reaction(send_suborqueue_desc.reaction_type, suborqueue_rip)
                     case SubOrQueueRipFilterType.UNSENT:
-                        valid = line_contains_substring(get_raw_rip_author(suborqueue_rip.text), 'email') and \
+                        is_valid = line_contains_substring(rip_author, 'email') and \
                                 not suborqueue_rip_has_reaction(ReactionType.EMAILSENT, suborqueue_rip)
+                    case SubOrQueueRipFilterType.SEARCH:
+                        for key in search_keys:
+                            if line_contains_substring(rip_title, key):
+                                is_valid = True
+                                break
+                    case SubOrQueueRipFilterType.EVENT:
+                        for key in search_keys:
+                            if line_contains_substring(rip_author, key):
+                                is_valid = True
+                                break
                     case _:
                         write_log("Unimplemented SubOrQueueRipFilterType: " + rip_filter_type)
 
-                if valid:
-                    rip_title = get_rip_title(suborqueue_rip.text)
-                    rip_link = format_message_link(ctx.guild.id, suborqueue_rip.channel_id, suborqueue_rip.message_id)
+                if is_valid:
+                    if suborqueue_rip_has_reaction(ReactionType.QOC, suborqueue_rip):
+                        result += f"{qoc_emote} "
+                    rip_link = format_message_link(channel.guild.id, suborqueue_rip.channel_id, suborqueue_rip.message_id)
                     result += f'**[{rip_title}]({rip_link})**\n'
+                    count += 1
 
             result += '------------------------------\n'
 
         if count == 0:
-            await ctx.channel.send("No rips found.")
+            not_found_message = "No rips found."
+            if len(send_suborqueue_desc.not_found_message):
+                not_found_message = send_suborqueue_desc.not_found_message
+            await ctx.channel.send(not_found_message)
         else:
             await send_embed(ctx.channel, result, time)
 
@@ -1820,13 +1827,6 @@ def react_is(reaction_type: ReactionType, name: str) -> bool:
 def react_is_one(reaction_type_list: List[ReactionType], name: str) -> bool:
     for reaction_type in reaction_type_list:
         if react_is(reaction_type, name):
-            return True
-    return False
-
-async def message_has_reaction(reaction_type: ReactionType, message: Message) -> bool:
-    reaction_datas = await get_reaction_datas(message.id, message.channel)
-    for react_data in reaction_datas:
-        if react_is(reaction_type, react_data.name):
             return True
     return False
 
