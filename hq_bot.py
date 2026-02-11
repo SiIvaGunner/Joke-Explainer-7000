@@ -246,6 +246,7 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
 
 class RoundupFilterType(Enum):
     MYFIXES = auto()
+    MYFRESH = auto()
 
 class RoundupDesc(NamedTuple):
     roundup_filter_type: RoundupFilterType = None
@@ -287,7 +288,11 @@ async def send_roundup(roundup_desc: RoundupDesc, optional_time: float, ctx: Con
             is_valid = True
             match (roundup_desc.roundup_filter_type):
                 case RoundupFilterType.MYFIXES:
-                    is_valid = is_qoc_rip_user_reacted_one([ReactionType.FIX, ReactionType.ALERT], user_id, qoc_rip)
+                    react_list = [ReactionType.FIX, ReactionType.ALERT]
+                    is_valid = is_qoc_rip_user_reacted_one(react_list, user_id, qoc_rip)
+                case RoundupFilterType.MYFRESH:
+                    react_list = [ReactionType.CHECK, ReactionType.GOLDCHECK, ReactionType.FIX, ReactionType.ALERT, ReactionType.REJECT]
+                    is_valid = not is_qoc_rip_user_reacted_one(react_list, user_id, qoc_rip)
 
             if is_valid:
                 rip_title = get_rip_title(qoc_rip.text)
@@ -462,13 +467,8 @@ async def myfresh(ctx: Context, user_id: str = "", optional_time = None):
     """
     Retrieve all messages with no review reactions by the command author.
     """
-    async def reactions_all_not_by_user(ID: int, reaction_data: typing.List[ReactionData]):
-        for r in reaction_data:
-            if react_is_one([ReactionType.CHECK, ReactionType.GOLDCHECK, ReactionType.FIX, ReactionType.ALERT, ReactionType.REJECT], r.name) and ID == r.user_id:
-                return False
-        return True
-
-    await react_conditional_command(ctx, 'myfresh', user_id, reactions_all_not_by_user, 'not reviewed', optional_time)
+    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.MYFRESH, user_id_string = user_id, conditional_string = "not reviewed")
+    await send_roundup(roundup_desc, optional_time, ctx)
 
 
 @bot.command(name="fresh", aliases = ['blank', 'bald', 'clean', 'noreacts'], brief='rips with no reacts yet')
