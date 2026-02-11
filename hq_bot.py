@@ -619,32 +619,11 @@ async def scout(ctx: Context, prefix: str = None, channel_link: str = None, opti
         await ctx.channel.send("Error: Please provide a prefix string.")
         return
 
-    channel_id, msg = parse_channel_link(channel_link, ['QUEUE'])
-    if len(msg) > 0:
-        await ctx.channel.send(msg)
-        return
-
-    time, msg = parse_optional_time(ctx.channel, optional_time)
-    if msg is not None: await ctx.channel.send(msg)
-    
-    channel = bot.get_channel(channel_id)
-    if channel is None: await ctx.channel.send("Error: Invalid channel found. Contact bot developers to update list of channels.")
-
-    async with ctx.channel.typing():
-        suborqueue_rips = await get_suborqueue_rips(channel, True)
-
-        result = ""
-        for suborqueue_rip in suborqueue_rips:
-            rip_title = get_rip_title(suborqueue_rip.text)
-            rip_link = format_message_link(ctx.guild.id, channel_id, suborqueue_rip.message_id)
-            if rip_title.lower().startswith(prefix.lower()):
-                result += f'**[{rip_title}]({rip_link})**\n'
-
-        if len(result) == 0:
-            await ctx.channel.send(f"No approved rips starting with {prefix} found.")
-        else:
-            await send_embed(ctx.channel, result, time)
-
+    desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.SCOUT, \
+                              channel_types = ['QUEUE'], \
+                              search_key = prefix, \
+                              not_found_message = 'No approved rips starting with {prefix} found.')
+    await send_suborqueue_rips(desc, channel_link, optional_time, ctx)
 
 @bot.command(name='scout_stats', brief='summarize approved rips with specific letter prefix')
 async def scout_stats(ctx: Context, channel_link: str = None, optional_time = None):
@@ -1442,6 +1421,7 @@ class SubOrQueueRipFilterType(Enum):
     UNSENT = auto()
     SEARCH = auto()
     EVENT = auto()
+    SCOUT = auto()
 
 class SendSubOrQueueDesc(NamedTuple):
     suborqueue_rip_filter_type: SubOrQueueRipFilterType = None
@@ -1471,6 +1451,7 @@ async def send_suborqueue_rips(send_suborqueue_desc: SendSubOrQueueDesc, channel
         count = 0
 
         search_keys = send_suborqueue_desc.search_key.split('|')
+        prefix = send_suborqueue_desc.search_key.lower()
 
         qoc_emote = DEFAULT_QOC
         for e in ctx.guild.emojis:
@@ -1478,7 +1459,6 @@ async def send_suborqueue_rips(send_suborqueue_desc: SendSubOrQueueDesc, channel
                 qoc_emote = e
 
         for channel_id in channel_ids:
-            print(channel_id)
             channel = bot.get_channel(channel_id)
 
             rips = []
@@ -1518,6 +1498,8 @@ async def send_suborqueue_rips(send_suborqueue_desc: SendSubOrQueueDesc, channel
                             if line_contains_substring(rip_author, key):
                                 is_valid = True
                                 break
+                    case SubOrQueueRipFilterType.SCOUT:
+                        is_valid = rip_title.lower().startswith(prefix)
                     case _:
                         write_log("Unimplemented SubOrQueueRipFilterType: " + rip_filter_type)
 
