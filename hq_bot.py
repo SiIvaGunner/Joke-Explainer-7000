@@ -571,6 +571,19 @@ async def overdue(ctx: Context, optional_time = None):
 
 # ============ Pin count commands ============== #
 
+async def count_pinned_qoc_messages(channel):
+    pincount = 0
+    if channel.id in RIP_CACHE_QOC:
+        pincount = len(RIP_CACHE_QOC[channel.id])
+    else:
+        async for message in channel.pins(limit=None):
+            pincount += 1
+
+    if _get_config('qoc_contains_pinned_rule'):
+        pincount -= 1
+
+    return pincount
+
 @bot.command(name='count', brief="counts all pinned rips")
 async def count(ctx: Context):
     """
@@ -587,8 +600,8 @@ async def count(ctx: Context):
         proxy = ""
 
     async with ctx.channel.typing():
-        pin_list = await get_pins(channel)
-        pincount = len(pin_list)
+
+        pincount = await count_pinned_qoc_messages(channel)
 
         if (pincount < 1):
             result = "`* Determination.`"
@@ -615,8 +628,8 @@ async def limitcheck(ctx: Context):
         proxy = ""
 
     async with ctx.channel.typing():
-        pin_list = [message async for message in channel.pins(limit=None)]
-        result = f"You can pin {_get_config('soft_pin_limit') - len(pin_list)} more rips until I start complaining about pin space."
+        pincount = await count_pinned_qoc_messages(channel)
+        result = f"You can pin {_get_config('soft_pin_limit') - pincount} more rips until I start complaining about pin space."
 
         result += proxy
         await ctx.channel.send(result)
