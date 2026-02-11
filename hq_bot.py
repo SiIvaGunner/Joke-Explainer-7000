@@ -248,6 +248,7 @@ class RoundupFilterType(Enum):
     MYPINS = auto()
     MYFIXES = auto()
     MYFRESH = auto()
+    FRESH = auto()
     SEARCH = auto()
     EVENTS = auto()
     HASREACT = auto()
@@ -348,16 +349,19 @@ async def send_roundup(roundup_desc: RoundupDesc, optional_time: float, ctx: Con
             author = get_rip_author(qoc_rip.text, qoc_rip.message_author_name)
             author = author.replace('*', '').replace('_', '')
 
+            review_react_list = [ReactionType.CHECK, ReactionType.GOLDCHECK, ReactionType.FIX, ReactionType.ALERT, ReactionType.REJECT]
+
             is_valid = True
             match (roundup_desc.roundup_filter_type):
                 case RoundupFilterType.MYPINS:
                     is_valid = qoc_rip.message_author_id == roundup_desc.message_author_id
                 case RoundupFilterType.MYFIXES:
-                    react_list = [ReactionType.FIX, ReactionType.ALERT]
-                    is_valid = is_qoc_rip_user_reacted_one(react_list, user_id, qoc_rip)
+                    fix_react_list = [ReactionType.FIX, ReactionType.ALERT]
+                    is_valid = qoc_rip_has_reaction_one_from_user(fix_react_list, user_id, qoc_rip)
                 case RoundupFilterType.MYFRESH:
-                    react_list = [ReactionType.CHECK, ReactionType.GOLDCHECK, ReactionType.FIX, ReactionType.ALERT, ReactionType.REJECT]
-                    is_valid = not is_qoc_rip_user_reacted_one(react_list, user_id, qoc_rip)
+                    is_valid = not qoc_rip_has_reaction_one_from_user(review_react_list, user_id, qoc_rip)
+                case RoundupFilterType.FRESH:
+                    is_valid = not qoc_rip_has_reaction_one(review_react_list, qoc_rip)
                 case RoundupFilterType.SEARCH:
                     is_valid = False
                     for key in search_keys:
@@ -492,37 +496,14 @@ async def myfresh(ctx: Context, user_id: str = "", optional_time = None):
     await send_roundup(roundup_desc, optional_time, ctx)
 
 
-@bot.command(name="fresh", aliases = ['blank', 'bald', 'clean', 'noreacts'], brief='rips with no reacts yet')
+@bot.command(name="fresh", aliases = ['blank', 'bald', 'clean', 'noreacts'], brief='display rips no one has reviewed')
 async def fresh(ctx: Context, optional_time = None):
     """
-    Retrieve all pinned messages (except the first one) with 0 reactions.
+    Retrieve all pinned messages (except the first one) with no review reactions.
     """
-    if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
-    heard_command("fresh", ctx.message.author.name)
-
-    time, msg = parse_optional_time(ctx.channel, optional_time)
-    if msg is not None: await ctx.channel.send(msg)
-
-    channel = await get_roundup_channel(ctx)
-    if channel is None: return
-
-    result = ""
-
-    async with ctx.channel.typing():
-        qoc_rips = await get_qoc_rips(channel)
-
-        ##TODO: (Ahmayk) compress roundup formatting into one thing, it's sad you don't see all the info here
-        for qoc_rip in qoc_rips:
-            if len(qoc_rip.react_and_users) < 1:
-                title = get_rip_title(qoc_rip.text)
-                link = format_message_link(channel.guild.id, channel.id, qoc_rip.message_id)
-                result = result + f'**[{title}]({link})**\n'
-
-        if result != "":
-            await send_embed(ctx.channel, result, time)
-        else:
-            await ctx.channel.send("No fresh rips.")
-
+    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.FRESH, \
+            not_found_message = "No fresh rips.")
+    await send_roundup(roundup_desc, optional_time, ctx)
 
 @bot.command(name='wrenches', aliases = ['fix'])
 async def wrenches(ctx: Context, optional_time = None):
@@ -1148,7 +1129,9 @@ async def help(ctx: Context):
     async with ctx.channel.typing():
         result = "_**YOU ARE NOW QoCING:**_\n`!roundup [embed_minutes: float]`" + roundup.brief \
             + "\n_**Special lists:**_\n`!mypins` " + mypins.brief \
-            + "\n`!myfixes <user_id: str>` " + myfixes.brief + "\n`!myfresh <user_id: str>` " + myfresh.brief\
+            + "\n`!myfixes <user_id: str>` " + myfixes.brief \
+            + "\n`!myfresh <user_id: str>` " + myfresh.brief\
+            + "\n`!fresh` " + fresh.brief\
             + "\n`!search <arg1: str|arg2: str|...>` " + search.brief \
             + "\n`!emails` " + emails.brief + "\n`!events <arg1: str|arg2: str|...>` " + events.brief \
             + "\n`!checks`, `!rejects`, `!wrenches`, `!stops`" \
@@ -1859,7 +1842,13 @@ def qoc_rip_has_reaction(reaction_type: ReactionType, qoc_rip: QocRip) -> bool:
             return True
     return False
 
-def is_qoc_rip_user_reacted_one(reaction_type_list: List[ReactionType], user_id: int, qoc_rip: QocRip):
+def qoc_rip_has_reaction_one(reaction_type_list: List[ReactionType], qoc_rip: QocRip):
+    for react_and_user in qoc_rip.react_and_users:
+        if react_is_one(reaction_type_list, react_and_user.name):
+            return True
+    return False
+
+def qoc_rip_has_reaction_one_from_user(reaction_type_list: List[ReactionType], user_id: int, qoc_rip: QocRip):
     for react_and_user in qoc_rip.react_and_users:
         if react_and_user.user_id == user_id and react_is_one(reaction_type_list, react_and_user.name):
             return True
