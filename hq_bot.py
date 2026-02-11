@@ -249,12 +249,15 @@ class RoundupFilterType(Enum):
     MYFRESH = auto()
     SEARCH = auto()
     EVENTS = auto()
+    HASREACT = auto()
 
 class RoundupDesc(NamedTuple):
     roundup_filter_type: RoundupFilterType = None
     user_id_string: str = ""
     conditional_string: str = ""
     search_key: str = ""
+    reaction_type: ReactionType = None
+    not_found_message: str = ""
 
 async def send_roundup(roundup_desc: RoundupDesc, optional_time: float, ctx: Context):
     if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
@@ -313,6 +316,8 @@ async def send_roundup(roundup_desc: RoundupDesc, optional_time: float, ctx: Con
                         if line_contains_substring(author, key):
                             is_valid = True
                             break
+                case RoundupFilterType.HASREACT:
+                    is_valid = qoc_rip_has_reaction(roundup_desc.reaction_type, qoc_rip)
 
             if is_valid:
                 author = author.replace('*', '').replace('_', '')
@@ -377,7 +382,10 @@ async def send_roundup(roundup_desc: RoundupDesc, optional_time: float, ctx: Con
         if result != "":
             await send_embed(ctx.channel, result, time)
         else:
-            await ctx.channel.send("No rips.")
+            not_found_message = "No rips."
+            if len(roundup_desc.not_found_message):
+                not_found_message = roundup_desc.not_found_message
+            await ctx.channel.send(not_found_message)
 
 
 @bot.command(name='roundup', aliases = ['down_taunt', 'qoc', 'qocparty', 'roudnup', 'links', 'list', 'ls'], brief='displays all rips in QoC')
@@ -522,29 +530,37 @@ async def wrenches(ctx: Context, optional_time = None):
     """
     Retrieve all pinned messages (except the first one) with :fix: reactions.
     """
-    await react_command(ctx, 'fix', ReactionType.FIX, "No wrenches found.", optional_time)
+    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.HASREACT, \
+                               reaction_type=ReactionType.FIX, not_found_message="No wrenches found.")
+    await send_roundup(roundup_desc, optional_time, ctx)
 
 @bot.command(name='stops')
 async def stops(ctx: Context, optional_time = None):
     """
     Retrieve all pinned messages (except the first one) with :stop: reactions.
     """
-    await react_command(ctx, 'stop', ReactionType.STOP, "No octogons found.", optional_time)
+    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.HASREACT, \
+                               reaction_type=ReactionType.STOP, not_found_message="No octogons found.")
+    await send_roundup(roundup_desc, optional_time, ctx)
+
 
 @bot.command(name='checks')
 async def checks(ctx: Context, optional_time = None):
     """
     Retrieve all pinned messages (except the first one) with :check: reactions.
     """
-    await react_command(ctx, 'check', ReactionType.CHECK, "No checks found.", optional_time)
+    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.HASREACT, \
+                               reaction_type=ReactionType.CHECK, not_found_message="No checks found.")
+    await send_roundup(roundup_desc, optional_time, ctx)
 
 @bot.command(name='rejects')
 async def rejects(ctx: Context, optional_time = None):
     """
     Retrieve all pinned messages (except the first one) with :reject: reactions.
     """
-    await react_command(ctx, 'reject', ReactionType.REJECT, "No rejected rips found.", optional_time)
-
+    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.HASREACT, \
+                               reaction_type=ReactionType.REJECT, not_found_message="No rejected rips found.")
+    await send_roundup(roundup_desc, optional_time, ctx)
 
 @bot.command(name='overdue', brief=f'display rips that have been pinned for over X days')
 async def overdue(ctx: Context, optional_time = None):
@@ -1973,6 +1989,12 @@ async def message_has_reaction(reaction_type: ReactionType, message: Message) ->
 def suborqueue_rip_has_reaction(reaction_type: ReactionType, suborqueue_rip: SubOrQueueRip) -> bool:
     for name in suborqueue_rip.react_names:
         if react_is(reaction_type, name):
+            return True
+    return False
+
+def qoc_rip_has_reaction(reaction_type: ReactionType, qoc_rip: QocRip) -> bool:
+    for react_and_user in qoc_rip.react_and_users:
+        if react_is(reaction_type, react_and_user.name):
             return True
     return False
 
