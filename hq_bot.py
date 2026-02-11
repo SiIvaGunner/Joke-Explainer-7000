@@ -245,6 +245,7 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
 # ============ Aggregate commands ============= #
 
 class RoundupFilterType(Enum):
+    MYPINS = auto()
     MYFIXES = auto()
     MYFRESH = auto()
     SEARCH = auto()
@@ -254,6 +255,8 @@ class RoundupFilterType(Enum):
 
 class RoundupDesc(NamedTuple):
     roundup_filter_type: RoundupFilterType = None
+    message_author_id: id = None
+    message_author_name: str = ""
     user_id_string: str = ""
     conditional_string: str = ""
     search_key: str = ""
@@ -342,11 +345,13 @@ async def send_roundup(roundup_desc: RoundupDesc, optional_time: float, ctx: Con
                 indicator = OVERDUE_INDICATOR
 
             rip_title = get_rip_title(qoc_rip.text)
-            author = get_rip_author(qoc_rip.text, qoc_rip.message_author)
+            author = get_rip_author(qoc_rip.text, qoc_rip.message_author_name)
             author = author.replace('*', '').replace('_', '')
 
             is_valid = True
             match (roundup_desc.roundup_filter_type):
+                case RoundupFilterType.MYPINS:
+                    is_valid = qoc_rip.message_author_id == roundup_desc.message_author_id
                 case RoundupFilterType.MYFIXES:
                     react_list = [ReactionType.FIX, ReactionType.ALERT]
                     is_valid = is_qoc_rip_user_reacted_one(react_list, user_id, qoc_rip)
@@ -401,16 +406,9 @@ async def mypins(ctx: Context, optional_time = None):
     """
     Retrieve all messages pinned by the command author.
     """
-    await filter_command(ctx, 'mypins', (lambda ctx, rip_info: rip_info["PinMiser"] == ctx.author.name), True, optional_time)
-
-
-@bot.command(name='mypins_legacy', brief='displays rips you\'ve pinned (without reacts)')
-async def mypins_legacy(ctx: Context, optional_time = None):
-    """
-    Retrieve all messages pinned by the command author without reacts (legacy behaviour).
-    """
-    await filter_command(ctx, 'mypins', (lambda ctx, rip_info: rip_info["PinMiser"] == ctx.author.name), False, optional_time)
-
+    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.MYPINS,
+                               message_author_id = ctx.author.id, not_found_message = "No pins are yours.")
+    await send_roundup(roundup_desc, optional_time, ctx)
 
 @bot.command(name='search', brief='search for pinned rips with text in title')
 async def search(ctx: Context, search_key: str, optional_time = None):
@@ -418,7 +416,8 @@ async def search(ctx: Context, search_key: str, optional_time = None):
     Search for pinned messages by rip title.
     Supports `|` for multiple search keys.
     """
-    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.SEARCH, search_key=search_key)
+    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.SEARCH, \
+            search_key=search_key, not_found_message = "No pinned rips containing indicated text in title found.")
     await send_roundup(roundup_desc, optional_time, ctx)
 
 
@@ -453,7 +452,8 @@ async def events(ctx: Context, event: str = None, optional_time = None):
         await ctx.channel.send("Error: Please indicate the event name. Rips should be tagged with this name.")
         return
 
-    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.EVENTS, search_key=event)
+    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.EVENTS, \
+            search_key=event, not_found_message = "No pinned rips containing inteded text in author line found.")
     await send_roundup(roundup_desc, optional_time, ctx)
 
 
@@ -1014,7 +1014,7 @@ async def scan(ctx: Context, channel_link: str = None, start_index: int = None, 
             
             rip_title = get_rip_title(rip.text)
 
-            mtCode, mtMsg = await check_metadata(rip.text, rip.message_id, rip.message_author)
+            mtCode, mtMsg = await check_metadata(rip.text, rip.message_id, rip.message_author_name)
             if mtCode == -1:
                 await write_log("Warning: cannot check metadata of message\nRip: {}\n{}".format(rip_title, mtMsg))
 
@@ -1443,32 +1443,6 @@ NO_RIP_DESCRIPTOR = {
     'event_subs': 'submissions containing indicated text in author line',
 }
 
-async def filter_command(ctx: Context, cmd_name: str, filter_func: typing.Callable, display_reacts: bool, optional_time = None):
-    """
-    Unified command to roundup messages according to a predicate in QoC channels.
-    `filter_func` is a function accepting 2 parameters: `ctx`, `rip_info`
-    """
-    if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
-    heard_command(cmd_name, ctx.message.author.name)
-
-    time, msg = parse_optional_time(ctx.channel, optional_time)
-    if msg is not None: await ctx.channel.send(msg)
-
-    channel = await get_roundup_channel(ctx)
-    if channel is None: return
-
-    async with ctx.channel.typing():
-        all_pins = await process_pins(channel, display_reacts)
-        result = ""
-        for rip_id, rip_info in all_pins.items():
-            if filter_func(ctx, rip_info):
-                result += make_markdown(rip_info, display_reacts) # a match!
-        if result == "":
-            await ctx.channel.send("No {} found.".format(NO_RIP_DESCRIPTOR[cmd_name] if cmd_name in NO_RIP_DESCRIPTOR.keys() else 'rips'))
-        else:
-            await send_embed(ctx.channel, result, time)
-
-
 async def filter_sub_command(ctx: Context, cmd_name: str, filter_sub_func: typing.Callable, sub_channel_link: str = None, optional_time = None):
     """
     Unified command to roundup submissions according to a predicate.
@@ -1503,7 +1477,7 @@ async def filter_sub_command(ctx: Context, cmd_name: str, filter_sub_func: typin
             if filter_sub_func(rip):
                 if suborqueue_rip_has_reaction(ReactionType.QOC, rip):
                     result += f"{qoc_emote} "
-                author = rip.message_author.split('#')[0].replace('_', '\_')
+                author = rip.message_author_name.split('#')[0].replace('_', '\_')
                 result += f'**[{rip_title}]({rip_link})** (by {author})\n'
 
         if len(result) == 0:
@@ -1725,7 +1699,7 @@ def get_raw_rip_author(text: str) -> str:
     return author
 
 
-def get_rip_author(text: str, message_author: str) -> str:
+def get_rip_author(text: str, message_author_name: str) -> str:
     """
     Wrapper function to format author line.
     If the line contains "by me", append the message sender's name to the author line.
@@ -1738,7 +1712,7 @@ def get_rip_author(text: str, message_author: str) -> str:
 
     elif len(re.findall(r'\bby me\b', author.lower())) > 0: 
         # Overwrite it and do something else if the rip's author and the pinner are the same
-        cleaned_author = message_author.split('#')[0]
+        cleaned_author = message_author_name.split('#')[0]
         author += (f' (**{cleaned_author}**)')
 
     return author
@@ -1884,91 +1858,6 @@ def is_qoc_rip_user_reacted_one(reaction_type_list: List[ReactionType], user_id:
             return True
     return False
 
-def rip_is_specs_overdue(message: datetime.datetime) -> bool:
-    """
-    Returns true if the message is older than SPECS_OVERDUE_DAYS
-    """
-
-def rip_is_overdue(message: Message) -> bool:
-    """
-    Returns true if the message is older than OVERDUE_DAYS
-    """
-    return datetime.now(timezone.utc) - message.created_at > timedelta(days=_get_config('overdue_days'))
-
-async def get_reactions(channel: TextChannel, message: Message) -> typing.Tuple[str, str]:
-    """
-    Return the reactions of a message.
-    The message should contain the full reactions information.
-    Returns an additional emoji as special indicator for the message.
-    Requirements for approval:
-    - At least 3 more checks than rejects
-    - No fixes or alerts
-    - If stop is present, number of goldchecks must be at least the numerical react (if any), or 1 (default)
-    - If checkreq is present, change 3 to the corresponding value
-    """
-    reacts = ""
-    indicator = ""
-
-    num_checks = 0
-    num_rejects = 0
-    num_goldchecks = 0
-    specs_required = 1
-    checks_required = 3
-    specs_needed = False
-    fix_or_alert = False
-
-    emote_names = [e.name for e in channel.guild.emojis]
-
-    reaction_data = await get_reaction_datas(message.id, channel)
-
-    for react_data in reaction_data:
-        if react_is(ReactionType.GOLDCHECK, react_data.name):
-            num_goldchecks += 1
-        elif react_is(ReactionType.CHECKREQ, react_data.name):
-            try:
-                checks_required = int(react_data.name.split("check")[0])
-            except ValueError:
-                print("Error parsing checkreq react: {}".format(react_data.name))
-        elif react_is(ReactionType.CHECK, react_data.name):
-            num_checks += 1
-        elif react_is(ReactionType.REJECT, react_data.name):
-            num_rejects += 1
-        elif react_is_one([ReactionType.FIX, ReactionType.ALERT], react_data.name):
-            fix_or_alert = True
-        elif react_is(ReactionType.STOP, react_data.name):
-            specs_needed = True
-        elif react_is(ReactionType.NUMBER, react_data.name):
-            specs_required = KEYCAP_EMOJIS[react_data.name]
-
-        if react_data.name in emote_names:
-            for e in channel.guild.emojis:
-                if e.name == react_data.name:
-                    reacts += f"{e} "
-                    break
-        else:
-            reacts += f"{react_data.name} "
-
-    check_passed = (num_checks - num_rejects >= checks_required) and not fix_or_alert
-    specs_passed = (not specs_needed or num_goldchecks >= specs_required)
-
-    if check_passed:
-        indicator = APPROVED_INDICATOR if specs_passed else AWAITING_SPECIALIST_INDICATOR
-    elif specs_needed and not specs_passed and rip_is_specs_overdue(message):
-        indicator = SPECS_OVERDUE_INDICATOR
-    elif rip_is_overdue(message):
-        indicator = OVERDUE_INDICATOR
-
-    return reacts, indicator
-
-
-async def process_pins(channel: TextChannel, get_reacts: bool):
-    """
-    Retrieve all pinned messages (except the first one) from a channel.
-    - get_reacts: Whether to show messages' reactions as emojis
-    """
-    return await get_pinned_msgs_and_react(channel, get_reactions if get_reacts else None)
-
-
 async def vet_message(channel: TextChannel, message: Message) -> typing.Tuple[str, str]:
     """
     Return the QoC verdict of a message as emoji reactions.
@@ -2029,7 +1918,7 @@ async def check_qoc(message: Message, fullFeedback: bool = False) -> typing.Tupl
     return qcCode, qcMsg, detectedUrl
 
 ##TODO: (Ahmayk) Now that checking rip metadata is fast due to being in cache, have this run on every qoc pin without the youtube check
-async def check_metadata(text: str, message_id: int, message_author: str, fullFeedback: bool = False) -> typing.Tuple[str, str]:
+async def check_metadata(text: str, message_id: int, message_author_name: str, fullFeedback: bool = False) -> typing.Tuple[str, str]:
     """
     Perform metadata checking on rip info.
     If info contains the phrase "unusual metadata", skip most checks
@@ -2044,7 +1933,7 @@ async def check_metadata(text: str, message_id: int, message_author: str, fullFe
         mtCode, mtMsgs = await run_blocking(checkMetadata, description, YOUTUBE_CHANNEL_NAME, playlistId, YOUTUBE_API_KEY, advancedCheck)
         pass
 
-    if mtCode != -1 and "[Unusual Pin Format]" in get_rip_author(text, message_author):
+    if mtCode != -1 and "[Unusual Pin Format]" in get_rip_author(text, message_author_name):
         mtCode = 1
         mtMsgs.append("Rip author is missing.")
 
@@ -2161,7 +2050,8 @@ class QocRip(NamedTuple):
     text: str
     message_id: int
     channel_id: int
-    message_author: str
+    message_author_id: int
+    message_author_name: str
     react_and_users: List[ReactAndUser]
     created_at: datetime.datetime
 
@@ -2189,7 +2079,7 @@ async def get_qoc_rips(channel: TextChannel) -> typing.List[QocRip]:
                     user_ids = [user.id async for user in reaction.users()]
                     for user_id in user_ids:
                         react_and_users.append(ReactAndUser(name, user_id))
-                qoc_rip = QocRip(message.content, message.id, channel.id, str(message.author), react_and_users, message.created_at)
+                qoc_rip = QocRip(message.content, message.id, channel.id, message.author.id, str(message.author), react_and_users, message.created_at)
                 qoc_rips.append(qoc_rip)
             count += 1
         RIP_CACHE_QOC[channel.id] = qoc_rips
@@ -2201,7 +2091,8 @@ class SubOrQueueRip(NamedTuple):
     text: str
     message_id: int
     channel_id: int
-    message_author: str
+    message_author_id: int
+    message_author_name: str
     react_names: List[str]
 
 async def get_suborqueue_rips(channel: TextChannel, include_threads: bool) -> typing.List[SubOrQueueRip]:
@@ -2227,7 +2118,7 @@ async def get_suborqueue_rips(channel: TextChannel, include_threads: bool) -> ty
                         elif hasattr(reaction.emoji, "name"):
                             name = reaction.emoji.name
                         react_names.append(name)
-                    suborqueue_rip = SubOrQueueRip(message.content, message.id, channel.id, str(message.author), react_names)
+                    suborqueue_rip = SubOrQueueRip(message.content, message.id, channel.id, message.author.id, str(message.author), react_names)
                     suborqueue_rips.append(suborqueue_rip)
         for k, v in thread_dict.items():
             suborqueue_rips.extend(v)
@@ -2240,7 +2131,7 @@ def qoc_rips_to_suborqueue_rips(qoc_rips: List[QocRip]) -> List[SubOrQueueRip]:
         react_names = []
         for react_and_user in r.react_and_users:
             react_names.append(react_and_user.name)
-        suborqueue_rip = SubOrQueueRip(r.text, r.message_id, r.channel_id, r.message_author, react_names)
+        suborqueue_rip = SubOrQueueRip(r.text, r.message_id, r.channel_id, r.message_author_name, react_names)
         suborqueue_rips.append(suborqueue_rip)
     return suborqueue_rips
 
