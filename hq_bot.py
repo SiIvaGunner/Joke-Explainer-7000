@@ -729,7 +729,7 @@ async def frames(ctx: Context, channel_link: str = None, optional_time = None):
     Search queue channel for rips with "thumbnail needed" react.
     """
     heard_command("frames", ctx.message.author.name)
-    await fetch_command(ctx, RipFilterType.HAS_REACT, ReactionType.THUMBNAIL, channel_link, optional_time)
+    await send_suborqueue_rips(ctx, SubOrQueueRipFilterType.HAS_REACT, ReactionType.THUMBNAIL, channel_link, optional_time)
 
 
 @bot.command(name='alerts', brief='find approved rips with alert reacts')
@@ -739,7 +739,7 @@ async def alerts(ctx: Context, channel_link: str = None, optional_time = None):
     """
     if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
     heard_command("alerts", ctx.message.author.name)
-    await fetch_command(ctx, RipFilterType.HAS_REACT, ReactionType.ALERT, channel_link, optional_time)
+    await send_suborqueue_rips(ctx, SubOrQueueRipFilterType.HAS_REACT, ReactionType.ALERT, channel_link, optional_time)
 
 
 @bot.command(name='metadata', brief='find approved rips with metadata reacts')
@@ -749,7 +749,7 @@ async def metadata(ctx: Context, channel_link: str = None, optional_time = None)
     """
     if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
     heard_command("metadata", ctx.message.author.name)
-    await fetch_command(ctx, RipFilterType.HAS_REACT, ReactionType.METADATA, channel_link, optional_time)
+    await send_suborqueue_rips(ctx, SubOrQueueRipFilterType.HAS_REACT, ReactionType.METADATA, channel_link, optional_time)
 
 
 @bot.command(name='unsent', brief='find approved emails with no emailsent reacts')
@@ -758,7 +758,7 @@ async def unsent(ctx: Context, channel_link: str = None, optional_time = None):
     Search queue channel for rips tagged email with no "approval email sent" react.
     """
     heard_command("unsent", ctx.message.author.name)
-    await fetch_command(ctx, RipFilterType.UNSENT, None, channel_link, optional_time)
+    await send_suborqueue_rips(ctx, SubOrQueueRipFilterType.UNSENT, None, channel_link, optional_time)
 
 # ============ Basic QoC commands ============== #
 
@@ -1485,11 +1485,11 @@ async def filter_sub_command(ctx: Context, cmd_name: str, filter_sub_func: typin
         else:
             await send_embed(ctx.channel, result, time)
 
-class RipFilterType(Enum):
+class SubOrQueueRipFilterType(Enum):
     HAS_REACT = auto()
     UNSENT = auto()
 
-async def fetch_command(ctx: Context, rip_filter_type: RipFilterType, reaction_type = None, channel_link = None, optional_time = None):
+async def send_suborqueue_rips(ctx: Context, suborqueue_rip_filter_type: SubOrQueueRipFilterType, reaction_type = None, channel_link = None, optional_time = None):
     """
     Unified command to roundup messages satisfying condition in queues.
     """
@@ -1520,20 +1520,20 @@ async def fetch_command(ctx: Context, rip_filter_type: RipFilterType, reaction_t
             for suborqueue_rip in suborqueue_rips:
 
                 valid = False
-                match(rip_filter_type):
-                    case RipFilterType.HAS_REACT:
+                match(suborqueue_rip_filter_type):
+                    case SubOrQueueRipFilterType.HAS_REACT:
                         valid = suborqueue_rip_has_reaction(reaction_type, suborqueue_rip)
-                    case RipFilterType.UNSENT:
+                    case SubOrQueueRipFilterType.UNSENT:
                         valid = line_contains_substring(get_raw_rip_author(suborqueue_rip.text), 'email') and \
                                 not suborqueue_rip_has_reaction(ReactionType.EMAILSENT, suborqueue_rip)
                     case _:
-                        write_log("Unimplemented RipFilterType: " + rip_filter_type)
+                        write_log("Unimplemented SubOrQueueRipFilterType: " + rip_filter_type)
 
                 if valid:
                     rip_title = get_rip_title(suborqueue_rip.text)
                     rip_link = format_message_link(ctx.guild.id, suborqueue_rip.channel_id, suborqueue_rip.message_id)
                     result += f'**[{rip_title}]({rip_link})**\n'
-            
+
             result += '------------------------------\n'
 
         if count == 0:
