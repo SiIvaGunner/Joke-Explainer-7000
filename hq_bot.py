@@ -244,7 +244,15 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
 
 # ============ Aggregate commands ============= #
 
-async def roundup_new(ctx: Context, optional_time = None):
+class RoundupFilterType(Enum):
+    MYFIXES = auto()
+
+class RoundupDesc(NamedTuple):
+    roundup_filter_type: RoundupFilterType = None
+    user_id_string: str = ""
+    conditional_string: str = ""
+
+async def send_roundup(roundup_desc: RoundupDesc, optional_time: float, ctx: Context):
     if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
     heard_command("roundup", ctx.message.author.name)
 
@@ -258,73 +266,90 @@ async def roundup_new(ctx: Context, optional_time = None):
 
         qoc_rips = await get_qoc_rips(channel)
 
-        dict_index = 1
-        pins_list = {}
         ##NOTE: (Ahmayk) pulling this out of loop cause calling to disk is slow
         is_spec_overdue_days = _get_config('spec_overdue_days')
+        is_overdue_days = _get_config('overdue_days')
+
+        ##TODO: (Ahmayk) fuzzy username input (ie typing "ahmayk" and matching to their username or display name)
+        user_id = ctx.author.id
+        if len(roundup_desc.user_id_string):
+            match = re.search(r'\d+', user_id)
+            if match:
+                ID = int(match.group(0))
+                search_author = ctx.guild.get_member(ID)
+                if search_author:
+                    await ctx.channel.send(f"Searching for rips {roundup_desc.conditional_string} by {search_author.name}")
 
         result = ""
 
         for qoc_rip in qoc_rips:
-            rip_title = get_rip_title(qoc_rip.text)
-            author = get_rip_author(qoc_rip.text, qoc_rip.message_author)
-            author = author.replace('*', '').replace('_', '')
-            emote_names = [e.name for e in channel.guild.emojis]
 
-            reacts = ""
-            num_checks = 0
-            num_rejects = 0
-            num_goldchecks = 0
-            specs_required = 1
-            checks_required = 3
-            specs_needed = False
-            fix_or_alert = False
+            is_valid = True
+            match (roundup_desc.roundup_filter_type):
+                case RoundupFilterType.MYFIXES:
+                    is_valid = is_qoc_rip_user_reacted_one([ReactionType.FIX, ReactionType.ALERT], user_id, qoc_rip)
 
-            for react_and_user in qoc_rip.react_and_users:
-                if react_is(ReactionType.GOLDCHECK, react_and_user.name):
-                    num_goldchecks += 1
-                elif react_is(ReactionType.CHECKREQ, react_and_user.name):
-                    try:
-                        checks_required = int(react_and_user.name.split("check")[0])
-                    except ValueError:
-                        print("Error parsing checkreq react: {}".format(react_and_user.name))
-                elif react_is(ReactionType.CHECK, react_and_user.name):
-                    num_checks += 1
-                elif react_is(ReactionType.REJECT, react_and_user.name):
-                    num_rejects += 1
-                elif react_is_one([ReactionType.FIX, ReactionType.ALERT], react_and_user.name):
-                    fix_or_alert = True
-                elif react_is(ReactionType.STOP, react_and_user.name):
-                    specs_needed = True
-                elif react_is(ReactionType.NUMBER, react_and_user.name):
-                    specs_required = KEYCAP_EMOJIS[react_and_user.name]
+            if is_valid:
+                rip_title = get_rip_title(qoc_rip.text)
+                author = get_rip_author(qoc_rip.text, qoc_rip.message_author)
+                author = author.replace('*', '').replace('_', '')
+                emote_names = [e.name for e in channel.guild.emojis]
 
-                if react_and_user.name in emote_names:
-                    for e in channel.guild.emojis:
-                        if e.name == react_and_user.name:
-                            reacts += f"{e} "
-                            break
-                else:
-                    reacts += f"{react_and_user.name} "
+                reacts = ""
+                num_checks = 0
+                num_rejects = 0
+                num_goldchecks = 0
+                specs_required = 1
+                checks_required = 3
+                specs_needed = False
+                fix_or_alert = False
 
-            indicator = ""
-            check_passed = (num_checks - num_rejects >= checks_required) and not fix_or_alert
-            specs_passed = (not specs_needed or num_goldchecks >= specs_required)
-            is_overdue = (datetime.now(timezone.utc) - qoc_rip.created_at) > timedelta(days=is_spec_overdue_days)
-            if check_passed:
-                indicator = APPROVED_INDICATOR if specs_passed else AWAITING_SPECIALIST_INDICATOR
-            elif specs_needed and not specs_passed and is_overdue:
-                indicator = SPECS_OVERDUE_INDICATOR
-            elif is_overdue:
-                indicator = OVERDUE_INDICATOR
+                for react_and_user in qoc_rip.react_and_users:
+                    if react_is(ReactionType.GOLDCHECK, react_and_user.name):
+                        num_goldchecks += 1
+                    elif react_is(ReactionType.CHECKREQ, react_and_user.name):
+                        try:
+                            checks_required = int(react_and_user.name.split("check")[0])
+                        except ValueError:
+                            print("Error parsing checkreq react: {}".format(react_and_user.name))
+                    elif react_is(ReactionType.CHECK, react_and_user.name):
+                        num_checks += 1
+                    elif react_is(ReactionType.REJECT, react_and_user.name):
+                        num_rejects += 1
+                    elif react_is_one([ReactionType.FIX, ReactionType.ALERT], react_and_user.name):
+                        fix_or_alert = True
+                    elif react_is(ReactionType.STOP, react_and_user.name):
+                        specs_needed = True
+                    elif react_is(ReactionType.NUMBER, react_and_user.name):
+                        specs_required = KEYCAP_EMOJIS[react_and_user.name]
 
-            link = format_message_link(channel.guild.id, channel.id, qoc_rip.message_id)
+                    if react_and_user.name in emote_names:
+                        for e in channel.guild.emojis:
+                            if e.name == react_and_user.name:
+                                reacts += f"{e} "
+                                break
+                    else:
+                        reacts += f"{react_and_user.name} "
 
-            base_message = f'**[{rip_title}]({link})**\n{author}'
-            if len(indicator) > 0:
-                base_message = f'{indicator} **[{rip_title}]({link})** {indicator}\n{author}'
-            result += base_message + f' | {reacts}\n'
-            result += "━━━━━━━━━━━━━━━━━━\n" # a line for readability!
+                indicator = ""
+                check_passed = (num_checks - num_rejects >= checks_required) and not fix_or_alert
+                specs_passed = (not specs_needed or num_goldchecks >= specs_required)
+                is_spec_overdue = (datetime.now(timezone.utc) - qoc_rip.created_at) > timedelta(days=is_spec_overdue_days)
+                is_overdue =      (datetime.now(timezone.utc) - qoc_rip.created_at) > timedelta(days=is_overdue_days)
+                if check_passed:
+                    indicator = APPROVED_INDICATOR if specs_passed else AWAITING_SPECIALIST_INDICATOR
+                elif specs_needed and not specs_passed and is_spec_overdue:
+                    indicator = SPECS_OVERDUE_INDICATOR
+                elif is_overdue:
+                    indicator = OVERDUE_INDICATOR
+
+                link = format_message_link(channel.guild.id, channel.id, qoc_rip.message_id)
+
+                base_message = f'**[{rip_title}]({link})**\n{author}'
+                if len(indicator) > 0:
+                    base_message = f'{indicator} **[{rip_title}]({link})** {indicator}\n{author}'
+                result += base_message + f' | {reacts}\n'
+                result += "━━━━━━━━━━━━━━━━━━\n" # a line for readability!
 
         if result != "":
             await send_embed(ctx.channel, result, time)
@@ -338,7 +363,8 @@ async def roundup(ctx: Context, optional_time = None):
     Roundup command. Retrieve all pinned messages (except the first one) and their reactions.
     Accepts an optional argument to control embed's display time *in hours*.
     """
-    await roundup_new(ctx, optional_time)
+    roundup_desc = RoundupDesc()
+    await send_roundup(roundup_desc, optional_time, ctx)
 
 @bot.command(name='mypins', brief='displays rips you\'ve pinned')
 async def mypins(ctx: Context, optional_time = None):
@@ -427,13 +453,8 @@ async def myfixes(ctx: Context, user_id: str = "", optional_time = None):
     """
     Retrieve all messages with fix or alert reactions by the command author.
     """
-    async def reactions_contain_fix_by_user(ID: int, reaction_data: typing.List[ReactionData]):
-        for r in reaction_data:
-            if react_is_one([ReactionType.FIX, ReactionType.ALERT], r.name) and ID == r.user_id:
-                return True
-        return False
-
-    await react_conditional_command(ctx, 'myfixes', user_id, reactions_contain_fix_by_user, 'with wrenches', optional_time)
+    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.MYFIXES, user_id_string = user_id, conditional_string = "with wrenches")
+    await send_roundup(roundup_desc, optional_time, ctx)
 
 
 @bot.command(name='myfresh', brief='displays rips you\'ve not reviewed')
@@ -1938,6 +1959,12 @@ async def message_has_reaction(reaction_type: ReactionType, message: Message) ->
 def suborqueue_rip_has_reaction(reaction_type: ReactionType, suborqueue_rip: SubOrQueueRip) -> bool:
     for name in suborqueue_rip.react_names:
         if react_is(reaction_type, name):
+            return True
+    return False
+
+def is_qoc_rip_user_reacted_one(reaction_type_list: List[ReactionType], user_id: int, qoc_rip: QocRip):
+    for react_and_user in qoc_rip.react_and_users:
+        if react_and_user.user_id == user_id and react_is_one(reaction_type_list, react_and_user.name):
             return True
     return False
 
