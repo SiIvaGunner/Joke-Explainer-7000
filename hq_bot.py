@@ -247,11 +247,13 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
 class RoundupFilterType(Enum):
     MYFIXES = auto()
     MYFRESH = auto()
+    SEARCH = auto()
 
 class RoundupDesc(NamedTuple):
     roundup_filter_type: RoundupFilterType = None
     user_id_string: str = ""
     conditional_string: str = ""
+    search_key: str = ""
 
 async def send_roundup(roundup_desc: RoundupDesc, optional_time: float, ctx: Context):
     if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
@@ -281,9 +283,13 @@ async def send_roundup(roundup_desc: RoundupDesc, optional_time: float, ctx: Con
                 if search_author:
                     await ctx.channel.send(f"Searching for rips {roundup_desc.conditional_string} by {search_author.name}")
 
+        search_keys = roundup_desc.search_key.split('|')
+
         result = ""
 
         for qoc_rip in qoc_rips:
+
+            rip_title = get_rip_title(qoc_rip.text)
 
             is_valid = True
             match (roundup_desc.roundup_filter_type):
@@ -293,9 +299,14 @@ async def send_roundup(roundup_desc: RoundupDesc, optional_time: float, ctx: Con
                 case RoundupFilterType.MYFRESH:
                     react_list = [ReactionType.CHECK, ReactionType.GOLDCHECK, ReactionType.FIX, ReactionType.ALERT, ReactionType.REJECT]
                     is_valid = not is_qoc_rip_user_reacted_one(react_list, user_id, qoc_rip)
+                case RoundupFilterType.SEARCH:
+                    is_valid = False
+                    for key in search_keys:
+                        if line_contains_substring(rip_title, key):
+                            is_valid = True
+                            break
 
             if is_valid:
-                rip_title = get_rip_title(qoc_rip.text)
                 author = get_rip_author(qoc_rip.text, qoc_rip.message_author)
                 author = author.replace('*', '').replace('_', '')
                 emote_names = [e.name for e in channel.guild.emojis]
@@ -393,10 +404,8 @@ async def search(ctx: Context, search_key: str, optional_time = None):
     Search for pinned messages by rip title.
     Supports `|` for multiple search keys.
     """
-    search_keys = search_key.split('|')
-    await filter_command(ctx, 'search', 
-            (lambda ctx, rip_info: any([line_contains_substring(rip_info["Title"], key) for key in search_keys])),
-            True, optional_time)
+    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.SEARCH, search_key=search_key)
+    await send_roundup(roundup_desc, optional_time, ctx)
 
 
 @bot.command(name='search_subs', aliases = ['search_sub'], brief='search for submissions with text in title')
