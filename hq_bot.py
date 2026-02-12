@@ -135,28 +135,32 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
     global latest_pin_time
     if last_pin is None or last_pin <= latest_pin_time:
         # print("Seems to be a message being unpinned")
+        # TODO: (Ahmayk) clear cache info of rip
         pass
     else:
         latest_pin_time = last_pin
-        pin_list = [message async for message in channel.pins(limit=None)]
-        if len(pin_list) < 1: return
-        latest_msg = pin_list[0]
+        latest_msg = await channel.pins(limit=1)
+        if latest_msg:
 
-        SOFT_PIN_LIMIT = _get_config('soft_pin_limit')
-        if len(pin_list) > SOFT_PIN_LIMIT:
-            if _get_config("pinlimit_must_die_mode"):
-                await latest_msg.unpin()
-                await channel.send(f"**Error**: More than {SOFT_PIN_LIMIT} rips in pins. Unpinned.")
-            else:
-                await channel.send(f"**Warning**: More than {SOFT_PIN_LIMIT} rips pinned - please handle them first :(")
-    
-        verdict, msg = await check_qoc_and_metadata(latest_msg)
+            qoc_rips = get_fast_converted_qoc_rips(channel)
 
-        # Send msg
-        if len(verdict) > 0:
-            rip_title = get_rip_title(latest_msg.content)
-            link = format_message_link(channel.guild.id, channel.id, latest_msg.id)
-            await channel.send("**Rip**: **[{}]({})**\n**Verdict**: {}\n{}-# React {} if this is resolved.".format(rip_title, link, verdict, msg, DEFAULT_CHECK))
+            SOFT_PIN_LIMIT = _get_config('soft_pin_limit')
+            if len(pin_list) > SOFT_PIN_LIMIT:
+                if _get_config("pinlimit_must_die_mode"):
+                    await latest_msg.unpin()
+                    await channel.send(f"**Error**: More than {SOFT_PIN_LIMIT} rips in pins. Unpinned.")
+                else:
+                    await channel.send(f"**Warning**: More than {SOFT_PIN_LIMIT} rips pinned - please handle them first :(")
+        
+            # TODO: (Ahmayk) add rip to cache
+
+            verdict, msg = await check_qoc_and_metadata(latest_msg.content, latest_msg.id, str(latest_msg.author))
+
+            # Send msg
+            if len(verdict) > 0:
+                rip_title = get_rip_title(latest_msg.content)
+                link = format_message_link(channel.guild.id, channel.id, latest_msg.id)
+                await channel.send("**Rip**: **[{}]({})**\n**Verdict**: {}\n{}-# React {} if this is resolved.".format(rip_title, link, verdict, msg, DEFAULT_CHECK))
 
 class ReactionCacheAction(Enum):
     REACTION_ADD = auto()
@@ -768,17 +772,17 @@ async def vet_from(ctx: Context, from_msg):
         return
 
     async with ctx.channel.typing():
-        pin_list = await get_pins(channel)
+        qoc_rips = await get_fast_converted_qoc_rips(channel)
 
-        for pinned_message in pin_list:
-            if not vet_all_pins and pinned_message.created_at < from_timestamp:
+        for qoc_rip in qoc_rips:
+            if not vet_all_pins and qoc_rip.created_at < from_timestamp:
                 continue
-            qcCode, qcMsg, _ = await check_qoc(pinned_message, False)
+            qcCode, qcMsg, _ = await check_qoc(qoc_rip.text, False)
 
             if qcCode != 0:
-                rip_title = get_rip_title(pinned_message.content)
+                rip_title = get_rip_title(qoc_rip.text)
                 verdict = code_to_verdict(qcCode, qcMsg)
-                link = format_message_link(channel.guild.id, channel.id, pinned_message.id)
+                link = format_message_link(channel.guild.id, channel.id, qoc_rip.message_id)
                 await ctx.channel.send("**Rip**: **[{}]({})**\n**Verdict**: {}\n{}\n-# React {} if this is resolved.".format(rip_title, link, verdict, qcMsg, DEFAULT_CHECK))
 
         if len(pin_list) == 0:
@@ -806,7 +810,8 @@ async def vet_all(ctx: Context, optional_time = None):
         return
 
     async with ctx.channel.typing():
-        all_pins = await vet_pins(channel)
+        #TOOD: (Ahmayk) this does not vet anything???
+        # all_pins = await vet_pins(channel)
         result = ""
         for rip_id, rip_info in all_pins.items():
             result += make_markdown(rip_info, True)
@@ -833,7 +838,7 @@ async def vet_msg(ctx: Context, msg_link: str = None):
             await ctx.channel.send(status)
             return
 
-        verdict, msg = await check_qoc_and_metadata(message, True)
+        verdict, msg = await check_qoc_and_metadata(message.content, message.id, str(message.author), True)
         rip_title = get_rip_title(message.content)
 
         await ctx.channel.send("**Rip**: **{}**\n**Verdict**: {}\n**Comments**:\n{}".format(rip_title, verdict, msg))
@@ -1713,48 +1718,6 @@ def get_rip_description(text: str) -> str:
 def format_message_link(guild_id: int, channel_id: int, message_id: int):
     return  f"<https://discordapp.com/channels/{str(guild_id)}/{str(channel_id)}/{str(message_id)}>"
 
-async def get_pinned_msgs_and_react(channel: TextChannel, react_func: typing.Callable | None = None) -> dict:
-    """
-    Unified function to retrieve all pinned messages (except the first one) from a channel and give corresponding emojis.
-    - react_func: A function in the form of fn(TextChannel, Message) that returns some emojis for a message. If None, show no emojis.
-    
-    Returns a dictionary of pinned messages.
-    """
-    pin_list = await get_pins(channel)
-
-    dict_index = 1
-    pins_in_message = {}  # make a dict for everything
-
-    for pinned_message in pin_list:
-        # Get the rip title
-        rip_title = get_rip_title(pinned_message.content)
-
-        # Find the rip's author
-        author = get_rip_author(pinned_message.content, str(pinned_message.author))
-
-        # Get reactions
-        if react_func is not None:
-            #TODO: (Marc) rearchitect to not pass in a function pointer
-            reacts, indicator = await react_func(channel, pinned_message)
-        else:
-            reacts, indicator = "", ""
-
-        #get rid of all asterisks and underscores in the author so an odd number of them doesn't mess up the rest of the message
-        author = author.replace('*', '').replace('_', '')
-
-        # Put all this information in the dict
-        pins_in_message[dict_index] = {
-            'Title': rip_title,
-            'Author': author,
-            'Reacts': reacts,
-            'PinMiser': pinned_message.author.name,  # im mister rip christmas, im mister qoc
-            'Indicator': indicator,
-            'Link': format_message_link(channel.guild.id, channel_id, pinned_message.id)
-        }
-        dict_index += 1
-
-    return pins_in_message
-
 
 KEYCAP_EMOJIS = {'2️⃣': 2, '3️⃣': 3, '4️⃣': 4, '5️⃣': 5, '6️⃣': 6, '7️⃣': 7, '8️⃣': 8, '9️⃣': 9, '🔟': 10}
 
@@ -1854,13 +1817,6 @@ async def vet_message(channel: TextChannel, message: Message) -> typing.Tuple[st
 
     return reacts, ""
 
-async def vet_pins(channel: TextChannel):
-    """
-    Retrieve all pinned messages (except the first one) from a channel and perform basic QoC, showing verdicts as emojis.
-    """
-    return await get_pinned_msgs_and_react(channel, vet_message)
-
-
 def code_to_verdict(code: int, msg: str) -> str:
     """
     Helper function to convert performQoC code output to emoji
@@ -1881,11 +1837,11 @@ def code_to_verdict(code: int, msg: str) -> str:
     return verdict
 
 
-async def check_qoc(message: Message, fullFeedback: bool = False) -> typing.Tuple[str, str, str]:
+async def check_qoc(text: str, fullFeedback: bool = False) -> typing.Tuple[str, str, str]:
     """
     Perform simpleQoC on a message.
     """
-    urls = extract_rip_link(message.content)
+    urls = extract_rip_link(text)
     qcCode, qcMsg = -1, "No links detected."
     detectedUrl = None
     for url in urls:
@@ -1949,7 +1905,7 @@ async def check_metadata(text: str, message_id: int, message_author_name: str, f
     return mtCode, mtMsg
 
 
-async def check_qoc_and_metadata(message: Message, fullFeedback: bool = False) -> typing.Tuple[str, str]:
+async def check_qoc_and_metadata(text: str, message_id: int, message_author_name: str, fullFeedback: bool = False) -> typing.Tuple[str, str]:
     """
     Perform simpleQoC and metadata checking on a message.
 
@@ -1958,10 +1914,10 @@ async def check_qoc_and_metadata(message: Message, fullFeedback: bool = False) -
     """
     verdict = ""
     msg = ""
-    rip_title = get_rip_title(message.content)
+    rip_title = get_rip_title(text)
     
     # QoC
-    qcCode, qcMsg, detectedUrl = await check_qoc(message, fullFeedback)
+    qcCode, qcMsg, detectedUrl = await check_qoc(text, fullFeedback)
     if qcCode == -1:
         await write_log("Warning: cannot QoC message\nRip: {}\n{}".format(rip_title, qcMsg))
     elif (qcCode == 1) or fullFeedback:
@@ -1969,7 +1925,7 @@ async def check_qoc_and_metadata(message: Message, fullFeedback: bool = False) -
         msg += qcMsg + "\n"
 
     # Metadata
-    mtCode, mtMsg = await check_metadata(message.content, message.id, str(message.author), fullFeedback)
+    mtCode, mtMsg = await check_metadata(text, message_id, message_author_name, fullFeedback)
     if mtCode == -1:
         await write_log("Warning: cannot check metadata of message\nRip: {}\n{}".format(rip_title, mtMsg))
     elif mtCode == 1:
@@ -1981,7 +1937,7 @@ async def check_qoc_and_metadata(message: Message, fullFeedback: bool = False) -
     # in order to minimize accidental joke lines when uploading
     if detectedUrl is not None:
         try:
-            for line in message.content.split('```', 2)[2].splitlines():
+            for line in text.split('```', 2)[2].splitlines():
                 line = "".join(c for c in line if c.isprintable())
                 if detectedUrl in line:
                     break
@@ -1992,14 +1948,6 @@ async def check_qoc_and_metadata(message: Message, fullFeedback: bool = False) -
             pass
 
     return verdict, msg
-
-
-async def get_pins(channel: TextChannel) -> typing.List[Message]:
-    """
-    Raw pin retrieval helper function
-    """
-    pins = [message async for message in channel.pins(limit=None)]
-    return pins[:-1] if _get_config('qoc_contains_pinned_rule') else pins
 
 
 RIP_CACHE_QOC = {}
