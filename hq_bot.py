@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 import discord
-from discord import Message, Thread, TextChannel, Reaction
+from discord import Message, Thread, TextChannel
 from discord.abc import GuildChannel
 from discord.ext import commands
 from discord.ext.commands import Context
@@ -39,8 +39,8 @@ QOC_DEFAULT_LINKERR = '🔗'
 QOC_DEFAULT_BITRATE = '🔢'
 QOC_DEFAULT_CLIPPING = '📢'
 
-latest_pin_time = None # Keeps track of the last pinned message's time to distinguish between pins and unpins. To be updated on ready.
-latest_scan_time = None
+latest_pin_time: datetime = datetime.now(timezone.utc)
+latest_scan_time: datetime = datetime.now(timezone.utc)
 
 bot = commands.Bot(
     command_prefix='!',
@@ -54,6 +54,146 @@ bot = commands.Bot(
 bot.remove_command('help') # get rid of the dumb default !help command
 
 #===============================================#
+#                    CACHE                      #
+#===============================================#
+
+class ReactAndUser(NamedTuple):
+    name: str
+    user_id: int
+
+class QocRip(NamedTuple):
+    text: str
+    message_id: int
+    channel_id: int
+    message_author_id: int
+    message_author_name: str
+    react_and_users: List[ReactAndUser]
+    created_at: datetime.datetime
+
+## NOTE: (Ahmayk) key = channel_id, value = dictionary with key = message, value = QocRip
+RIP_CACHE_QOC: dict[int, dict[int, QocRip]] = {}
+
+async def cache_qoc_rip(message: Message) -> QocRip:
+
+    react_and_users = []
+    for reaction in message.reactions:
+        name = ""
+        if isinstance(reaction.emoji, str):
+            name = reaction.emoji
+        elif hasattr(reaction.emoji, "name"):
+            name = reaction.emoji.name
+        # NOTE: (Ahmayk) this is slow! We have to do an api call for each user.
+        # But is also neccessary
+        user_ids = [user.id async for user in reaction.users()]
+        for user_id in user_ids:
+            react_and_users.append(ReactAndUser(name, user_id))
+
+    qoc_rip = QocRip(message.content, message.id, message.channel.id, message.author.id, \
+            str(message.author), react_and_users, message.created_at)
+
+    RIP_CACHE_QOC[message.channel.id][message.id] = qoc_rip
+
+    return qoc_rip
+
+CACHE_LOCK_QOC: dict[int, asyncio.Lock] = {}
+
+async def get_qoc_rips(channel: TextChannel) -> typing.List[QocRip]:
+    qoc_rips = []
+
+    if channel.id not in CACHE_LOCK_QOC:
+        CACHE_LOCK_QOC[channel.id] = asyncio.Lock()
+
+    async with CACHE_LOCK_QOC[channel.id]:
+        if channel.id not in RIP_CACHE_QOC:
+
+            RIP_CACHE_QOC[channel.id]: dict[int, QocRip] = {}
+
+            async for message in channel.pins(limit=None):
+                # NOTE: (Ahmayk) channel.pins does not return reaction data,
+                # so we have to fetch it manually. This is slow! But neccessary.
+                message = await channel.fetch_message(message.id)
+                await cache_qoc_rip(message)
+
+            if len(RIP_CACHE_QOC[channel.id]) and _get_config('qoc_contains_pinned_rule'):
+                RIP_CACHE_QOC[channel.id].popitem()
+
+    qoc_rips = RIP_CACHE_QOC[channel.id].values()
+
+    return qoc_rips
+
+class SubOrQueueRip(NamedTuple):
+    text: str
+    message_id: int
+    channel_id: int
+    message_author_id: int
+    message_author_name: str
+    react_names: List[str]
+
+RIP_CACHE_SUBORQUEUE: dict[int, dict[int, SubOrQueueRip]] = {}
+
+async def cache_suborqueue_rip(message) -> SubOrQueueRip:
+
+    react_names = []
+    for reaction in message.reactions:
+        name = ""
+        if isinstance(reaction.emoji, str):
+            name = reaction.emoji
+        elif hasattr(reaction.emoji, "name"):
+            name = reaction.emoji.name
+        react_names.append(name)
+
+    suborqueue_rip = SubOrQueueRip(message.content, message.id, message.channel.id, \
+                                   message.author.id, str(message.author), react_names)
+
+    RIP_CACHE_SUBORQUEUE[message.channel.id][message.id] = suborqueue_rip
+    return suborqueue_rip
+
+CACHE_LOCK_SUBORQUEUE: dict[int, asyncio.Lock] = {}
+
+async def get_suborqueue_rips(channel: TextChannel, include_threads: bool) -> typing.List[SubOrQueueRip]:
+
+    if channel.id not in CACHE_LOCK_SUBORQUEUE:
+        CACHE_LOCK_SUBORQUEUE[channel.id] = asyncio.Lock()
+
+    async with CACHE_LOCK_SUBORQUEUE[channel.id]:
+        if channel.id not in RIP_CACHE_SUBORQUEUE:
+            RIP_CACHE_SUBORQUEUE[channel.id]: dict[int, SubOrQueueRip] = {}
+
+            async for message in channel.history(limit = None):
+
+                if message.thread is not None and include_threads:
+                    thread_suborqueue_rips = await get_suborqueue_rips(message.thread, False)
+                    #NOTE: (Ahmayk) we insert thread rips also in its parent channel dict so that
+                    #we get all rips in theads when we get the parent channel's rips 
+                    for thread_suborqueue_rip in thread_suborqueue_rips:
+                        RIP_CACHE_SUBORQUEUE[channel.id][thread_suborqueue_rip.message_id] = thread_suborqueue_rip 
+
+                is_valid_message = channel is Thread or not (message.channel is Thread)
+                has_quotes = '```' in message.content
+                if is_valid_message and has_quotes:
+                    rip_link = extract_rip_link(message.content)
+                    if len(rip_link) > 0:
+                        await cache_suborqueue_rip(message)
+
+    return RIP_CACHE_SUBORQUEUE[channel.id].values()
+
+async def get_fast_converted_qoc_rips(channel: TextChannel) -> typing.List[SubOrQueueRip]:
+    qoc_fast_converted_rips = []
+    async with CACHE_LOCK_SUBORQUEUE:
+        if channel.id in RIP_CACHE_QOC:
+            qoc_rips = RIP_CACHE_QOC[channel.id].values()
+            for r in qoc_rips:
+                suborqueue_rip = SubOrQueueRip(r.text, r.message_id, r.channel_id, r.message_author_id, r.message_author_name, [])
+                qoc_fast_converted_rips.append(suborqueue_rip)
+        else:
+            async for message in channel.pins(limit=None):
+                qoc_rip = SubOrQueueRip(message.content, message.id, channel.id, message.author.id, str(message.author), [])
+                qoc_fast_converted_rips.append(qoc_rip)
+            if _get_config('qoc_contains_pinned_rule'):
+                qoc_fast_converted_rips = qoc_fast_converted_rips[:-1]
+    return qoc_fast_converted_rips
+
+#===============================================#
 #                    EVENTS                     #
 #===============================================#
 
@@ -61,10 +201,6 @@ bot.remove_command('help') # get rid of the dumb default !help command
 async def on_ready():
     print(f'Logged in as {bot.user.name}')
     print('#################################')
-
-    # Update latest_pin_time in order to keep track of 
-    global latest_pin_time
-    latest_pin_time = datetime.now(timezone.utc)
 
     await write_log("Good morning! Caching rips...")
 
@@ -131,8 +267,9 @@ bot.close = types.MethodType(close_with_log, bot)
 async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Thread], last_pin: datetime):
     if not channel_is_type(channel, 'ROUNDUP'):
         return
-    
+
     global latest_pin_time
+    
     if last_pin is None or last_pin <= latest_pin_time:
         # print("Seems to be a message being unpinned")
         # TODO: (Ahmayk) clear cache info of rip
@@ -260,11 +397,7 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
     if payload.channel_id in RIP_CACHE_SUBORQUEUE and payload.message_id in RIP_CACHE_SUBORQUEUE[payload.channel_id]: 
         RIP_CACHE_SUBORQUEUE[payload.channel_id].pop(payload.message_id)
 
-#===============================================#
-#                   COMMANDS                    #
-#===============================================#
-
-# ============ Aggregate commands ============= #
+# ============ Roundup commands ============== #
 
 class RoundupFilterType(Enum):
     MYPINS = auto()
@@ -427,6 +560,7 @@ async def roundup(ctx: Context, optional_time = None):
     roundup_desc = RoundupDesc()
     await send_roundup(roundup_desc, optional_time, ctx)
 
+
 @bot.command(name='mypins', brief='displays rips you\'ve pinned')
 async def mypins(ctx: Context, optional_time = None):
     """
@@ -435,71 +569,6 @@ async def mypins(ctx: Context, optional_time = None):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.MYPINS,
                                message_author_id = ctx.author.id, not_found_message = "No pins are yours.")
     await send_roundup(roundup_desc, optional_time, ctx)
-
-@bot.command(name='search', brief='search for pinned rips with text in title')
-async def search(ctx: Context, search_key: str, optional_time = None):
-    """
-    Search for pinned messages by rip title.
-    Supports `|` for multiple search keys.
-    """
-    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.SEARCH, \
-            search_key=search_key, not_found_message = "No pinned rips containing indicated text in title found.")
-    await send_roundup(roundup_desc, optional_time, ctx)
-
-
-@bot.command(name='search_subs', aliases = ['search_sub'], brief='search for submissions with text in title')
-async def search_subs(ctx: Context, search_key: str, sub_channel_link: str = None, optional_time = None):
-    """
-    Search for submissions by rip title.
-    Supports `|` for multiple search keys.
-    """
-    desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.SEARCH, \
-                              channel_types = ['SUBS', 'SUBS_PIN', 'SUBS_THREAD'], \
-                              search_key = search_key, \
-                              not_found_message = "No submissions containing indicated text in title found.")
-    await send_suborqueue_rips(desc, sub_channel_link, optional_time, ctx)
-
-
-@bot.command(name='emails', brief='displays emails')
-async def emails(ctx: Context, optional_time = None):
-    """
-    Retrieve all messages that are tagged as email.
-    """
-    await events(ctx, "email", optional_time)
-
-
-@bot.command(name='events', aliases = ['event'], brief='displays event rips')
-async def events(ctx: Context, event: str = None, optional_time = None):
-    """
-    Retrieve all messages that are tagged as for an event.
-    The provided string must appear in the rip's author label (case insensitive).
-    Supports `|` for multiple search keys.
-    """
-    if channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']) and event is None:
-        await ctx.channel.send("Error: Please indicate the event name. Rips should be tagged with this name.")
-        return
-
-    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.EVENTS, \
-            search_key=event, not_found_message = "No pinned rips containing inteded text in author line found.")
-    await send_roundup(roundup_desc, optional_time, ctx)
-
-
-@bot.command(name='event_subs', aliases = ['event_sub'], brief='displays event submissions from linked channel')
-async def event_subs(ctx: Context, event: str = None, sub_channel_link: str = None, optional_time = None):
-    """
-    Retrieve all messages in a submission channel that are tagged as for an event.
-    The provided string must appear in the rip's author label (case insensitive).
-    Supports `|` for multiple search keys.
-    """
-    if channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']) and event is None:
-        await ctx.channel.send("Error: Please indicate the event name. Rips should be tagged with this name.")
-        return
-
-    desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.EVENT, \
-                              channel_types = ['SUBS', 'SUBS_PIN', 'SUBS_THREAD'], \
-                              search_key = event, \
-                              not_found_message = "No submissions containing indicated text in author line found.")
-    await send_suborqueue_rips(desc, sub_channel_link, optional_time, ctx)
 
 
 @bot.command(name='myfixes', brief='displays rips you\'ve wrenched')
@@ -529,23 +598,24 @@ async def fresh(ctx: Context, optional_time = None):
             not_found_message = "No fresh rips.")
     await send_roundup(roundup_desc, optional_time, ctx)
 
-@bot.command(name='wrenches', aliases = ['fix'])
-async def wrenches(ctx: Context, optional_time = None):
+
+@bot.command(name='search', brief='search for pinned rips with text in title')
+async def search(ctx: Context, search_key: str, optional_time = None):
     """
-    Retrieve all pinned messages (except the first one) with :fix: reactions.
+    Search for pinned messages by rip title.
+    Supports `|` for multiple search keys.
     """
-    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.HASREACT, \
-                               reaction_type=ReactionType.FIX, not_found_message="No wrenches found.")
+    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.SEARCH, \
+            search_key=search_key, not_found_message = "No pinned rips containing indicated text in title found.")
     await send_roundup(roundup_desc, optional_time, ctx)
 
-@bot.command(name='stops')
-async def stops(ctx: Context, optional_time = None):
+
+@bot.command(name='emails', brief='displays emails')
+async def emails(ctx: Context, optional_time = None):
     """
-    Retrieve all pinned messages (except the first one) with :stop: reactions.
+    Retrieve all messages that are tagged as email.
     """
-    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.HASREACT, \
-                               reaction_type=ReactionType.STOP, not_found_message="No octogons found.")
-    await send_roundup(roundup_desc, optional_time, ctx)
+    await events(ctx, "email", optional_time)
 
 
 @bot.command(name='checks')
@@ -566,6 +636,27 @@ async def rejects(ctx: Context, optional_time = None):
                                reaction_type=ReactionType.REJECT, not_found_message="No rejected rips found.")
     await send_roundup(roundup_desc, optional_time, ctx)
 
+
+@bot.command(name='wrenches', aliases = ['fix'])
+async def wrenches(ctx: Context, optional_time = None):
+    """
+    Retrieve all pinned messages (except the first one) with :fix: reactions.
+    """
+    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.HASREACT, \
+                               reaction_type=ReactionType.FIX, not_found_message="No wrenches found.")
+    await send_roundup(roundup_desc, optional_time, ctx)
+
+@bot.command(name='stops')
+async def stops(ctx: Context, optional_time = None):
+    """
+    Retrieve all pinned messages (except the first one) with :stop: reactions.
+    """
+    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.HASREACT, \
+                               reaction_type=ReactionType.STOP, not_found_message="No octogons found.")
+    await send_roundup(roundup_desc, optional_time, ctx)
+
+
+
 @bot.command(name='overdue', brief=f'display rips that have been pinned for over X days')
 async def overdue(ctx: Context, optional_time = None):
     """
@@ -574,7 +665,25 @@ async def overdue(ctx: Context, optional_time = None):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.OVERDUE, not_found_message="No overdue rips.")
     await send_roundup(roundup_desc, optional_time, ctx)
 
-# ============ Pin count commands ============== #
+
+@bot.command(name='events', aliases = ['event'], brief='displays event rips')
+async def events(ctx: Context, event: str = None, optional_time = None):
+    """
+    Retrieve all messages that are tagged as for an event.
+    The provided string must appear in the rip's author label (case insensitive).
+    Supports `|` for multiple search keys.
+    """
+    if channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']) and event is None:
+        await ctx.channel.send("Error: Please indicate the event name. Rips should be tagged with this name.")
+        return
+
+    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.EVENTS, \
+            search_key=event, not_found_message = "No pinned rips containing inteded text in author line found.")
+    await send_roundup(roundup_desc, optional_time, ctx)
+
+
+# ============ Counting Commands ============== #
+
 
 @bot.command(name='count', brief="counts all pinned rips")
 async def count(ctx: Context):
@@ -628,71 +737,175 @@ async def limitcheck(ctx: Context):
         await ctx.channel.send(result)
 
 
-@bot.command(name='scout', brief='find approved rips with specific title prefix')
-async def scout(ctx: Context, prefix: str = None, channel_link: str = None, optional_time = None):
+@bot.command(name='count_subs', brief='count number of remaining submissions')
+async def count_subs(ctx: Context, sub_channel_link: str = None):
     """
-    Search queue channel for rips starting with the specific prefix (e.g. letter E).
-    The prefix is case insensitive.
-    """
-    if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
-    heard_command("scout", ctx.message.author.name)
-
-    if prefix is None:
-        await ctx.channel.send("Error: Please provide a prefix string.")
-        return
-
-    desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.SCOUT, \
-                              channel_types = ['QUEUE'], \
-                              search_key = prefix, \
-                              not_found_message = 'No approved rips starting with {prefix} found.')
-    await send_suborqueue_rips(desc, channel_link, optional_time, ctx)
-
-@bot.command(name='scout_stats', brief='summarize approved rips with specific letter prefix')
-async def scout_stats(ctx: Context, channel_link: str = None, optional_time = None):
-    """
-    Display count of rips starting with each letter.
+    Count number of messages in a channel (e.g. submissions).
+    Retrieve the entire history of a channel and count the number of messages not in threads.
+    Accepts an optional link argument to the subs-type channel to view - if not, first valid channel in config is used.
     """
     if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
-    heard_command("scout_stats", ctx.message.author.name)
+    heard_command("count_subs", ctx.message.author.name)
 
-    channel_id, msg = parse_channel_link(channel_link, ['QUEUE'])
+    sub_channel_id, msg = parse_channel_link(sub_channel_link, ['SUBS', 'SUBS_PIN', 'SUBS_THREAD'])
     if len(msg) > 0:
         await ctx.channel.send(msg)
-        return
+        if sub_channel == -1: return
+
+    async with ctx.channel.typing():
+        channel = bot.get_channel(sub_channel_id)
+
+        rips = 0
+        if channel_is_types(channel, ['QOC', 'SUBS_PIN']):
+            rips = await get_fast_converted_qoc_rips(channel)
+        else:
+            rips = await get_suborqueue_rips(channel, True)
+        count = len(rips)
+
+        if (count < 1):
+            result = "```ansi\n\u001b[0;31m* Determination.\u001b[0;0m```"
+        else:
+            result = f"```ansi\n\u001b[0;31m* {count} left.\u001b[0;0m```"
+
+        await ctx.channel.send(result)
+
+
+# ============ SubOrQueue Rip Commands ============== #
+
+class SubOrQueueRipFilterType(Enum):
+    HASREACT = auto()
+    UNSENT = auto()
+    SEARCH = auto()
+    EVENT = auto()
+    SCOUT = auto()
+
+class SendSubOrQueueDesc(NamedTuple):
+    suborqueue_rip_filter_type: SubOrQueueRipFilterType = None
+    reaction_type: ReactionType = None
+    channel_types: List[str] = []
+    search_key: str = ""
+    not_found_message: str = ""
+
+async def send_suborqueue_rips(send_suborqueue_desc: SendSubOrQueueDesc, channel_link: str, optional_time: float, ctx: Context):
+    channel_id, msg = parse_channel_link(channel_link, send_suborqueue_desc.channel_types)
+    if len(msg) > 0 or channel_link is None:
+        if channel_link is not None:
+            await ctx.channel.send("Warning: something went wrong parsing channel link. Defaulting to showing from all known queues.")
+        channel_ids = []
+        for k, v in CHANNELS.items():
+            for type in send_suborqueue_desc.channel_types:
+                if type in v:
+                    channel_ids.append(k)
+    else:
+        channel_ids = [channel_id]
 
     time, msg = parse_optional_time(ctx.channel, optional_time)
     if msg is not None: await ctx.channel.send(msg)
 
-    channel = bot.get_channel(channel_id)
-    if channel is None: await ctx.channel.send("Error: Invalid channel found. Contact bot developers to update list of channels.")
-
     async with ctx.channel.typing():
-        suborqueue_rips = await get_suborqueue_rips(channel, True)
-
-        count = {}
-        for letter in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ': # could have done string.ascii_uppercase but i dont think the alphabet is getting any updates
-            count[letter] = 0
-
-        for suborqueue_rip in suborqueue_rips:
-            rip_title = get_raw_rip_title(suborqueue_rip.text)
-            prefix = rip_title.lower()[0]
-            if prefix in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ':  # isalpha becomes fucked with unicode characters i think
-                count[prefix.upper()] += 1
-            else:
-                if prefix in count.keys():
-                    count[prefix] += 1
-                else:
-                    count[prefix] = 1
-        
         result = ""
-        maxCount = max(max(count.values()), 20)
-        for k, v in sorted(count.items()):
-            result += f"{k}: " + ("▮" * int(v / maxCount * 20)) + f" ({v})\n"
+        count = 0
 
-        if len(suborqueue_rips) == 0:
-            await ctx.channel.send("No approved rips found.")
+        search_keys = send_suborqueue_desc.search_key.split('|')
+        prefix = send_suborqueue_desc.search_key.lower()
+
+        qoc_emote = DEFAULT_QOC
+        for e in ctx.guild.emojis:
+            if e.name.lower() == "qoc":
+                qoc_emote = e
+
+        for channel_id in channel_ids:
+            channel = bot.get_channel(channel_id)
+
+            rips = []
+            if channel:
+                if channel_is_type(channel, 'SUBS_PIN'):
+                    ##NOTE: (Ahmayk) Does not return reaction data
+                    ## but this doesn't affect anything as of writing
+                    ## since we do not call any filtertypes that check reactions
+                    ## (besdies checking for qoc react, but this does not happen in pratice)
+                    rips = await get_fast_converted_qoc_rips(channel)
+                elif channel_is_types(channel, ['SUBS']):
+                    rips = await get_suborqueue_rips(channel, False)
+                elif channel_is_types(channel, ['QUEUE', 'SUBS_THREAD']):
+                    rips = await get_suborqueue_rips(channel, True)
+
+            result += f'<#{channel_id}>:\n'
+
+            for suborqueue_rip in rips:
+
+                rip_title = get_rip_title(suborqueue_rip.text)
+                rip_author = get_raw_rip_author(suborqueue_rip.text)
+
+                is_valid = False
+                match(send_suborqueue_desc.suborqueue_rip_filter_type):
+                    case SubOrQueueRipFilterType.HASREACT:
+                        is_valid = suborqueue_rip_has_reaction(send_suborqueue_desc.reaction_type, suborqueue_rip)
+                    case SubOrQueueRipFilterType.UNSENT:
+                        is_valid = line_contains_substring(rip_author, 'email') and \
+                                not suborqueue_rip_has_reaction(ReactionType.EMAILSENT, suborqueue_rip)
+                    case SubOrQueueRipFilterType.SEARCH:
+                        for key in search_keys:
+                            if line_contains_substring(rip_title, key):
+                                is_valid = True
+                                break
+                    case SubOrQueueRipFilterType.EVENT:
+                        for key in search_keys:
+                            if line_contains_substring(rip_author, key):
+                                is_valid = True
+                                break
+                    case SubOrQueueRipFilterType.SCOUT:
+                        is_valid = rip_title.lower().startswith(prefix)
+                    case _:
+                        write_log("Unimplemented SubOrQueueRipFilterType: " + rip_filter_type)
+
+                if is_valid:
+                    if suborqueue_rip_has_reaction(ReactionType.QOC, suborqueue_rip):
+                        result += f"{qoc_emote} "
+                    rip_link = format_message_link(channel.guild.id, suborqueue_rip.channel_id, suborqueue_rip.message_id)
+                    result += f'**[{rip_title}]({rip_link})**\n'
+                    count += 1
+
+            result += '------------------------------\n'
+
+        if count == 0:
+            not_found_message = "No rips found."
+            if len(send_suborqueue_desc.not_found_message):
+                not_found_message = send_suborqueue_desc.not_found_message
+            await ctx.channel.send(not_found_message)
         else:
             await send_embed(ctx.channel, result, time)
+
+
+@bot.command(name='search_subs', aliases = ['search_sub'], brief='search for submissions with text in title')
+async def search_subs(ctx: Context, search_key: str, sub_channel_link: str = None, optional_time = None):
+    """
+    Search for submissions by rip title.
+    Supports `|` for multiple search keys.
+    """
+    desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.SEARCH, \
+                              channel_types = ['SUBS', 'SUBS_PIN', 'SUBS_THREAD'], \
+                              search_key = search_key, \
+                              not_found_message = "No submissions containing indicated text in title found.")
+    await send_suborqueue_rips(desc, sub_channel_link, optional_time, ctx)
+
+
+@bot.command(name='event_subs', aliases = ['event_sub'], brief='displays event submissions from linked channel')
+async def event_subs(ctx: Context, event: str = None, sub_channel_link: str = None, optional_time = None):
+    """
+    Retrieve all messages in a submission channel that are tagged as for an event.
+    The provided string must appear in the rip's author label (case insensitive).
+    Supports `|` for multiple search keys.
+    """
+    if channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']) and event is None:
+        await ctx.channel.send("Error: Please indicate the event name. Rips should be tagged with this name.")
+        return
+
+    desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.EVENT, \
+                              channel_types = ['SUBS', 'SUBS_PIN', 'SUBS_THREAD'], \
+                              search_key = event, \
+                              not_found_message = "No submissions containing indicated text in author line found.")
+    await send_suborqueue_rips(desc, sub_channel_link, optional_time, ctx)
 
 
 @bot.command(name='frames', brief='find approved rips with thumbnail reacts')
@@ -745,6 +958,75 @@ async def unsent(ctx: Context, channel_link: str = None, optional_time = None):
     desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.UNSENT, \
                               channel_types = ["QUEUE"])
     await send_suborqueue_rips(desc, channel_link, optional_time, ctx)
+
+
+@bot.command(name='scout', brief='find approved rips with specific title prefix')
+async def scout(ctx: Context, prefix: str = None, channel_link: str = None, optional_time = None):
+    """
+    Search queue channel for rips starting with the specific prefix (e.g. letter E).
+    The prefix is case insensitive.
+    """
+    if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
+    heard_command("scout", ctx.message.author.name)
+
+    if prefix is None:
+        await ctx.channel.send("Error: Please provide a prefix string.")
+        return
+
+    desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.SCOUT, \
+                              channel_types = ['QUEUE'], \
+                              search_key = prefix, \
+                              not_found_message = 'No approved rips starting with {prefix} found.')
+    await send_suborqueue_rips(desc, channel_link, optional_time, ctx)
+
+
+@bot.command(name='scout_stats', brief='summarize approved rips with specific letter prefix')
+async def scout_stats(ctx: Context, channel_link: str = None, optional_time = None):
+    """
+    Display count of rips starting with each letter.
+    """
+    if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
+    heard_command("scout_stats", ctx.message.author.name)
+
+    channel_id, msg = parse_channel_link(channel_link, ['QUEUE'])
+    if len(msg) > 0:
+        await ctx.channel.send(msg)
+        return
+
+    time, msg = parse_optional_time(ctx.channel, optional_time)
+    if msg is not None: await ctx.channel.send(msg)
+
+    channel = bot.get_channel(channel_id)
+    if channel is None: await ctx.channel.send("Error: Invalid channel found. Contact bot developers to update list of channels.")
+
+    async with ctx.channel.typing():
+        suborqueue_rips = await get_suborqueue_rips(channel, True)
+
+        count = {}
+        for letter in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ': # could have done string.ascii_uppercase but i dont think the alphabet is getting any updates
+            count[letter] = 0
+
+        for suborqueue_rip in suborqueue_rips:
+            rip_title = get_raw_rip_title(suborqueue_rip.text)
+            prefix = rip_title.lower()[0]
+            if prefix in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ':  # isalpha becomes fucked with unicode characters i think
+                count[prefix.upper()] += 1
+            else:
+                if prefix in count.keys():
+                    count[prefix] += 1
+                else:
+                    count[prefix] = 1
+        
+        result = ""
+        maxCount = max(max(count.values()), 20)
+        for k, v in sorted(count.items()):
+            result += f"{k}: " + ("▮" * int(v / maxCount * 20)) + f" ({v})\n"
+
+        if len(suborqueue_rips) == 0:
+            await ctx.channel.send("No approved rips found.")
+        else:
+            await send_embed(ctx.channel, result, time)
+
 
 # ============ Basic QoC commands ============== #
 
@@ -1225,38 +1507,6 @@ async def cat(ctx: Context):
     await ctx.channel.send("meow!")
 
 
-@bot.command(name='count_subs', brief='count number of remaining submissions')
-async def count_subs(ctx: Context, sub_channel_link: str = None):
-    """
-    Count number of messages in a channel (e.g. submissions).
-    Retrieve the entire history of a channel and count the number of messages not in threads.
-    Accepts an optional link argument to the subs-type channel to view - if not, first valid channel in config is used.
-    """
-    if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
-    heard_command("count_subs", ctx.message.author.name)
-
-    sub_channel_id, msg = parse_channel_link(sub_channel_link, ['SUBS', 'SUBS_PIN', 'SUBS_THREAD'])
-    if len(msg) > 0:
-        await ctx.channel.send(msg)
-        if sub_channel == -1: return
-
-    async with ctx.channel.typing():
-        channel = bot.get_channel(sub_channel_id)
-
-        rips = 0
-        if channel_is_types(channel, ['QOC', 'SUBS_PIN']):
-            rips = await get_fast_converted_qoc_rips(channel)
-        else:
-            rips = await get_suborqueue_rips(channel, True)
-        count = len(rips)
-
-        if (count < 1):
-            result = "```ansi\n\u001b[0;31m* Determination.\u001b[0;0m```"
-        else:
-            result = f"```ansi\n\u001b[0;31m* {count} left.\u001b[0;0m```"
-
-        await ctx.channel.send(result)
-
 async def get_suborqueue_rip_stats_string(channel_id) -> str:
     ret = ""
     channel = bot.get_channel(channel_id)
@@ -1415,110 +1665,6 @@ def make_markdown(rip_info: dict, display_reacts: bool) -> str:
     result += "━━━━━━━━━━━━━━━━━━\n" # a line for readability!
     return result
 
-class SubOrQueueRipFilterType(Enum):
-    HASREACT = auto()
-    UNSENT = auto()
-    SEARCH = auto()
-    EVENT = auto()
-    SCOUT = auto()
-
-class SendSubOrQueueDesc(NamedTuple):
-    suborqueue_rip_filter_type: SubOrQueueRipFilterType = None
-    reaction_type: ReactionType = None
-    channel_types: List[str] = []
-    search_key: str = ""
-    not_found_message: str = ""
-
-async def send_suborqueue_rips(send_suborqueue_desc: SendSubOrQueueDesc, channel_link: str, optional_time: float, ctx: Context):
-    channel_id, msg = parse_channel_link(channel_link, send_suborqueue_desc.channel_types)
-    if len(msg) > 0 or channel_link is None:
-        if channel_link is not None:
-            await ctx.channel.send("Warning: something went wrong parsing channel link. Defaulting to showing from all known queues.")
-        channel_ids = []
-        for k, v in CHANNELS.items():
-            for type in send_suborqueue_desc.channel_types:
-                if type in v:
-                    channel_ids.append(k)
-    else:
-        channel_ids = [channel_id]
-
-    time, msg = parse_optional_time(ctx.channel, optional_time)
-    if msg is not None: await ctx.channel.send(msg)
-
-    async with ctx.channel.typing():
-        result = ""
-        count = 0
-
-        search_keys = send_suborqueue_desc.search_key.split('|')
-        prefix = send_suborqueue_desc.search_key.lower()
-
-        qoc_emote = DEFAULT_QOC
-        for e in ctx.guild.emojis:
-            if e.name.lower() == "qoc":
-                qoc_emote = e
-
-        for channel_id in channel_ids:
-            channel = bot.get_channel(channel_id)
-
-            rips = []
-            if channel:
-                if channel_is_type(channel, 'SUBS_PIN'):
-                    ##NOTE: (Ahmayk) Does not return reaction data
-                    ## but this doesn't affect anything as of writing
-                    ## since we do not call any filtertypes that check reactions
-                    ## (besdies checking for qoc react, but this does not happen in pratice)
-                    rips = await get_fast_converted_qoc_rips(channel)
-                elif channel_is_types(channel, ['SUBS']):
-                    rips = await get_suborqueue_rips(channel, False)
-                elif channel_is_types(channel, ['QUEUE', 'SUBS_THREAD']):
-                    rips = await get_suborqueue_rips(channel, True)
-
-            result += f'<#{channel_id}>:\n'
-
-            for suborqueue_rip in rips:
-
-                rip_title = get_rip_title(suborqueue_rip.text)
-                rip_author = get_raw_rip_author(suborqueue_rip.text)
-
-                is_valid = False
-                match(send_suborqueue_desc.suborqueue_rip_filter_type):
-                    case SubOrQueueRipFilterType.HASREACT:
-                        is_valid = suborqueue_rip_has_reaction(send_suborqueue_desc.reaction_type, suborqueue_rip)
-                    case SubOrQueueRipFilterType.UNSENT:
-                        is_valid = line_contains_substring(rip_author, 'email') and \
-                                not suborqueue_rip_has_reaction(ReactionType.EMAILSENT, suborqueue_rip)
-                    case SubOrQueueRipFilterType.SEARCH:
-                        for key in search_keys:
-                            if line_contains_substring(rip_title, key):
-                                is_valid = True
-                                break
-                    case SubOrQueueRipFilterType.EVENT:
-                        for key in search_keys:
-                            if line_contains_substring(rip_author, key):
-                                is_valid = True
-                                break
-                    case SubOrQueueRipFilterType.SCOUT:
-                        is_valid = rip_title.lower().startswith(prefix)
-                    case _:
-                        write_log("Unimplemented SubOrQueueRipFilterType: " + rip_filter_type)
-
-                if is_valid:
-                    if suborqueue_rip_has_reaction(ReactionType.QOC, suborqueue_rip):
-                        result += f"{qoc_emote} "
-                    rip_link = format_message_link(channel.guild.id, suborqueue_rip.channel_id, suborqueue_rip.message_id)
-                    result += f'**[{rip_title}]({rip_link})**\n'
-                    count += 1
-
-            result += '------------------------------\n'
-
-        if count == 0:
-            not_found_message = "No rips found."
-            if len(send_suborqueue_desc.not_found_message):
-                not_found_message = send_suborqueue_desc.not_found_message
-            await ctx.channel.send(not_found_message)
-        else:
-            await send_embed(ctx.channel, result, time)
-
 
 def split_long_message(a_message: str, character_limit: int) -> list[str]:  # avoid Discord's character limit
     """
@@ -1553,10 +1699,10 @@ async def send_embed(channel: TextChannel, message: str, delete_after: float = N
         fancy_message = discord.Embed(description=line, color=_get_config('embed_color'))
         await channel.send(embed=fancy_message, delete_after=delete_after)
 
-def channel_is_type(channel: TextChannel | Thread, type: str):
+def channel_is_type(channel: typing.Union[GuildChannel, Thread], type: str):
     return channel.id in CHANNELS.keys() and type in CHANNELS[channel.id] or hasattr(channel, "parent") and channel_is_type(channel.parent, type)
 
-def channel_is_types(channel: TextChannel | Thread, types: typing.List[str]):
+def channel_is_types(channel: typing.Union[GuildChannel, Thread], types: typing.List[str]):
     return channel.id in CHANNELS.keys() and any([t in CHANNELS[channel.id] for t in types]) or hasattr(channel, "parent") and channel_is_types(channel.parent, types)
 
 async def get_roundup_channel(ctx: Context):
@@ -1943,142 +2089,6 @@ async def check_qoc_and_metadata(text: str, message_id: int, message_author_name
 
     return verdict, msg
 
-
-class ReactAndUser(NamedTuple):
-    name: str
-    user_id: int
-
-class QocRip(NamedTuple):
-    text: str
-    message_id: int
-    channel_id: int
-    message_author_id: int
-    message_author_name: str
-    react_and_users: List[ReactAndUser]
-    created_at: datetime.datetime
-
-## NOTE: (Ahmayk) key = channel_id, value = dictionary with key = message, value = QocRip
-RIP_CACHE_QOC: dict[int, dict[int, QocRip]] = {}
-
-async def cache_qoc_rip(message: Message) -> QocRip:
-
-    react_and_users = []
-    for reaction in message.reactions:
-        name = ""
-        if isinstance(reaction.emoji, str):
-            name = reaction.emoji
-        elif hasattr(reaction.emoji, "name"):
-            name = reaction.emoji.name
-        # NOTE: (Ahmayk) this is slow! We have to do an api call for each user.
-        # But is also neccessary
-        user_ids = [user.id async for user in reaction.users()]
-        for user_id in user_ids:
-            react_and_users.append(ReactAndUser(name, user_id))
-
-    qoc_rip = QocRip(message.content, message.id, message.channel.id, message.author.id, \
-            str(message.author), react_and_users, message.created_at)
-
-    RIP_CACHE_QOC[message.channel.id][message.id] = qoc_rip
-
-    return qoc_rip
-
-CACHE_LOCK_QOC: dict[int, asyncio.Lock] = {}
-
-async def get_qoc_rips(channel: TextChannel) -> typing.List[QocRip]:
-    qoc_rips = []
-
-    if channel.id not in CACHE_LOCK_QOC:
-        CACHE_LOCK_QOC[channel.id] = asyncio.Lock()
-
-    async with CACHE_LOCK_QOC[channel.id]:
-        if channel.id not in RIP_CACHE_QOC:
-
-            RIP_CACHE_QOC[channel.id]: dict[int, QocRip] = {}
-
-            async for message in channel.pins(limit=None):
-                # NOTE: (Ahmayk) channel.pins does not return reaction data,
-                # so we have to fetch it manually. This is slow! But neccessary.
-                message = await channel.fetch_message(message.id)
-                await cache_qoc_rip(message)
-
-            if len(RIP_CACHE_QOC[channel.id]) and _get_config('qoc_contains_pinned_rule'):
-                RIP_CACHE_QOC[channel.id].popitem()
-
-    qoc_rips = RIP_CACHE_QOC[channel.id].values()
-
-    return qoc_rips
-
-class SubOrQueueRip(NamedTuple):
-    text: str
-    message_id: int
-    channel_id: int
-    message_author_id: int
-    message_author_name: str
-    react_names: List[str]
-
-RIP_CACHE_SUBORQUEUE: dict[int, dict[int, SubOrQueueRip]] = {}
-
-async def cache_suborqueue_rip(message) -> SubOrQueueRip:
-
-    react_names = []
-    for reaction in message.reactions:
-        name = ""
-        if isinstance(reaction.emoji, str):
-            name = reaction.emoji
-        elif hasattr(reaction.emoji, "name"):
-            name = reaction.emoji.name
-        react_names.append(name)
-
-    suborqueue_rip = SubOrQueueRip(message.content, message.id, message.channel.id, \
-                                   message.author.id, str(message.author), react_names)
-
-    RIP_CACHE_SUBORQUEUE[message.channel.id][message.id] = suborqueue_rip
-    return suborqueue_rip
-
-CACHE_LOCK_SUBORQUEUE: dict[int, asyncio.Lock] = {}
-
-async def get_suborqueue_rips(channel: TextChannel, include_threads: bool) -> typing.List[SubOrQueueRip]:
-
-    if channel.id not in CACHE_LOCK_SUBORQUEUE:
-        CACHE_LOCK_SUBORQUEUE[channel.id] = asyncio.Lock()
-
-    async with CACHE_LOCK_SUBORQUEUE[channel.id]:
-        if channel.id not in RIP_CACHE_SUBORQUEUE:
-            RIP_CACHE_SUBORQUEUE[channel.id]: dict[int, SubOrQueueRip] = {}
-
-            async for message in channel.history(limit = None):
-
-                if message.thread is not None and include_threads:
-                    thread_suborqueue_rips = await get_suborqueue_rips(message.thread, False)
-                    #NOTE: (Ahmayk) we insert thread rips also in its parent channel dict so that
-                    #we get all rips in theads when we get the parent channel's rips 
-                    for thread_suborqueue_rip in thread_suborqueue_rips:
-                        RIP_CACHE_SUBORQUEUE[channel.id][thread_suborqueue_rip.message_id] = thread_suborqueue_rip 
-
-                is_valid_message = channel is Thread or not (message.channel is Thread)
-                has_quotes = '```' in message.content
-                if is_valid_message and has_quotes:
-                    rip_link = extract_rip_link(message.content)
-                    if len(rip_link) > 0:
-                        await cache_suborqueue_rip(message)
-
-    return RIP_CACHE_SUBORQUEUE[channel.id].values()
-
-async def get_fast_converted_qoc_rips(channel: TextChannel) -> typing.List[SubOrQueueRip]:
-    qoc_fast_converted_rips = []
-    async with CACHE_LOCK_SUBORQUEUE:
-        if channel.id in RIP_CACHE_QOC:
-            qoc_rips = RIP_CACHE_QOC[channel.id].values()
-            for r in qoc_rips:
-                suborqueue_rip = SubOrQueueRip(r.text, r.message_id, r.channel_id, r.message_author_id, r.message_author_name, [])
-                qoc_fast_converted_rips.append(suborqueue_rip)
-        else:
-            async for message in channel.pins(limit=None):
-                qoc_rip = SubOrQueueRip(message.content, message.id, channel.id, message.author.id, str(message.author), [])
-                qoc_fast_converted_rips.append(qoc_rip)
-            if _get_config('qoc_contains_pinned_rule'):
-                qoc_fast_converted_rips = qoc_fast_converted_rips[:-1]
-    return qoc_fast_converted_rips
 
 def parse_channel_link(link: str | None, types: typing.List[str]) -> typing.Tuple[int, str]:
     """
