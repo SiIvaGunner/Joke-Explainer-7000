@@ -12,7 +12,7 @@ from simpleQoC.metadata import checkMetadata, countDupe, isDupe
 import re
 import functools
 import typing
-from typing import NamedTuple, List
+from typing import NamedTuple, List, ValuesView
 from enum import Enum, auto
 import math
 import json
@@ -97,11 +97,14 @@ async def cache_qoc_rip(message: Message) -> QocRip:
 
 CACHE_LOCK_QOC: dict[int, asyncio.Lock] = {}
 
-async def get_qoc_rips(channel: typing.Union[GuildChannel, Thread]) -> List[QocRip]:
+async def get_qoc_rips(channel: typing.Union[GuildChannel, Thread]) -> ValuesView[QocRip]:
 
     if channel.id not in CACHE_LOCK_QOC:
         CACHE_LOCK_QOC[channel.id] = asyncio.Lock()
 
+    ##NOTE: (Ahmayk) We need to prevent other processes from accessing the cache 
+    ## in the case where we are updating the cache. If we allow access to the cache while
+    ## it is being updated, it would likely be inccomplete or wrong! 
     async with CACHE_LOCK_QOC[channel.id]:
         if channel.id not in RIP_CACHE_QOC:
 
@@ -148,11 +151,14 @@ async def cache_suborqueue_rip(message) -> SubOrQueueRip:
 
 CACHE_LOCK_SUBORQUEUE: dict[int, asyncio.Lock] = {}
 
-async def get_suborqueue_rips(channel: typing.Union[GuildChannel, Thread], include_threads: bool) -> List[SubOrQueueRip]:
+async def get_suborqueue_rips(channel: typing.Union[GuildChannel, Thread], include_threads: bool) -> ValuesView[SubOrQueueRip]:
 
     if channel.id not in CACHE_LOCK_SUBORQUEUE:
         CACHE_LOCK_SUBORQUEUE[channel.id] = asyncio.Lock()
 
+    ##NOTE: (Ahmayk) We need to prevent other processes from accessing the cache 
+    ## in the case where we are updating the cache. If we allow access to the cache while
+    ## it is being updated, it would likely be inccomplete or wrong! 
     async with CACHE_LOCK_SUBORQUEUE[channel.id]:
         if channel.id not in RIP_CACHE_SUBORQUEUE:
             RIP_CACHE_SUBORQUEUE[channel.id]: dict[int, SubOrQueueRip] = {}
@@ -269,38 +275,39 @@ bot.close = types.MethodType(close_with_log, bot)
 
 @bot.event
 async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Thread], last_pin: datetime):
-    if not channel_is_type(channel, 'ROUNDUP'):
+
+    if not channel_is_types(channel, ['QOC', 'SUBS_PIN']):
         return
 
     global latest_pin_time
-    
-    if last_pin is None or last_pin <= latest_pin_time:
-        # print("Seems to be a message being unpinned")
-        # TODO: (Ahmayk) clear cache info of rip
-        pass
-    else:
-        latest_pin_time = last_pin
-        latest_msg: Message = await channel.pins(limit=1)
-        if latest_msg:
+
+    async for message in channel.pins(limit=1):
+
+        if last_pin is None or last_pin <= latest_pin_time:
+            # print("Seems to be a message being unpinned")
+            #TODO: (Ahmayk) update cache somehow
+            pass
+        else:
+            latest_pin_time = last_pin
 
             qoc_rips = await get_fast_converted_qoc_rips(channel)
 
             SOFT_PIN_LIMIT = _get_config('soft_pin_limit')
             if len(qoc_rips) > SOFT_PIN_LIMIT:
                 if _get_config("pinlimit_must_die_mode"):
-                    await latest_msg.unpin()
+                    await message.unpin()
                     await channel.send(f"**Error**: More than {SOFT_PIN_LIMIT} rips in pins. Unpinned.")
                 else:
                     await channel.send(f"**Warning**: More than {SOFT_PIN_LIMIT} rips pinned - please handle them first :(")
         
-            # TODO: (Ahmayk) add rip to cache
+            await cache_qoc_rip(message)
 
-            verdict, msg = await check_qoc_and_metadata(latest_msg.content, latest_msg.id, str(latest_msg.author))
+            verdict, msg = await check_qoc_and_metadata(message.content, message.id, str(message.author))
 
             # Send msg
             if len(verdict) > 0:
-                rip_title = get_rip_title(latest_msg.content)
-                link = format_message_link(channel.guild.id, channel.id, latest_msg.id)
+                rip_title = get_rip_title(message.content)
+                link = format_message_link(channel.guild.id, channel.id, message.id)
                 await channel.send("**Rip**: **[{}]({})**\n**Verdict**: {}\n{}-# React {} if this is resolved.".format(rip_title, link, verdict, msg, DEFAULT_CHECK))
 
 
@@ -313,8 +320,6 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         is_suborqueue_channel = channel_is_types(channel, ['QUEUE', 'SUBS', 'SUBS_THREAD'])
 
         if is_qoc_channel or is_suborqueue_channel:
-
-            print("is valid rip of some kind")
 
             message = await channel.fetch_message(payload.message_id)
 
@@ -356,7 +361,6 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                     ##NOTE: (Ahmayk) can happen if reaction happens before message is added to cache
                     suborqueue_rip = await cache_suborqueue_rip(message)
 
-
 @bot.listen('on_raw_reaction_remove')
 async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
     if payload.channel_id in RIP_CACHE_QOC and payload.message_id in RIP_CACHE_QOC[payload.channel_id]: 
@@ -394,12 +398,15 @@ async def on_raw_reaction_clear(payload: discord.RawReactionClearEvent):
         suborqueue_rip = RIP_CACHE_SUBORQUEUE[payload.channel_id][payload.message_id]
         suborqueue_rip.react_names.clear()
 
+def remove_rip_from_cache(message_id: int, channel_id: int):
+    if channel_id in RIP_CACHE_QOC and message_id in RIP_CACHE_QOC[channel_id]: 
+        RIP_CACHE_QOC[channel_id].pop(message_id)
+    if channel_id in RIP_CACHE_SUBORQUEUE and message_id in RIP_CACHE_SUBORQUEUE[channel_id]: 
+        RIP_CACHE_SUBORQUEUE[channel_id].pop(message_id)
+
 @bot.listen('on_raw_message_delete')
 async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
-    if payload.channel_id in RIP_CACHE_QOC and payload.message_id in RIP_CACHE_QOC[payload.channel_id]: 
-        RIP_CACHE_QOC[payload.channel_id].pop(payload.message_id)
-    if payload.channel_id in RIP_CACHE_SUBORQUEUE and payload.message_id in RIP_CACHE_SUBORQUEUE[payload.channel_id]: 
-        RIP_CACHE_SUBORQUEUE[payload.channel_id].pop(payload.message_id)
+    remove_rip_from_cache(payload.message_id, payload.channel_id)
 
 # ============ React Functions ============== #
 
