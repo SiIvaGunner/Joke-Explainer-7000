@@ -396,6 +396,15 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                     ##NOTE: (Ahmayk) can happen if reaction happens before message is added to cache
                     suborqueue_rip = await cache_suborqueue_rip(message)
 
+
+@bot.listen('on_message')
+async def on_message(message: Message):
+    is_suborqueue_channel = channel_is_types(message.channel, ['QUEUE', 'SUBS', 'SUBS_THREAD'])
+    if is_suborqueue_channel and '```' in message.content and extract_rip_link(message.content):
+        print("adding new suborqueue")
+        await cache_suborqueue_rip(message)
+
+
 @bot.listen('on_raw_reaction_remove')
 async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
     if payload.channel_id in RIP_CACHE_QOC and payload.message_id in RIP_CACHE_QOC[payload.channel_id]: 
@@ -966,10 +975,13 @@ async def send_suborqueue_rips(send_suborqueue_desc: SendSubOrQueueDesc, channel
             rips = []
             if channel:
                 if channel_is_type(channel, 'SUBS_PIN'):
-                    ##NOTE: (Ahmayk) Does not return reaction data
-                    ## but this doesn't affect anything as of writing
-                    ## since we do not call any filtertypes that check reactions
-                    ## (besdies checking for qoc react, but this does not happen in pratice)
+                    #NOTE: (Ahmayk) fast_converted_qoc_rips not return reaction data
+                    # but this doesn't affect anything as of writing
+                    # since we do not call any filtertypes that check reactions
+                    # on subs_pin channels on any suborqueue rip listing functions 
+                    # (besdies checking for qoc react, but qoc reactions on 
+                    # subs_pin messages don't happen in pratice so who cares)
+                    # This may need to change later 
                     rips = await get_fast_converted_qoc_rips(channel)
                 elif channel_is_types(channel, ['SUBS']):
                     rips = await get_suborqueue_rips(channel, False)
