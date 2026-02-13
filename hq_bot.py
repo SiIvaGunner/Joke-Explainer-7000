@@ -218,6 +218,13 @@ async def get_suborqueue_rips(channel: typing.Union[GuildChannel, Thread], inclu
     return result
 
 async def get_fast_converted_qoc_rips(channel: typing.Union[GuildChannel, Thread]) -> typing.List[SubOrQueueRip]:
+    """
+    In some cases we want rips from an arbitrary place, or want to process all rips together
+    (like counting them, or processing metadata).
+    This function is for when you want to get qoc rips but want to guarentee that the type will be the  
+    same as all other rips, you do not care about reaction data (this leaves reaction data empty),
+    and also guarentee that getting the rips will be fast, even if they're not in cache.
+    """
     qoc_fast_converted_rips = []
 
     if channel.id not in CACHE_LOCK_SUBORQUEUE:
