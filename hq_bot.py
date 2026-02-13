@@ -227,23 +227,24 @@ async def get_fast_converted_qoc_rips(channel: typing.Union[GuildChannel, Thread
     """
     qoc_fast_converted_rips = []
 
-    if channel.id not in CACHE_LOCK_SUBORQUEUE:
-        CACHE_LOCK_SUBORQUEUE[channel.id] = asyncio.Lock()
+    if channel.id not in CACHE_LOCK_QOC:
+        CACHE_LOCK_QOC[channel.id] = asyncio.Lock()
 
-    async with CACHE_LOCK_SUBORQUEUE[channel.id]:
-        if channel.id in RIP_CACHE_QOC:
-            qoc_rips = RIP_CACHE_QOC[channel.id].values()
-            for r in qoc_rips:
-                suborqueue_rip = SubOrQueueRip(r.text, r.message_id, r.channel_id, r.message_author_id, \
-                                                r.message_author_name, [], r.created_at)
-                qoc_fast_converted_rips.append(suborqueue_rip)
-        else:
-            async for message in channel.pins(limit=None):
-                qoc_rip = SubOrQueueRip(message.content, message.id, channel.id, message.author.id, \
-                                         str(message.author), [], message.created_at)
-                qoc_fast_converted_rips.append(qoc_rip)
-            if _get_config('qoc_contains_pinned_rule'):
-                qoc_fast_converted_rips = qoc_fast_converted_rips[:-1]
+    if channel.id in RIP_CACHE_QOC and not CACHE_LOCK_QOC[channel.id].locked():
+        print("Got cache!")
+        qoc_rips = RIP_CACHE_QOC[channel.id].values()
+        for r in qoc_rips:
+            suborqueue_rip = SubOrQueueRip(r.text, r.message_id, r.channel_id, r.message_author_id, \
+                                            r.message_author_name, [], r.created_at)
+            qoc_fast_converted_rips.append(suborqueue_rip)
+    else:
+        print("Got raw!")
+        async for message in channel.pins(limit=None):
+            qoc_rip = SubOrQueueRip(message.content, message.id, channel.id, message.author.id, \
+                                        str(message.author), [], message.created_at)
+            qoc_fast_converted_rips.append(qoc_rip)
+        if _get_config('qoc_contains_pinned_rule'):
+            qoc_fast_converted_rips = qoc_fast_converted_rips[:-1]
 
     ##NOTE: (Ahmayk) show rips in expected order, newest at top
     qoc_fast_converted_rips.sort(key = lambda rip: rip.created_at, reverse=True)
