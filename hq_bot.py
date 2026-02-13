@@ -61,6 +61,10 @@ class ReactAndUser(NamedTuple):
     name: str
     user_id: int
 
+"""
+QocRips are rips that are pinned in a channel and used in QoC. They have info on who reacted to what.
+Exist in channels: QOC, SUBS_PIN
+"""
 class QocRip(NamedTuple):
     text: str
     message_id: int
@@ -101,6 +105,12 @@ async def cache_qoc_rip(message: Message) -> QocRip:
 CACHE_LOCK_QOC: dict[int, asyncio.Lock] = {}
 
 async def get_qoc_rips(channel: typing.Union[GuildChannel, Thread]) -> List[QocRip]:
+    """
+    Gets all qoc rips from a channel. Makes a cache for the channel if it doesn't already exist. 
+
+    Blocks processing while cache is being created to not allow someone to access the cache
+    with it half finished.
+    """
 
     if channel.id not in CACHE_LOCK_QOC:
         CACHE_LOCK_QOC[channel.id] = asyncio.Lock()
@@ -127,6 +137,13 @@ async def get_qoc_rips(channel: typing.Union[GuildChannel, Thread]) -> List[QocR
     result.sort(key = lambda rip: rip.created_at, reverse=True)
     return result
 
+"""
+SubOrQueue Rips are rips posted in a submission channel, or rips posted in an accepted rips queue.
+They can be in channels or threads depending on the channel type. 
+They do NOT include info on who reacted to what as an optimization as this info is slow to obtain.
+(This is the only difference between SubOrQueueRips and QocRips. They are split into different types 
+despite being mostly the same so that it is easier to manage this difference in data layout)
+"""
 class SubOrQueueRip(NamedTuple):
     text: str
     message_id: int
@@ -161,6 +178,13 @@ async def cache_suborqueue_rip(message) -> SubOrQueueRip:
 CACHE_LOCK_SUBORQUEUE: dict[int, asyncio.Lock] = {}
 
 async def get_suborqueue_rips(channel: typing.Union[GuildChannel, Thread], include_threads: bool) -> ValuesView[SubOrQueueRip]:
+    """
+    Gets all SubOrQueue rips from a channel. If includes_threads is true, also gets all rips in all threads.
+    Discord can process messages in order very quickly, so this function is fast!
+
+    Blocks processing while cache is being created to not allow someone to access the cache
+    with it half finished.
+    """
 
     if channel.id not in CACHE_LOCK_SUBORQUEUE:
         CACHE_LOCK_SUBORQUEUE[channel.id] = asyncio.Lock()
@@ -573,6 +597,10 @@ class RoundupDesc(NamedTuple):
     not_found_message: str = ""
 
 async def send_roundup(roundup_desc: RoundupDesc, optional_time: float, ctx: Context):
+    """
+    Sends a roundup message of all rips that the roundup channel the message was sent in points to.
+    The roundup_filter_type describes how the roundup will be filtered.
+    """
     if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
     heard_command("roundup", ctx.message.author.name)
 
@@ -851,7 +879,7 @@ async def events(ctx: Context, event: str = None, optional_time = None):
 @bot.command(name='count', brief="counts all pinned rips")
 async def count(ctx: Context):
     """
-    Count the number of pinned messages containing rip links.
+    Count the number of pinned messages that contain rips according to the roundup channel.
     """
     heard_command("count", ctx.message.author.name)
 
@@ -880,7 +908,7 @@ async def count(ctx: Context):
 @bot.command(name='limitcheck', aliases=['pinlimit'], brief="pin limit checker")
 async def limitcheck(ctx: Context):
     """
-    Count the number of available pin slots.
+    Count the number of available rips below the 50 rip limit.
     """
     heard_command("limitcheck", ctx.message.author.name)
 
@@ -951,6 +979,9 @@ class SendSubOrQueueDesc(NamedTuple):
     not_found_message: str = ""
 
 async def send_suborqueue_rips(send_suborqueue_desc: SendSubOrQueueDesc, channel_link: str, optional_time: float, ctx: Context):
+    """
+    Sends a list of rips from either all submission or queue channels according to a filter.
+    """
     channel_id, msg = parse_channel_link(channel_link, send_suborqueue_desc.channel_types)
     if len(msg) > 0 or channel_link is None:
         if channel_link is not None:
@@ -1798,25 +1829,6 @@ async def modify_config(ctx: Context, conf: str, value: str):
 #===============================================#
 #               HELPER FUNCTIONS                #
 #===============================================#
-
-def make_markdown(rip_info: dict, display_reacts: bool) -> str:
-    """
-    Convert a dictionary of rip information to a markdown message
-    """
-    base_message = f'**[{rip_info["Title"]}]({rip_info["Link"]})**\n{rip_info["Author"]}'
-    result = ""
-
-    if len(rip_info["Indicator"]) > 0:
-        base_message = f'{rip_info["Indicator"]} **[{rip_info["Title"]}]({rip_info["Link"]})** {rip_info["Indicator"]}\n{rip_info["Author"]}'
-
-    if display_reacts:
-        result = base_message + f' | {rip_info["Reacts"]}\n'
-    else:
-        result = base_message + "\n"
-
-    result += "━━━━━━━━━━━━━━━━━━\n" # a line for readability!
-    return result
-
 
 def split_long_message(a_message: str, character_limit: int) -> list[str]:  # avoid Discord's character limit
     """
