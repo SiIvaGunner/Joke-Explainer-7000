@@ -615,7 +615,7 @@ async def send_roundup(roundup_desc: RoundupDesc, optional_time: float, ctx: Con
     time, msg = parse_optional_time(ctx.channel, optional_time)
     if msg is not None: await ctx.channel.send(msg)
 
-    channel = await get_roundup_channel(ctx)
+    channel = await get_qoc_channel(ctx)
     if channel is None: return
 
     async with ctx.channel.typing():
@@ -892,7 +892,7 @@ async def count(ctx: Context):
     heard_command("count", ctx.message.author.name)
 
     if channel_is_type(ctx.channel, 'PROXY_QOC'):
-        channel = await get_roundup_channel(ctx)
+        channel = await get_qoc_channel(ctx)
         if channel is None: return
         else: proxy = f"\n-# Showing results from <#{channel.id}>."
     else:
@@ -921,7 +921,7 @@ async def limitcheck(ctx: Context):
     heard_command("limitcheck", ctx.message.author.name)
 
     if channel_is_type(ctx.channel, 'PROXY_QOC'):
-        channel = await get_roundup_channel(ctx)
+        channel = await get_qoc_channel(ctx)
         if channel is None: return
         else: proxy = f"\n-# Showing results from <#{channel.id}>."
     else:
@@ -1271,7 +1271,7 @@ async def vet_from(ctx: Context, from_msg):
             return
         from_timestamp = from_message.created_at
 
-    channel = await get_roundup_channel(ctx)
+    channel = await get_qoc_channel(ctx)
     if channel is None: return
 
     if not ffmpegExists():
@@ -1878,9 +1878,11 @@ def channel_is_type(channel: typing.Union[GuildChannel, Thread], type: str):
 def channel_is_types(channel: typing.Union[GuildChannel, Thread], types: typing.List[str]):
     return channel.id in CHANNELS.keys() and any([t in CHANNELS[channel.id] for t in types]) or hasattr(channel, "parent") and channel_is_types(channel.parent, types)
 
-async def get_roundup_channel(ctx: Context):
+async def get_qoc_channel(ctx: Context):
+    """
+    Gets the first channel labeled QOC in bot_secrets.py 
+    """
     if channel_is_type(ctx.channel, 'PROXY_QOC'):
-        ##NOTE (Ahmayk): will fetch first QOC channel in config list
         qoc_channel, msg = parse_channel_link(None, ["QOC"])
         if len(msg) > 0:
             await ctx.channel.send(msg)
