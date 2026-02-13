@@ -63,7 +63,7 @@ class ReactAndUser(NamedTuple):
 
 """
 QocRips are rips that are pinned in a channel and used in QoC. They have info on who reacted to what.
-Exist in channels: QOC, SUBS_PIN
+Exists only in QOC channels
 """
 class QocRip(NamedTuple):
     text: str
@@ -608,7 +608,7 @@ async def send_roundup(roundup_desc: RoundupDesc, optional_time: float, ctx: Con
     Sends a roundup message of all rips that the roundup channel the message was sent in points to.
     The roundup_filter_type describes how the roundup will be filtered.
     """
-    if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
+    if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
     heard_command("roundup", ctx.message.author.name)
 
     time, msg = parse_optional_time(ctx.channel, optional_time)
@@ -871,7 +871,7 @@ async def events(ctx: Context, event: str = None, optional_time = None):
     The provided string must appear in the rip's author label (case insensitive).
     Supports `|` for multiple search keys.
     """
-    if channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']) and event is None:
+    if channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']) and event is None:
         await ctx.channel.send("Error: Please indicate the event name. Rips should be tagged with this name.")
         return
 
@@ -890,7 +890,7 @@ async def count(ctx: Context):
     """
     heard_command("count", ctx.message.author.name)
 
-    if channel_is_type(ctx.channel, 'PROXY_ROUNDUP'):
+    if channel_is_type(ctx.channel, 'PROXY_QOC'):
         channel = await get_roundup_channel(ctx)
         if channel is None: return
         else: proxy = f"\n-# Showing results from <#{channel.id}>."
@@ -919,7 +919,7 @@ async def limitcheck(ctx: Context):
     """
     heard_command("limitcheck", ctx.message.author.name)
 
-    if channel_is_type(ctx.channel, 'PROXY_ROUNDUP'):
+    if channel_is_type(ctx.channel, 'PROXY_QOC'):
         channel = await get_roundup_channel(ctx)
         if channel is None: return
         else: proxy = f"\n-# Showing results from <#{channel.id}>."
@@ -942,7 +942,7 @@ async def count_subs(ctx: Context, sub_channel_link: str = None):
     Retrieve the entire history of a channel and count the number of messages not in threads.
     Accepts an optional link argument to the subs-type channel to view - if not, first valid channel in config is used.
     """
-    if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
+    if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
     heard_command("count_subs", ctx.message.author.name)
 
     sub_channel_id, msg = parse_channel_link(sub_channel_link, ['SUBS', 'SUBS_PIN', 'SUBS_THREAD'])
@@ -1103,7 +1103,7 @@ async def event_subs(ctx: Context, event: str = None, sub_channel_link: str = No
     The provided string must appear in the rip's author label (case insensitive).
     Supports `|` for multiple search keys.
     """
-    if channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']) and event is None:
+    if channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']) and event is None:
         await ctx.channel.send("Error: Please indicate the event name. Rips should be tagged with this name.")
         return
 
@@ -1132,7 +1132,7 @@ async def alerts(ctx: Context, channel_link: str = None, optional_time = None):
     """
     Search queue channel for rips with alert react.
     """
-    if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
+    if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
     heard_command("alerts", ctx.message.author.name)
 
     desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.HASREACT, \
@@ -1146,7 +1146,7 @@ async def metadata(ctx: Context, channel_link: str = None, optional_time = None)
     """
     Search queue channel for rips with metadata react.
     """
-    if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
+    if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
     heard_command("metadata", ctx.message.author.name)
 
     desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.HASREACT, \
@@ -1172,7 +1172,7 @@ async def scout(ctx: Context, prefix: str = None, channel_link: str = None, opti
     Search queue channel for rips starting with the specific prefix (e.g. letter E).
     The prefix is case insensitive.
     """
-    if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
+    if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
     heard_command("scout", ctx.message.author.name)
 
     if prefix is None:
@@ -1191,7 +1191,7 @@ async def scout_stats(ctx: Context, channel_link: str = None, optional_time = No
     """
     Display count of rips starting with each letter.
     """
-    if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
+    if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
     heard_command("scout_stats", ctx.message.author.name)
 
     channel_id, msg = parse_channel_link(channel_link, ['QUEUE'])
@@ -1241,7 +1241,7 @@ async def vet(ctx: Context, optional_arg = None):
     """
     Find rips in pinned messages with bitrate/clipping issues and show their details
     """
-    if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
+    if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
 
     if optional_arg is not None:
         await ctx.channel.send("WARNING: ``!vet`` takes no argument. Did you mean to use ``!vet_msg`` or ``!vet_url``?")
@@ -1259,7 +1259,7 @@ async def vet_from(ctx: Context, from_msg):
     """
     Find rips in pinned messages with bitrate/clipping issues and show their details, only counting messages not older than linked message
     """
-    if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
+    if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
     heard_command("vet_from", ctx.message.author.name)
 
     vet_all_pins = from_msg is None
@@ -1319,7 +1319,7 @@ async def vet_msg(ctx: Context, msg_link: str = None):
     Perform basic QoC on a linked message.
     The first non-YouTube link found in the message is treated as the rip URL.
     """
-    if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
+    if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
     heard_command("vet_msg", ctx.message.author.name)
 
     if msg_link is None:
@@ -1343,7 +1343,7 @@ async def vet_url(ctx: Context, url: str = None):
     """
     Perform basic QoC on an URL.
     """
-    if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
+    if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
     heard_command("vet_url", ctx.message.author.name)
 
     urls = extract_rip_link(url)
@@ -1364,7 +1364,7 @@ async def count_dupe(ctx: Context, msg_link: str = None, check_queues: str = Non
     Count the number of dupes for a given link to rip message.
     Accepts an optional argument to also count rips in queues, which can take longer.
     """
-    if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
+    if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
     heard_command("count_dupe", ctx.message.author.name)
 
     if msg_link is None:
@@ -1414,7 +1414,7 @@ async def scan(ctx: Context, channel_link: str = None, start_index: int = None, 
     - `start_index`: First rip to look at (inclusive). Index 1 means start from the oldest rip.
     - `end_index`: Last rip to look at (inclusive). Index 100 means scan until and including the 100th oldest rip. If this is not provided, scan to the latest rip.
     """
-    if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
+    if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
     heard_command("scan", ctx.message.author.name)
 
     global latest_scan_time
@@ -1501,7 +1501,7 @@ async def peek_msg(ctx: Context, msg_link: str = None, use_ffprobe = None):
     Prints the file metadata of the rip at linked message.
     The first non-YouTube link found in the message is treated as the rip URL.
     """
-    if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
+    if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
     heard_command("peek_msg", ctx.message.author.name)
 
     if msg_link is None:
@@ -1543,7 +1543,7 @@ async def peek_url(ctx: Context, url: str = None, use_ffprobe = None):
     """
     Prints the file metadata of the rip at linked URL.
     """
-    if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
+    if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
     heard_command("peek_url", ctx.message.author.name)
 
     urls = extract_rip_link(url)
@@ -1657,11 +1657,10 @@ async def channel_list(ctx: Context):
         channels = [f"<#{channel_id}>: " + ", ".join(types) for channel_id, types in CHANNELS.items()]
         message = [
             "_**Command channel types**_",
-            "`ROUNDUP`: QoC-type channels with rips pinned. All QoC tools are available here.",
-            "`PROXY_ROUNDUP`: Allows running ROUNDUP commands in a different channel (and embed last longer by default).",
+            "`QOC`: QoC channel. Rips are pinned. All Qoc tools are avaliable here.",
+            "`PROXY_QOC`: Allows running QOC commands in a different channel (and embed last longer by default).",
             "`DEBUG`: For developer testing purposes.",
             "_**Stats channel types**_",
-            "`QOC`: QoC channel. Rips are pinned.",
             "`SUBS`: Submission channel. Rips are posted as messages in main channel.",
             "`SUBS_PIN`: Submission channel. Rips are pinned.",
             "`SUBS_THREAD`: Submission channel. Rips are posted in threads.",
@@ -1738,12 +1737,15 @@ async def stats(ctx: Context, optional_arg = None):
     Display the number of rips in the QoC and submission channels.
     Accepts an optional argument to show queue channels too.
     """
-    if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
+    if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
     heard_command("stats", ctx.message.author.name)
 
     async with ctx.channel.typing():
         ret = "**QoC channels**\n"
-        qoc_channels = [k for k, v in CHANNELS.items() if 'QOC' in v]
+
+        sub_channels = [k for k, v in CHANNELS.items() if any(t in v for t in ['SUBS', 'SUBS_PIN', 'SUBS_THREAD'])]
+
+        qoc_channels = [k for k, v in CHANNELS.items() if 'QOC' in v and k not in sub_channels]
         for channel_id in qoc_channels:
             team_count = 0
             email_count = 0
@@ -1759,7 +1761,6 @@ async def stats(ctx: Context, optional_arg = None):
                 ret += f"- <#{channel_id}>: **{team_count + email_count}** rips\n  - {team_count} team subs\n  - {email_count} email subs\n"
 
         ret += "**Submission channels**\n"
-        sub_channels = [k for k, v in CHANNELS.items() if any(t in v for t in ['SUBS', 'SUBS_PIN', 'SUBS_THREAD'])]
         for channel_id in sub_channels:
             ret += await get_suborqueue_rip_stats_string(channel_id)
 
@@ -1877,8 +1878,9 @@ def channel_is_types(channel: typing.Union[GuildChannel, Thread], types: typing.
     return channel.id in CHANNELS.keys() and any([t in CHANNELS[channel.id] for t in types]) or hasattr(channel, "parent") and channel_is_types(channel.parent, types)
 
 async def get_roundup_channel(ctx: Context):
-    if channel_is_type(ctx.channel, 'PROXY_ROUNDUP'):
-        qoc_channel, msg = parse_channel_link(None, ["ROUNDUP"])
+    if channel_is_type(ctx.channel, 'PROXY_QOC'):
+        ##NOTE (Ahmayk): will fetch first QOC channel in config list
+        qoc_channel, msg = parse_channel_link(None, ["QOC"])
         if len(msg) > 0:
             await ctx.channel.send(msg)
             if qoc_channel == -1: return None
@@ -1896,7 +1898,7 @@ def parse_optional_time(channel: typing.Union[GuildChannel, Thread], optional_ti
     """
     Get the number of houminutesrs from user input for roundup embed commands.
     """
-    time = _get_config('proxy_embed_seconds') if channel_is_type(channel, 'PROXY_ROUNDUP') else _get_config('embed_seconds')
+    time = _get_config('proxy_embed_seconds') if channel_is_type(channel, 'PROXY_QOC') else _get_config('embed_seconds')
     msg = None
     if optional_time is not None:
         try:
