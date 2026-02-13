@@ -303,7 +303,7 @@ async def on_command_error(ctx: commands.Context, error: commands.CommandError):
     error_data = "".join(traceback.format_exception(type(error), error, error.__traceback__))
     print(f"\033[91m {error_data}\033[0m")
 
-    description = f":boom: Intriging! I have encountered an unexpected error! ```{error}```"
+    description = f":boom: Intriguing! I have encountered an unexpected error! ```{error}```"
     # NOTE: (Ahmayk) hardcoding message limit to not risk a crash
     #as of writing, current implementation of _get_config() calls to disk
     messages = split_long_message(description, 2000)
