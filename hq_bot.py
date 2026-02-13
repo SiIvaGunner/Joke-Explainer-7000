@@ -70,7 +70,7 @@ class QocRip(NamedTuple):
     react_and_users: List[ReactAndUser]
     created_at: datetime
 
-## NOTE: (Ahmayk) key = channel_id, value = dictionary with key = message, value = QocRip
+## NOTE: (Ahmayk) key = channel_id, value = dictionary with key = message_id, value = QocRip
 RIP_CACHE_QOC: dict[int, dict[int, QocRip]] = {}
 
 async def cache_qoc_rip(message: Message) -> QocRip:
@@ -91,20 +91,23 @@ async def cache_qoc_rip(message: Message) -> QocRip:
     qoc_rip = QocRip(message.content, message.id, message.channel.id, message.author.id, \
             str(message.author), react_and_users, message.created_at)
 
+    if message.channel.id not in RIP_CACHE_QOC:
+        RIP_CACHE_QOC[message.channel.id]: dict[int, QocRip] = {}
+
     RIP_CACHE_QOC[message.channel.id][message.id] = qoc_rip
 
     return qoc_rip
 
 CACHE_LOCK_QOC: dict[int, asyncio.Lock] = {}
 
-async def get_qoc_rips(channel: typing.Union[GuildChannel, Thread]) -> ValuesView[QocRip]:
+async def get_qoc_rips(channel: typing.Union[GuildChannel, Thread]) -> List[QocRip]:
 
     if channel.id not in CACHE_LOCK_QOC:
         CACHE_LOCK_QOC[channel.id] = asyncio.Lock()
 
     ##NOTE: (Ahmayk) We need to prevent other processes from accessing the cache 
     ## in the case where we are updating the cache. If we allow access to the cache while
-    ## it is being updated, it would likely be inccomplete or wrong! 
+    ## it is being updated, it would likely be incomplete or wrong! 
     async with CACHE_LOCK_QOC[channel.id]:
         if channel.id not in RIP_CACHE_QOC:
 
@@ -119,7 +122,10 @@ async def get_qoc_rips(channel: typing.Union[GuildChannel, Thread]) -> ValuesVie
             if len(RIP_CACHE_QOC[channel.id]) and _get_config('qoc_contains_pinned_rule'):
                 RIP_CACHE_QOC[channel.id].popitem()
 
-    return RIP_CACHE_QOC[channel.id].values()
+    result = list(RIP_CACHE_QOC[channel.id].values())
+    ##NOTE: (Ahmayk) show rips in expected order, newest at top
+    result.sort(key = lambda rip: rip.created_at, reverse=True)
+    return result
 
 class SubOrQueueRip(NamedTuple):
     text: str
@@ -146,6 +152,9 @@ async def cache_suborqueue_rip(message) -> SubOrQueueRip:
     suborqueue_rip = SubOrQueueRip(message.content, message.id, message.channel.id, \
                                    message.author.id, str(message.author), react_names, message.created_at)
 
+    if message.channel.id not in RIP_CACHE_SUBORQUEUE:
+        RIP_CACHE_SUBORQUEUE[message.channel.id]: dict[int, SubOrQueueRip] = {}
+
     RIP_CACHE_SUBORQUEUE[message.channel.id][message.id] = suborqueue_rip
     return suborqueue_rip
 
@@ -158,7 +167,7 @@ async def get_suborqueue_rips(channel: typing.Union[GuildChannel, Thread], inclu
 
     ##NOTE: (Ahmayk) We need to prevent other processes from accessing the cache 
     ## in the case where we are updating the cache. If we allow access to the cache while
-    ## it is being updated, it would likely be inccomplete or wrong! 
+    ## it is being updated, it would likely be incomplete or wrong! 
     async with CACHE_LOCK_SUBORQUEUE[channel.id]:
         if channel.id not in RIP_CACHE_SUBORQUEUE:
             RIP_CACHE_SUBORQUEUE[channel.id]: dict[int, SubOrQueueRip] = {}
@@ -179,7 +188,10 @@ async def get_suborqueue_rips(channel: typing.Union[GuildChannel, Thread], inclu
                     if len(rip_link) > 0:
                         await cache_suborqueue_rip(message)
 
-    return RIP_CACHE_SUBORQUEUE[channel.id].values()
+    result = list(RIP_CACHE_SUBORQUEUE[channel.id].values())
+    ##NOTE: (Ahmayk) show rips in expected order, newest at top
+    result.sort(key = lambda rip: rip.created_at, reverse=True)
+    return result
 
 async def get_fast_converted_qoc_rips(channel: typing.Union[GuildChannel, Thread]) -> typing.List[SubOrQueueRip]:
     qoc_fast_converted_rips = []
@@ -201,6 +213,9 @@ async def get_fast_converted_qoc_rips(channel: typing.Union[GuildChannel, Thread
                 qoc_fast_converted_rips.append(qoc_rip)
             if _get_config('qoc_contains_pinned_rule'):
                 qoc_fast_converted_rips = qoc_fast_converted_rips[:-1]
+
+    ##NOTE: (Ahmayk) show rips in expected order, newest at top
+    qoc_fast_converted_rips.sort(key = lambda rip: rip.created_at, reverse=True)
     return qoc_fast_converted_rips
 
 #===============================================#
