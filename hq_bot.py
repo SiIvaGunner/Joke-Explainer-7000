@@ -606,11 +606,14 @@ class RoundupFilterType(Enum):
     NULL = auto()
     MYPINS = auto()
     MYFIXES = auto()
+    NOFIXES = auto()
     MYFRESH = auto()
     FRESH = auto()
+    SPICY = auto()
     SEARCH = auto()
     EVENTS = auto()
     HASREACT = auto()
+    NOTHASREACT = auto()
     OVERDUE = auto()
     VET_ALL = auto()
 
@@ -715,18 +718,23 @@ async def send_roundup(roundup_desc: RoundupDesc, optional_time: float, ctx: Con
             author = author.replace('*', '').replace('_', '')
 
             review_react_list = [ReactionType.CHECK, ReactionType.GOLDCHECK, ReactionType.FIX, ReactionType.ALERT, ReactionType.REJECT]
+            fix_react_list = [ReactionType.FIX, ReactionType.ALERT]
 
             is_valid = True
             match (roundup_desc.roundup_filter_type):
                 case RoundupFilterType.MYPINS:
                     is_valid = qoc_rip.message_author_id == roundup_desc.message_author_id
                 case RoundupFilterType.MYFIXES:
-                    fix_react_list = [ReactionType.FIX, ReactionType.ALERT]
                     is_valid = qoc_rip_has_reaction_one_from_user(fix_react_list, user_id, qoc_rip)
+                case RoundupFilterType.NOFIXES:
+                    is_valid = not qoc_rip_has_reaction_one(fix_react_list, qoc_rip)
                 case RoundupFilterType.MYFRESH:
                     is_valid = not qoc_rip_has_reaction_one_from_user(review_react_list, user_id, qoc_rip)
                 case RoundupFilterType.FRESH:
                     is_valid = not qoc_rip_has_reaction_one(review_react_list, qoc_rip)
+                case RoundupFilterType.SPICY:
+                    is_valid = qoc_rip_has_reaction(ReactionType.CHECK, qoc_rip) and \
+                               qoc_rip_has_reaction(ReactionType.REJECT, qoc_rip)
                 case RoundupFilterType.SEARCH:
                     is_valid = False
                     for key in search_keys:
@@ -741,6 +749,12 @@ async def send_roundup(roundup_desc: RoundupDesc, optional_time: float, ctx: Con
                             break
                 case RoundupFilterType.HASREACT:
                     is_valid = qoc_rip_has_reaction(roundup_desc.reaction_type, qoc_rip)
+                case RoundupFilterType.NOTHASREACT:
+                    is_valid = True
+                    for react_and_user in qoc_rip.react_and_users:
+                        if react_is(roundup_desc.reaction_type, react_and_user.name):
+                            is_valid = False
+                            break
                 case RoundupFilterType.OVERDUE:
                     is_valid = is_overdue
                 case RoundupFilterType.VET_ALL:
@@ -817,6 +831,14 @@ async def fresh(ctx: Context, optional_time = None):
             not_found_message = "No fresh rips.")
     await send_roundup(roundup_desc, optional_time, ctx)
 
+@bot.command(name="spicy", brief='display rips with at least one check and one reject')
+async def spicy(ctx: Context, optional_time = None):
+    """
+    Retrieve all pinned messages (except the first one) that have at least one check and one reject.
+    """
+    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.SPICY, \
+            not_found_message = "No fresh rips.")
+    await send_roundup(roundup_desc, optional_time, ctx)
 
 @bot.command(name='search', brief='search for pinned rips with text in title')
 async def search(ctx: Context, search_key: str, optional_time = None):
@@ -846,6 +868,14 @@ async def checks(ctx: Context, optional_time = None):
                                reaction_type=ReactionType.CHECK, not_found_message="No checks found.")
     await send_roundup(roundup_desc, optional_time, ctx)
 
+
+@bot.command(name='nochecks', aliases=['nocheck'])
+async def nochecks(ctx: Context, optional_time = None):
+    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.NOTHASREACT, \
+                               reaction_type=ReactionType.CHECK, not_found_message="No non-checked rips found.")
+    await send_roundup(roundup_desc, optional_time, ctx)
+
+
 @bot.command(name='rejects')
 async def rejects(ctx: Context, optional_time = None):
     """
@@ -853,6 +883,13 @@ async def rejects(ctx: Context, optional_time = None):
     """
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.HASREACT, \
                                reaction_type=ReactionType.REJECT, not_found_message="No rejected rips found.")
+    await send_roundup(roundup_desc, optional_time, ctx)
+
+
+@bot.command(name='norejects', aliases=['noreject'])
+async def norejects(ctx: Context, optional_time = None):
+    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.NOTHASREACT, \
+                               reaction_type=ReactionType.REJECT, not_found_message="No non-rejected rips found.")
     await send_roundup(roundup_desc, optional_time, ctx)
 
 
@@ -874,6 +911,19 @@ async def stops(ctx: Context, optional_time = None):
                                reaction_type=ReactionType.STOP, not_found_message="No octogons found.")
     await send_roundup(roundup_desc, optional_time, ctx)
 
+
+@bot.command(name='nofixes', aliases = ['nofix', 'nowrenches'])
+async def nofixes(ctx: Context, optional_time = None):
+    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.NOFIXES, \
+                               not_found_message="No non-fix rips found.")
+    await send_roundup(roundup_desc, optional_time, ctx)
+
+
+@bot.command(name='nostops', aliases=['nostop'])
+async def nofixes(ctx: Context, optional_time = None):
+    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.NOTHASREACT, \
+                               reaction_type=ReactionType.STOP, not_found_message="No non-octogons found.")
+    await send_roundup(roundup_desc, optional_time, ctx)
 
 
 @bot.command(name='overdue', brief=f'display rips that have been pinned for over X days')
@@ -1620,9 +1670,11 @@ async def help(ctx: Context):
             + "\n`!myfixes <user_id: str>` " + myfixes.brief \
             + "\n`!myfresh <user_id: str>` " + myfresh.brief\
             + "\n`!fresh` " + fresh.brief\
+            + "\n`!spicy` " + spicy.brief\
             + "\n`!search <arg1: str|arg2: str|...>` " + search.brief \
             + "\n`!emails` " + emails.brief + "\n`!events <arg1: str|arg2: str|...>` " + events.brief \
             + "\n`!checks`, `!rejects`, `!wrenches`, `!stops`" \
+            + "\n`!nochecks`, `!norejects`, `!nofixes`, `!nostops" \
             + "\n`!overdue` " + overdue.brief.replace('X', str(_get_config('overdue_days'))) \
             + "\n_**Misc. tools:**_\n`!count` " + count.brief \
             + "\n`!limitcheck` " + limitcheck.brief \
