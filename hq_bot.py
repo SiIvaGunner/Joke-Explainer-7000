@@ -443,6 +443,19 @@ def remove_rip_from_cache(message_id: int, channel_id: int):
 async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
     remove_rip_from_cache(payload.message_id, payload.channel_id)
 
+
+@bot.listen('on_raw_message_edit')
+async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
+    if payload.channel_id in RIP_CACHE_QOC and payload.message_id in RIP_CACHE_QOC[payload.channel_id]: 
+        qoc_rip = RIP_CACHE_QOC[payload.channel_id][payload.message_id]
+        qoc_rip = qoc_rip._replace(text = payload.message.content)
+        RIP_CACHE_QOC[payload.channel_id][payload.message_id] = qoc_rip
+    if payload.channel_id in RIP_CACHE_SUBORQUEUE and payload.message_id in RIP_CACHE_SUBORQUEUE[payload.channel_id]: 
+        suborqueue_rip = RIP_CACHE_SUBORQUEUE[payload.channel_id][payload.message_id]
+        suborqueue_rip = suborqueue_rip._replace(text = payload.message.content)
+        RIP_CACHE_SUBORQUEUE[payload.channel_id][payload.message_id] = suborqueue_rip
+
+
 # ============ React Functions ============== #
 
 KEYCAP_EMOJIS = {'2️⃣': 2, '3️⃣': 3, '4️⃣': 4, '5️⃣': 5, '6️⃣': 6, '7️⃣': 7, '8️⃣': 8, '9️⃣': 9, '🔟': 10}
