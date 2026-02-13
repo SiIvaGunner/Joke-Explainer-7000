@@ -260,6 +260,13 @@ async def on_error(event, *args, **kwargs):
 
 @bot.event
 async def on_command_error(ctx: commands.Context, error: commands.CommandError):
+
+    ##NOTE: (Ahmayk) Do nothing if command not recognized
+    ## while testing, people have already started getting angry at bot 
+    # for interrupting without anyone asking lol
+    if isinstance(error, commands.CommandNotFound):
+        return
+
     error_string = str(error)
     error_data = "".join(traceback.format_exception(type(error), error, error.__traceback__))
     print(f"\033[91m {error_data}\033[0m")
