@@ -184,8 +184,8 @@ async def get_suborqueue_rips(channel: typing.Union[GuildChannel, Thread], inclu
                 is_valid_message = channel is Thread or not (message.channel is Thread)
                 has_quotes = '```' in message.content
                 if is_valid_message and has_quotes:
-                    rip_link = extract_rip_link(message.content)
-                    if len(rip_link) > 0:
+                    rip_links = extract_rip_link(message.content)
+                    if len(rip_links) > 0:
                         await cache_suborqueue_rip(message)
 
     result = list(RIP_CACHE_SUBORQUEUE[channel.id].values())
@@ -560,6 +560,7 @@ class RoundupFilterType(Enum):
     EVENTS = auto()
     HASREACT = auto()
     OVERDUE = auto()
+    VET_ALL = auto()
 
 class RoundupDesc(NamedTuple):
     roundup_filter_type: RoundupFilterType = RoundupFilterType.NULL
@@ -686,6 +687,10 @@ async def send_roundup(roundup_desc: RoundupDesc, optional_time: float, ctx: Con
                     is_valid = qoc_rip_has_reaction(roundup_desc.reaction_type, qoc_rip)
                 case RoundupFilterType.OVERDUE:
                     is_valid = is_overdue
+                case RoundupFilterType.VET_ALL:
+                    vet_reacts, msg = await vet_message(qoc_rip.text) 
+                    reacts = vet_reacts
+                    is_valid = True 
 
             if is_valid:
                 link = format_message_link(channel.guild.id, channel.id, qoc_rip.message_id)
@@ -696,8 +701,13 @@ async def send_roundup(roundup_desc: RoundupDesc, optional_time: float, ctx: Con
                 result += "━━━━━━━━━━━━━━━━━━\n" # a line for readability!
 
         if result != "":
+
+            if roundup_desc.roundup_filter_type == RoundupFilterType.VET_ALL:
+                result += f"```\nLEGEND:\n{QOC_DEFAULT_LINKERR}: Link cannot be parsed\n{DEFAULT_CHECK}: Rip is OK\n{DEFAULT_FIX}: Rip has potential issues, see below\n{QOC_DEFAULT_BITRATE}: Bitrate is not 320kbps\n{QOC_DEFAULT_CLIPPING}: Clipping```"
+
             await send_embed(ctx.channel, result, time)
         else:
+
             not_found_message = "No rips."
             if len(roundup_desc.not_found_message):
                 not_found_message = roundup_desc.not_found_message
@@ -1254,28 +1264,15 @@ async def vet_all(ctx: Context, optional_time = None):
     """
     Retrieve all pinned messages (except the first one) and perform basic QoC, giving emoji labels.
     """
-    if not channel_is_types(ctx.channel, ['ROUNDUP', 'PROXY_ROUNDUP']): return
     heard_command("vet_all", ctx.message.author.name)
-
-    channel = await get_roundup_channel(ctx)
-    if channel is None: return
-
-    time, msg = parse_optional_time(ctx.channel, optional_time)
-    if msg is not None: await ctx.channel.send(msg)
 
     if not ffmpegExists():
         await ctx.channel.send("WARNING: ffmpeg command not found on the bot's server. Please contact the developers.")
         return
 
     async with ctx.channel.typing():
-        #TOOD: (Ahmayk) this does not vet anything???
-        # all_pins = await vet_pins(channel)
-        # result = ""
-        # for rip_id, rip_info in all_pins.items():
-        #     result += make_markdown(rip_info, True)
-        # result += f"```\nLEGEND:\n{QOC_DEFAULT_LINKERR}: Link cannot be parsed\n{DEFAULT_CHECK}: Rip is OK\n{DEFAULT_FIX}: Rip has potential issues, see below\n{QOC_DEFAULT_BITRATE}: Bitrate is not 320kbps\n{QOC_DEFAULT_CLIPPING}: Clipping```"
-        # await send_embed(ctx.channel, result, time)
-        pass
+        roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.VET_ALL)
+        await send_roundup(roundup_desc, optional_time, ctx)
 
 
 @bot.command(name='vet_msg', brief='vet a single message link')
@@ -2014,11 +2011,11 @@ def format_message_link(guild_id: int, channel_id: int, message_id: int):
     return  f"<https://discordapp.com/channels/{str(guild_id)}/{str(channel_id)}/{str(message_id)}>"
 
 
-async def vet_message(channel: typing.Union[GuildChannel, Thread], message: Message) -> typing.Tuple[str, str]:
+async def vet_message(text: str) -> typing.Tuple[str, str]:
     """
     Return the QoC verdict of a message as emoji reactions.
     """
-    urls = extract_rip_link(message.content)
+    urls = extract_rip_link(text)
     reacts = ""
     for url in urls:
         code, msg = await run_blocking(performQoC, url)
@@ -2026,7 +2023,7 @@ async def vet_message(channel: typing.Union[GuildChannel, Thread], message: Mess
         
         # debug
         if code == -1:
-            await write_log("Message: {}\n\nURL: {}\n\nError: {}".format(message.content, url, msg))
+            await write_log("Message: {}\n\nURL: {}\n\nError: {}".format(text, url, msg))
         else:
             break
 
