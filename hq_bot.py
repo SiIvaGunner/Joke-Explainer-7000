@@ -1764,7 +1764,7 @@ async def get_suborqueue_rip_stats_string(channel_id) -> str:
 
             if len(rips) > 0 and (channel_is_type(channel, 'SUBS_THREAD') or len(thread_count_dict) > 1):
                 ret += f"- <#{channel_id}>:\n"
-                for channel_id, count in thread_count_dict:
+                for channel_id, count in thread_count_dict.items():
                     if count > 0:
                         ret += f"  - <#{channel_id}>: **{count}** rips\n"
             else:
