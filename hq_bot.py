@@ -270,9 +270,9 @@ async def get_suborqueue_rips_fast(channel: typing.Union[GuildChannel, Thread]) 
     init_channel_cache(channel.id)
 
     result = []
-    if channel_is_types(channel, ['QOC', 'SUBS_PIN']) or \
-        not channel_is_types(channel, ['QUEUE', 'SUBS_THREAD', 'SUBS']):
-
+    if channel_is_types(channel, ['QUEUE', 'SUBS_THREAD', 'SUBS']):
+        result = await get_suborqueue_rips(channel)
+    else:
         if not CACHE_LOCK_SUBORQUEUE[channel.id].locked() and len(RIP_CACHE_SUBORQUEUE[channel.id]):
             result = await get_suborqueue_rips(channel)
         else:
@@ -280,9 +280,6 @@ async def get_suborqueue_rips_fast(channel: typing.Union[GuildChannel, Thread]) 
                 if is_message_rip(message):
                     suborqueue_rip = init_suborqueue_rip(message, [])
                     result.append(suborqueue_rip)
-    else:
-        result = await get_suborqueue_rips(channel)
-
     return result
 
 #===============================================#
