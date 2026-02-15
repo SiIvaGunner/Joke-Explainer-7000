@@ -1704,7 +1704,7 @@ async def peek_url(ctx: Context, url: str = None, use_ffprobe = None):
             for line in long_message:
                 await ctx.channel.send(line)
 
-@bot.command(name='validate_cache', brief='makes sure all rips are in cache')
+@bot.command(name='validate_cache', brief='makes sure all rips are in rip cache')
 async def validate_cache(ctx: Context):
 
     if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
@@ -1713,6 +1713,51 @@ async def validate_cache(ctx: Context):
     await ctx.channel.send("Validating cache of rips in all channels...")
     await validate_cache_all(ctx.channel)
     await ctx.channel.send("Cache validated!")
+
+
+@bot.command(name='reset_cache', brief='force reset rip cache for a channel')
+async def reset_cache(ctx: Context, channel_link: str = None):
+
+    if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
+    heard_command("reset_cache", ctx.message.author.name)
+
+    if channel_link is None:
+        await ctx.channel.send("Please provide a link to the channel you want to reset the cache for.")
+        return
+
+    channel_id, msg = parse_channel_link(channel_link, ['SUBS', 'SUBS_PIN', 'SUBS_THREAD', 'QUEUE', 'QOC'], False)
+    if len(msg) > 0:
+        await ctx.channel.send(msg)
+    if not channel_id:
+        return
+    
+    channel = bot.get_channel(channel_id)
+    init_channel_cache(channel.id)
+    channel_info = get_channel_info(channel)
+
+    if not channel_info.is_cache_qoc and not channel_info.is_cache_suborqueue:
+        return await ctx.channel.send(f'{channel.jump_url} is not cacheable!')
+
+    await ctx.channel.send("Rebuilding cache...")
+
+    suborqueue_count_old = 0 
+    async with CACHE_LOCK_SUBORQUEUE[channel.id]:
+        suborqueue_count_old = len(RIP_CACHE_SUBORQUEUE[channel.id])
+    qoc_count_old = 0
+    async with CACHE_LOCK_QOC[channel.id]:
+        qoc_count_old = len(RIP_CACHE_QOC[channel.id])
+
+    return_message = f'Cache rebuilt!'
+
+    if channel_info.is_cache_suborqueue:
+        suborqueue_rips = await get_suborqueue_rips(channel, True)
+        return_message += f'\nSubOrQueue rip count: {suborqueue_count_old} => {len(suborqueue_rips)}' 
+
+    if channel_info.is_cache_qoc:
+        qoc_rips = await get_qoc_rips(channel, True)
+        return_message += f'\nQoc rip count: {qoc_count_old} => {len(qoc_rips)}' 
+
+    await ctx.channel.send(return_message)
 
 # ============ Config commands ============== #
 
@@ -2320,8 +2365,8 @@ async def check_qoc_and_metadata(text: str, message_id: int, message_author_name
 
     return verdict, msg
 
-
-def parse_channel_link(link: str | None, types: typing.List[str]) -> typing.Tuple[int, str]:
+##TODO: (Ahmayk) refactor input system, don't give default on error by default
+def parse_channel_link(link: str | None, types: typing.List[str], give_default: bool = True) -> typing.Tuple[int, str]:
     """
     Parse the channel link and return the channel ID if it matches the specified types.
     If channel is invalid or does not match the types, returns the first channel in config matching the types.
@@ -2347,9 +2392,10 @@ def parse_channel_link(link: str | None, types: typing.List[str]) -> typing.Tupl
     channel = bot.get_channel(arg)
     if channel_is_types(channel, types):
         return arg, ""
-    else:
+    elif give_default:
         return default_id, f"Warning: Link is not a valid roundup channel, defaulting to <#{default_id}>."
-
+    else:
+        return None, f"Error: Link is not a valid roundup channel."
 
 async def parse_message_link(link: str):
     """
