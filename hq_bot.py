@@ -42,8 +42,10 @@ QOC_DEFAULT_CLIPPING = '📢'
 latest_pin_time: datetime = datetime.now(timezone.utc)
 latest_scan_time: datetime = datetime.now(timezone.utc)
 
+COMMAND_PREFIX = '!'
+
 bot = commands.Bot(
-    command_prefix='!',
+    command_prefix = COMMAND_PREFIX,
     help_command = commands.DefaultHelpCommand(no_category = 'Commands'), # Change only the no_category default string
     intents = discord.Intents.all() # This was a change necessitated by an update to discord.py :/
     # https://stackoverflow.com/questions/71950432/how-to-resolve-the-following-error-in-discord-py-typeerror-init-missing
@@ -541,8 +543,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                 cache_suborqueue_rip(message)
 
 
-@bot.listen('on_message')
-async def on_message(message: Message):
+def process_suborqueue_rip_caching(message: Message):
     is_suborqueue_channel = channel_is_types(message.channel, ['QUEUE', 'SUBS', 'SUBS_THREAD'])
     if is_suborqueue_channel and is_message_rip(message): 
         cache_suborqueue_rip(message)
@@ -690,6 +691,80 @@ def qoc_rip_has_reaction_one_from_user(reaction_type_list: List[ReactionType], u
         if react_and_user.user_id == user_id and react_is_one(reaction_type_list, react_and_user.name):
             return True
     return False
+
+# ============ Commands ============== #
+
+class CommandType(Enum):
+    NULL = auto()
+    QOC = auto()
+    MANAGEMENT = auto()
+
+async def null_command(message: Message, args: list[str]):
+    assert "NULL COMMAND CALLED"
+    return
+
+class CommandInfo(NamedTuple):
+    func: typing.Callable[[Message, list[str]], typing.Awaitable[typing.NoReturn]]
+    command_type: CommandType
+    brief: str
+    format: str
+    aliases: List[str]
+    secret: bool
+
+COMMANDS: dict[str, CommandInfo] = {}
+
+def command(
+    command_type: CommandType = CommandType.NULL,
+    brief: str = "",
+    format: str = "",
+    aliases: list[str] = [],
+    secret: bool = False,
+) -> typing.Callable:
+    def decorator(func: typing.Callable) -> typing.Callable:
+        COMMANDS[func.__name__] = CommandInfo(
+            func=func,
+            command_type=command_type,
+            brief=brief,
+            format=format,
+            aliases=aliases,
+            secret=secret,
+        )
+        return func
+    return decorator
+
+@bot.listen('on_message')
+async def on_message(message: Message):
+
+    if message.author == bot.user:
+        return
+
+    process_suborqueue_rip_caching(message)
+
+    if not message.content.startswith(COMMAND_PREFIX):
+        return
+
+    args = message.content.split(' ')
+    command_name = args[0][1:].lower()
+    if command_name not in COMMANDS:
+        return
+
+    command_info = COMMANDS[command_name]
+    await command_info.func(message, args[1:])
+
+@command(
+    command_type=CommandType.MANAGEMENT,
+    brief="Get info on all commands",
+    format="[command]",
+    aliases=['commands', 'halp', 'test'],
+)
+async def help(message: Message, args: list[str]):
+    result = ''
+
+    for name, info in COMMANDS.items():
+        if not info.secret:
+            result += f'\n`!{name} {info.format}` {info.brief}'
+
+    await send_embed(message.channel, result)
 
 # ============ Roundup commands ============== #
 
@@ -1807,8 +1882,8 @@ def _get_config(config: str):
 
 # ============ Helper/test commands ============== #
 
-@bot.command(name='help', aliases = ['commands', 'halp', 'test'])
-async def help(ctx: Context):    
+@bot.command(name='help_old')
+async def help_old(ctx: Context):    
     async with ctx.channel.typing():
         result = "_**YOU ARE NOW QoCING:**_\n`!roundup [embed_minutes: float]`" + roundup.brief \
             + "\n_**Special lists:**_\n`!mypins` " + mypins.brief \
