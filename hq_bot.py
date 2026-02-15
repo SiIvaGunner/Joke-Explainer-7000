@@ -672,10 +672,6 @@ class CommandType(Enum):
     MANAGEMENT = auto()
     QOC = auto()
 
-async def null_command(message: Message, args: list[str]):
-    assert "NULL COMMAND CALLED"
-    return
-
 class CommandInfo(NamedTuple):
     func: typing.Callable[[Message, list[str]], typing.Awaitable[typing.NoReturn]]
     command_type: CommandType
@@ -771,7 +767,7 @@ async def help(message: Message, args: list[str]):
 
     for name, info in COMMANDS.items():
         if not info.secret:
-            result += f'\n`!{name} {info.format}` {info.brief}'
+            result += f'\n**!{name}** `{info.format}` {info.brief}'
 
     await send_embed(message.channel, result)
 
@@ -958,6 +954,13 @@ async def send_roundup(roundup_desc: RoundupDesc, optional_time: float, message:
                 not_found_message = roundup_desc.not_found_message
             await message.channel.send(not_found_message)
 
+
+def parse_optional_time_args(args: list[str]) -> float:
+    optional_time = 0.0
+    if len(args): optional_time = float(args[0])
+    return optional_time
+
+
 @command(
     command_type=CommandType.QOC,
     format="[optional_time]",
@@ -965,27 +968,30 @@ async def send_roundup(roundup_desc: RoundupDesc, optional_time: float, message:
     brief="display all rips in QoC",
     desc=\
     """
-    Roundup command. Retrieve all pinned messages (except the first one) and their reactions.
-    Accepts an optional argument to control embed's display time *in hours*.
+    Retrieve all qoc rips and their reactions.
+    optional_time: controls the embed's display time *in hours*.
     """
 )
 async def roundup(message: Message, args: list[str]):
-    optional_time = 0.0
-    if len(args):
-        optional_time = float(args[0])
+    optional_time = parse_optional_time_args(args)
     roundup_desc = RoundupDesc()
-    print("Hi")
     await send_roundup(roundup_desc, optional_time, message)
 
 
-@bot.command(name='mypins', brief='displays rips you\'ve pinned')
-async def mypins(ctx: Context, optional_time = None):
+@command(
+    command_type=CommandType.QOC,
+    format="[optional_time]",
+    brief="display QoC rips you've pinned",
+    desc=\
     """
-    Retrieve all messages pinned by the command author.
+    optional_time: controls the embed's display time *in hours*.
     """
+)
+async def mypins(message: Message, args: list[str]):
+    optional_time = parse_optional_time_args(args)
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.MYPINS,
-                               message_author_id = ctx.author.id, not_found_message = "No pins are yours.")
-    await send_roundup(roundup_desc, optional_time, ctx)
+                               message_author_id = message.author.id, not_found_message = "No pins are yours.")
+    await send_roundup(roundup_desc, optional_time, message)
 
 
 @bot.command(name='myfixes', brief='displays rips you\'ve wrenched')
