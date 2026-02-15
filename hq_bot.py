@@ -418,33 +418,6 @@ async def on_error(event, *args, **kwargs):
     # https://stackoverflow.com/a/60031624
     await write_log('{}```py\n{}\n```'.format(event, traceback.format_exc()), embed=True)
 
-@bot.event
-async def on_command_error(ctx: commands.Context, error: commands.CommandError):
-
-    ##NOTE: (Ahmayk) Do nothing if command not recognized
-    ## while testing, people have already started getting angry at bot 
-    # for interrupting without anyone asking lol
-    if isinstance(error, commands.CommandNotFound):
-        return
-
-    error_string = str(error)
-    error_data = "".join(traceback.format_exception(type(error), error, error.__traceback__))
-    print(f"\033[91m {error_data}\033[0m")
-
-    description = f":boom: Intriguing! I have encountered an unexpected error! ```{error}```"
-    # NOTE: (Ahmayk) hardcoding message limit to not risk a crash
-    #as of writing, current implementation of _get_config() calls to disk
-    messages = split_long_message(description, 2000)
-    for message in messages:
-        await ctx.channel.send(message)
-
-    log_channel = bot.get_channel(LOG_CHANNEL)
-    messages = split_long_message(error_data, 2000 - len(error_string))
-    for i, message in enumerate(messages):
-        string = f'```py\n{message}\n```'
-        if i == 0:
-            string = f'**{error_string}**\n{string}'
-        await log_channel.send(string)
 
 _bot_close = bot.close
 async def close_with_log(self: commands.Bot):
@@ -696,8 +669,8 @@ def qoc_rip_has_reaction_one_from_user(reaction_type_list: List[ReactionType], u
 
 class CommandType(Enum):
     NULL = auto()
-    QOC = auto()
     MANAGEMENT = auto()
+    QOC = auto()
 
 async def null_command(message: Message, args: list[str]):
     assert "NULL COMMAND CALLED"
@@ -707,6 +680,7 @@ class CommandInfo(NamedTuple):
     func: typing.Callable[[Message, list[str]], typing.Awaitable[typing.NoReturn]]
     command_type: CommandType
     brief: str
+    desc: str
     format: str
     aliases: List[str]
     secret: bool
@@ -716,6 +690,7 @@ COMMANDS: dict[str, CommandInfo] = {}
 def command(
     command_type: CommandType = CommandType.NULL,
     brief: str = "",
+    desc: str = "",
     format: str = "",
     aliases: list[str] = [],
     secret: bool = False,
@@ -725,6 +700,7 @@ def command(
             func=func,
             command_type=command_type,
             brief=brief,
+            desc=desc,
             format=format,
             aliases=aliases,
             secret=secret,
@@ -745,11 +721,44 @@ async def on_message(message: Message):
 
     args = message.content.split(' ')
     command_name = args[0][1:].lower()
-    if command_name not in COMMANDS:
+    command_info = None
+    if command_name in COMMANDS:
+        command_info = COMMANDS[command_name]
+    else:
+        for info in COMMANDS.values():
+            if command_name in info.aliases:
+                command_info = info
+                break
+
+    if not command_info:
         return
 
-    command_info = COMMANDS[command_name]
-    await command_info.func(message, args[1:])
+    try:
+        await command_info.func(message, args[1:])
+    except Exception as error:
+
+        error_string = f"{type(error).__name__}: {error}"
+        error_data = "".join(traceback.format_exception(type(error), error, error.__traceback__))
+
+        print(f"\033[91m {error_data}\033[0m")
+
+        description = f":boom: Intriguing! I have encountered an unexpected error! ```{error_string}```"
+        # NOTE: (Ahmayk) hardcoding message limit to not risk a crash
+        #as of writing, current implementation of _get_config() calls to disk
+        split_texts = split_long_message(description, 2000)
+        for m in split_texts:
+            await message.channel.send(m)
+
+        header = f'ERROR on command ${command_name}: {error_string}'
+        log_channel = bot.get_channel(LOG_CHANNEL)
+        split_texts = split_long_message(error_data, 2000 - len(header))
+        for i, m in enumerate(split_texts):
+            string = f'```py\n{m}\n```'
+            if i == 0:
+                string = f'**{header}**\n{string}'
+            await log_channel.send(string)
+
+
 
 @command(
     command_type=CommandType.MANAGEMENT,
@@ -793,21 +802,21 @@ class RoundupDesc(NamedTuple):
     reaction_type: ReactionType = ReactionType.NULL 
     not_found_message: str = ""
 
-async def send_roundup(roundup_desc: RoundupDesc, optional_time: float, ctx: Context):
+async def send_roundup(roundup_desc: RoundupDesc, optional_time: float, message: Message):
     """
     Sends a roundup message of all rips that the roundup channel the message was sent in points to.
     The roundup_filter_type describes how the roundup will be filtered.
     """
-    if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
-    heard_command("roundup", ctx.message.author.name)
+    if not channel_is_types(message.channel, ['QOC', 'PROXY_QOC']): return
+    heard_command("roundup", message.author.name)
 
-    time, msg = parse_optional_time(ctx.channel, optional_time)
-    if msg is not None: await ctx.channel.send(msg)
+    time, msg = parse_optional_time(message.channel, optional_time)
+    if msg is not None: await message.channel.send(msg)
 
-    channel = await get_qoc_channel(ctx)
+    channel = await get_qoc_channel(message)
     if channel is None: return
 
-    async with ctx.channel.typing():
+    async with message.channel.typing():
 
         qoc_rips = await get_qoc_rips(channel)
 
@@ -817,15 +826,15 @@ async def send_roundup(roundup_desc: RoundupDesc, optional_time: float, ctx: Con
         emote_names = [e.name for e in channel.guild.emojis]
 
         ##TODO: (Ahmayk) fuzzy username input (ie typing "ahmayk" and matching to their username or display name)
-        user_id = ctx.author.id
+        user_id = message.author.id
         if len(roundup_desc.user_id_string):
             match = re.search(r'\d+', str(user_id))
             if match:
                 ID = int(match.group(0))
-                if ctx.guild:
-                    search_author = ctx.guild.get_member(ID)
+                if message.guild:
+                    search_author = message.guild.get_member(ID)
                     if search_author:
-                        await ctx.channel.send(f"Searching for rips {roundup_desc.conditional_string} by {search_author.name}")
+                        await message.channel.send(f"Searching for rips {roundup_desc.conditional_string} by {search_author.name}")
 
         result = ""
 
@@ -941,23 +950,32 @@ async def send_roundup(roundup_desc: RoundupDesc, optional_time: float, ctx: Con
             if roundup_desc.roundup_filter_type == RoundupFilterType.VET_ALL:
                 result += f"```\nLEGEND:\n{QOC_DEFAULT_LINKERR}: Link cannot be parsed\n{DEFAULT_CHECK}: Rip is OK\n{DEFAULT_FIX}: Rip has potential issues, see below\n{QOC_DEFAULT_BITRATE}: Bitrate is not 320kbps\n{QOC_DEFAULT_CLIPPING}: Clipping```"
 
-            await send_embed(ctx.channel, result, time)
+            await send_embed(message.channel, result, time)
         else:
 
             not_found_message = "No rips."
             if len(roundup_desc.not_found_message):
                 not_found_message = roundup_desc.not_found_message
-            await ctx.channel.send(not_found_message)
+            await message.channel.send(not_found_message)
 
-
-@bot.command(name='roundup', aliases = ['down_taunt', 'qoc', 'qocparty', 'roudnup', 'links', 'list', 'ls'], brief='displays all rips in QoC')
-async def roundup(ctx: Context, optional_time = None):
+@command(
+    command_type=CommandType.QOC,
+    format="[optional_time]",
+    aliases = ['down_taunt', 'qoc', 'qocparty', 'roudnup', 'links', 'list', 'ls'],
+    brief="display all rips in QoC",
+    desc=\
     """
     Roundup command. Retrieve all pinned messages (except the first one) and their reactions.
     Accepts an optional argument to control embed's display time *in hours*.
     """
+)
+async def roundup(message: Message, args: list[str]):
+    optional_time = 0.0
+    if len(args):
+        optional_time = float(args[0])
     roundup_desc = RoundupDesc()
-    await send_roundup(roundup_desc, optional_time, ctx)
+    print("Hi")
+    await send_roundup(roundup_desc, optional_time, message)
 
 
 @bot.command(name='mypins', brief='displays rips you\'ve pinned')
@@ -2160,15 +2178,15 @@ def heard_command(command_name: str, user: str):
     print(f"{today.strftime('%m/%d/%y %I:%M %p')}  ~~~  Heard {command_name} command from {user}!")
 
 
-def parse_optional_time(channel: typing.Union[GuildChannel, Thread], optional_time):
+def parse_optional_time(channel: typing.Union[GuildChannel, Thread], optional_time: float):
     """
     Get the number of houminutesrs from user input for roundup embed commands.
     """
     time = _get_config('proxy_embed_seconds') if channel_is_type(channel, 'PROXY_QOC') else _get_config('embed_seconds')
     msg = None
-    if optional_time is not None:
+    if optional_time:
         try:
-            new_time = float(optional_time) * 60
+            new_time = optional_time * 60
             if math.isnan(new_time) or math.isinf(new_time) or new_time < 1:
                 raise ValueError
         except ValueError:
