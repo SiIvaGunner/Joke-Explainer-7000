@@ -684,6 +684,7 @@ class CommandInfo(NamedTuple):
 
 COMMANDS: dict[str, CommandInfo] = {}
 
+##NOTE: (Ahmayk) This nonsense is so that we can have a simpler way of defining commands
 def command(
     command_type: CommandType = CommandType.NULL,
     brief: str = "",
@@ -793,7 +794,7 @@ class RoundupDesc(NamedTuple):
     roundup_filter_type: RoundupFilterType = RoundupFilterType.NULL
     message_author_id: int = 0 
     message_author_name: str = ""
-    user_id_string: str = ""
+    user_id: int = 0 
     conditional_string: str = ""
     search_key: str = ""
     reaction_type: ReactionType = ReactionType.NULL 
@@ -824,8 +825,8 @@ async def send_roundup(roundup_desc: RoundupDesc, optional_time: float, message:
 
         ##TODO: (Ahmayk) fuzzy username input (ie typing "ahmayk" and matching to their username or display name)
         user_id = message.author.id
-        if len(roundup_desc.user_id_string):
-            match = re.search(r'\d+', str(user_id))
+        if roundup_desc.user_id:
+            match = re.search(r'\d+', str(roundup_desc.user_id))
             if match:
                 ID = int(match.group(0))
                 if message.guild:
@@ -956,7 +957,7 @@ async def send_roundup(roundup_desc: RoundupDesc, optional_time: float, message:
             await message.channel.send(not_found_message)
 
 
-def parse_optional_time_args(args: list[str]) -> float:
+def parse_default_optional_time_args(args: list[str]) -> float:
     optional_time = 0.0
     if len(args): optional_time = float(args[0])
     return optional_time
@@ -974,7 +975,7 @@ def parse_optional_time_args(args: list[str]) -> float:
     """
 )
 async def roundup(message: Message, args: list[str]):
-    optional_time = parse_optional_time_args(args)
+    optional_time = parse_default_optional_time_args(args)
     roundup_desc = RoundupDesc()
     await send_roundup(roundup_desc, optional_time, message)
 
@@ -989,57 +990,88 @@ async def roundup(message: Message, args: list[str]):
     """
 )
 async def mypins(message: Message, args: list[str]):
-    optional_time = parse_optional_time_args(args)
+    optional_time = parse_default_optional_time_args(args)
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.MYPINS,
                                message_author_id = message.author.id, not_found_message = "No pins are yours.")
     await send_roundup(roundup_desc, optional_time, message)
 
 
-@bot.command(name='myfixes', brief='displays rips you\'ve wrenched')
-async def myfixes(ctx: Context, user_id: str = "", optional_time = None):
+@command(
+    command_type=CommandType.QOC,
+    format="[optional_time]",
+    brief="display QoC rips you've wrenched",
+    desc=\
     """
-    Retrieve all messages with fix or alert reactions by the command author.
+    "wrenched" means a :wrench: or an :alert: react.
+    optional_time: controls the embed's display time *in hours*.
     """
-    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.MYFIXES, user_id_string = user_id, conditional_string = "with wrenches")
-    await send_roundup(roundup_desc, optional_time, ctx)
+)
+async def myfixes(message: Message, args: list[str]):
+    optional_time = parse_default_optional_time_args(args)
+    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.MYFIXES, \
+                               user_id = message.author.id, conditional_string = "with wrenches")
+    await send_roundup(roundup_desc, optional_time, message)
 
 
-@bot.command(name='myfresh', brief='displays rips you\'ve not reviewed')
-async def myfresh(ctx: Context, user_id: str = "", optional_time = None):
+@command(
+    command_type=CommandType.QOC,
+    format="[optional_time]",
+    brief="display QoC rips you've not reviewed",
+    desc=\
     """
-    Retrieve all messages with no review reactions by the command author.
+    optional_time: controls the embed's display time *in hours*.
     """
-    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.MYFRESH, user_id_string = user_id, conditional_string = "not reviewed")
-    await send_roundup(roundup_desc, optional_time, ctx)
+)
+async def myfresh(message: Message, args: list[str]):
+    optional_time = parse_default_optional_time_args(args)
+    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.MYFRESH, \
+                               user_id = message.author.id, conditional_string = "not reviewed")
+    await send_roundup(roundup_desc, optional_time, message)
 
 
-@bot.command(name="fresh", aliases = ['blank', 'bald', 'clean', 'noreacts'], brief='display rips no one has reviewed')
-async def fresh(ctx: Context, optional_time = None):
+@command(
+    command_type=CommandType.QOC,
+    aliases = ['blank', 'bald', 'clean', 'noreacts'],
+    format="[optional_time]",
+    brief="display QoC rips no one has reviewed",
+    desc=\
     """
-    Retrieve all pinned messages (except the first one) with no review reactions.
+    optional_time: controls the embed's display time *in hours*.
     """
+)
+async def fresh(message: Message, args: list[str]):
+    optional_time = parse_default_optional_time_args(args)
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.FRESH, \
             not_found_message = "No fresh rips.")
-    await send_roundup(roundup_desc, optional_time, ctx)
+    await send_roundup(roundup_desc, optional_time, message)
 
-@bot.command(name="spicy", brief='display rips with at least one check and one reject')
-async def spicy(ctx: Context, optional_time = None):
+
+@command(
+    command_type=CommandType.QOC,
+    format="[optional_time]",
+    brief="display QoC rips with at least one check and one reject",
+    desc=\
     """
-    Retrieve all pinned messages (except the first one) that have at least one check and one reject.
+    optional_time: controls the embed's display time *in hours*.
     """
+)
+async def spicy(message: Message, args: list[str]):
+    optional_time = parse_default_optional_time_args(args)
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.SPICY, \
-            not_found_message = "No fresh rips.")
-    await send_roundup(roundup_desc, optional_time, ctx)
+            not_found_message = "No spicy rips :(")
+    await send_roundup(roundup_desc, optional_time, message)
 
-@bot.command(name='search', brief='search for pinned rips with text in title')
-async def search(ctx: Context, search_key: str, optional_time = None):
-    """
-    Search for pinned messages by rip title.
-    Supports `|` for multiple search keys.
-    """
+
+@command(
+    command_type=CommandType.QOC,
+    format="<search text>",
+    brief="search for QoC rips with text in title",
+)
+async def search(message: Message, args: list[str]):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.SEARCH, \
-            search_key=search_key, not_found_message = "No pinned rips containing indicated text in title found.")
-    await send_roundup(roundup_desc, optional_time, ctx)
+            search_key= "".join([str(s) for s in args]),\
+            not_found_message = "No pinned rips containing indicated text in title found.")
+    await send_roundup(roundup_desc, 0, message)
 
 
 @bot.command(name='emails', brief='displays emails')
@@ -1084,7 +1116,7 @@ async def norejects(ctx: Context, optional_time = None):
     await send_roundup(roundup_desc, optional_time, ctx)
 
 
-@bot.command(name='wrenches', aliases = ['fix'])
+@bot.command(name='wrenches', aliases = ['fix', 'fixes'])
 async def wrenches(ctx: Context, optional_time = None):
     """
     Retrieve all pinned messages (except the first one) with :fix: reactions.
