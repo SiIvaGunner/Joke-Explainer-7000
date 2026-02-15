@@ -107,6 +107,41 @@ def init_channel_cache(channel_id: int):
         CACHE_LOCK_QOC[channel_id] = asyncio.Lock()
 
 
+def is_message_rip(message: Message) -> bool:
+    result = False
+    is_valid_message = message.channel is Thread or not (message.channel is Thread)
+    has_quotes = '```' in message.content
+    if is_valid_message and has_quotes:
+        rip_links = extract_rip_link(message.content)
+        if len(rip_links) > 0:
+            result = True
+    return result
+
+class RipFetchType(Enum):
+    PINS = auto()
+    ALL_MESSAGES_NO_THREADS = auto()
+    ALL_MESSAGES_AND_THREADS = auto()
+
+class ChannelInfo(NamedTuple):
+    rip_fetch_type: RipFetchType
+    is_cache_qoc: bool
+    is_cache_suborqueue: bool
+
+def get_channel_info(channel: TextChannel) -> ChannelInfo:
+
+    rip_fetch_type = RipFetchType.PINS
+
+    if channel_is_types(channel, ['SUBS']):
+        rip_fetch_type = RipFetchType.ALL_MESSAGES_NO_THREADS
+
+    elif channel_is_types(channel, ['QUEUE', 'SUBS_THREAD']):
+        rip_fetch_type = RipFetchType.ALL_MESSAGES_AND_THREADS
+
+    is_cache_qoc = channel_is_types(channel, ['QOC'])
+    is_cache_suborqueue = channel_is_types(channel, ['SUBS', 'SUBS_PIN', 'SUBS_THREAD', 'QUEUE'])
+    
+    return ChannelInfo(rip_fetch_type, is_cache_qoc, is_cache_suborqueue)
+
 async def cache_qoc_rip(message: Message) -> QocRip:
 
     init_channel_cache(message.channel.id)
@@ -131,7 +166,7 @@ async def cache_qoc_rip(message: Message) -> QocRip:
 
     return qoc_rip
 
-async def get_qoc_rips(channel: typing.Union[GuildChannel, Thread]) -> List[QocRip]:
+async def get_qoc_rips(channel: typing.Union[GuildChannel, Thread], rebuild_cache: bool = False) -> List[QocRip]:
     """
     Gets all qoc rips from a channel. Makes a cache for the channel if it doesn't already exist. 
 
@@ -141,27 +176,30 @@ async def get_qoc_rips(channel: typing.Union[GuildChannel, Thread]) -> List[QocR
 
     init_channel_cache(channel.id)
 
+    channel_info = get_channel_info(channel)
+
+    ##NOTE: (Ahmayk) If we hit either of these asserts, then we are calling get_qoc_rips() incorrectly!
+    assert channel_info.rip_fetch_type == RipFetchType.PINS
+    assert channel_info.is_cache_qoc 
+
     ##NOTE: (Ahmayk) We need to prevent other processes from accessing the cache 
     ## in the case where we are updating the cache. If we allow access to the cache while
     ## it is being updated, it would likely be incomplete or wrong! 
     async with CACHE_LOCK_QOC[channel.id]:
-        if not len(RIP_CACHE_QOC[channel.id]):
+        if not len(RIP_CACHE_QOC[channel.id]) or rebuild_cache:
 
             RIP_CACHE_QOC[channel.id]: dict[int, QocRip] = {}
 
             async for message in channel.pins(limit=None):
-                # NOTE: (Ahmayk) channel.pins does not return reaction data,
-                # so we have to fetch it manually. This is slow! But neccessary.
-                fetched_message = await channel.fetch_message(message.id)
-                await cache_qoc_rip(fetched_message)
 
-                # NOTE: (Ahmayk) go ahead and cache it as a suborqueue rip too
-                # if it is a subs pin channel
-                if channel_is_type(channel, 'SUBS_PIN'):
-                    cache_suborqueue_rip(fetched_message)
+                if is_message_rip(message):
+                    # NOTE: (Ahmayk) channel.pins does not return reaction data,
+                    # so we have to fetch it manually. This is slow! But neccessary.
+                    fetched_message = await channel.fetch_message(message.id)
+                    await cache_qoc_rip(fetched_message)
 
-            if len(RIP_CACHE_QOC[channel.id]) and _get_config('qoc_contains_pinned_rule'):
-                RIP_CACHE_QOC[channel.id].popitem()
+                    if channel_info.is_cache_suborqueue: 
+                        cache_suborqueue_rip(fetched_message)
 
     result = list(RIP_CACHE_QOC[channel.id].values())
     ##NOTE: (Ahmayk) show rips in expected order, newest at top
@@ -190,17 +228,7 @@ def cache_suborqueue_rip(message) -> SubOrQueueRip:
     RIP_CACHE_SUBORQUEUE[message.channel.id][message.id] = suborqueue_rip
     return suborqueue_rip
 
-def is_message_rip(message: Message) -> bool:
-    result = False
-    is_valid_message = message.channel is Thread or not (message.channel is Thread)
-    has_quotes = '```' in message.content
-    if is_valid_message and has_quotes:
-        rip_links = extract_rip_link(message.content)
-        if len(rip_links) > 0:
-            result = True
-    return result
-
-async def get_suborqueue_rips(channel: typing.Union[GuildChannel, Thread]) -> List[SubOrQueueRip]:
+async def get_suborqueue_rips(channel: typing.Union[GuildChannel, Thread], rebuild_cache: bool = False) -> List[SubOrQueueRip]:
     """
     Gets all SubOrQueue rips from a channel. Detects the channel type and  
     grabs either 
@@ -216,40 +244,42 @@ async def get_suborqueue_rips(channel: typing.Union[GuildChannel, Thread]) -> Li
     """
 
     init_channel_cache(channel.id)
+    channel_info = get_channel_info(channel)
 
     ##NOTE: (Ahmayk) We need to prevent other processes from accessing the cache 
     ## in the case where we are updating the cache. If we allow access to the cache while
     ## it is being updated, it would likely be incomplete or wrong! 
     async with CACHE_LOCK_SUBORQUEUE[channel.id]:
 
-        if not len(RIP_CACHE_SUBORQUEUE[channel.id]):
+        if not len(RIP_CACHE_SUBORQUEUE[channel.id]) or rebuild_cache:
 
-            if channel_is_types(channel, ['SUBS']):
-                async for message in channel.history(limit = None):
-                    if is_message_rip(message):
-                        cache_suborqueue_rip(message)
+            match channel_info.rip_fetch_type: 
+                case RipFetchType.ALL_MESSAGES_NO_THREADS:
+                    async for message in channel.history(limit = None):
+                        if is_message_rip(message):
+                            cache_suborqueue_rip(message)
 
-            elif channel_is_types(channel, ['QUEUE', 'SUBS_THREAD']):
-                async for message in channel.history(limit = None):
-                    if message.thread is not None:
-                        thread_suborqueue_rips = await get_suborqueue_rips(message.thread)
-                        #NOTE: (Ahmayk) we insert thread rips also in its parent channel dict so that
-                        #we get all rips in theads when we get the parent channel's rips 
-                        for thread_suborqueue_rip in thread_suborqueue_rips:
-                            RIP_CACHE_SUBORQUEUE[channel.id][thread_suborqueue_rip.message_id] = thread_suborqueue_rip 
-                    if is_message_rip(message):
-                        cache_suborqueue_rip(message)
+                case RipFetchType.ALL_MESSAGES_AND_THREADS:
+                    async for message in channel.history(limit = None):
+                        if message.thread is not None:
+                            thread_suborqueue_rips = await get_suborqueue_rips(message.thread)
+                            #NOTE: (Ahmayk) we insert thread rips also in its parent channel dict so that
+                            #we get all rips in theads when we get the parent channel's rips 
+                            for thread_suborqueue_rip in thread_suborqueue_rips:
+                                RIP_CACHE_SUBORQUEUE[channel.id][thread_suborqueue_rip.message_id] = thread_suborqueue_rip 
+                        if is_message_rip(message):
+                            cache_suborqueue_rip(message)
 
-            else:
-                async for message in channel.pins(limit = None):
-                    if is_message_rip(message):
-                        # NOTE: (Ahmayk) channel.pins does not return reaction data,
-                        # so we have to fetch it manually. This is slow! But neccessary.
-                        fetched_message = await channel.fetch_message(message.id)
-                        cache_suborqueue_rip(fetched_message)
+                case RipFetchType.PINS:
+                    async for message in channel.pins(limit = None):
+                        if is_message_rip(message):
+                            # NOTE: (Ahmayk) channel.pins does not return reaction data,
+                            # so we have to fetch it manually. This is slow! But neccessary.
+                            fetched_message = await channel.fetch_message(message.id)
+                            cache_suborqueue_rip(fetched_message)
 
-                if len(RIP_CACHE_SUBORQUEUE[channel.id]) and _get_config('qoc_contains_pinned_rule'):
-                    RIP_CACHE_SUBORQUEUE[channel.id].popitem()
+                case _:
+                    assert "Unimplemented RipFetchType"
 
     result = list(RIP_CACHE_SUBORQUEUE[channel.id].values())
     ##NOTE: (Ahmayk) show rips in expected order, newest at top
@@ -263,24 +293,87 @@ async def get_suborqueue_rips_fast(channel: typing.Union[GuildChannel, Thread]) 
     and only care about the number of rips or its metadata.
 
     Channels that are not labeld with a matching channel type are assumed to be pin channels.
-
-    Never blocks processing.
     """
 
     init_channel_cache(channel.id)
+    channel_info = get_channel_info(channel)
 
     result = []
-    if channel_is_types(channel, ['QUEUE', 'SUBS_THREAD', 'SUBS']):
+
+    if channel_info.rip_fetch_type == RipFetchType.ALL_MESSAGES_AND_THREADS or \
+       channel_info.rip_fetch_type == RipFetchType.ALL_MESSAGES_NO_THREADS:
+
+        #NOTE: (Ahmayk) The path to get rips normally is already as fast
+        #as we can get so just do that
         result = await get_suborqueue_rips(channel)
+
     else:
         if not CACHE_LOCK_SUBORQUEUE[channel.id].locked() and len(RIP_CACHE_SUBORQUEUE[channel.id]):
             result = await get_suborqueue_rips(channel)
         else:
             async for message in channel.pins(limit = None):
                 if is_message_rip(message):
+                    ##NOTE: (Ahmayk) No fetching message for reactions for speed!
                     suborqueue_rip = init_suborqueue_rip(message, [])
                     result.append(suborqueue_rip)
+            result.sort(key = lambda rip: rip.created_at, reverse=True)
+
     return result
+
+async def validate_cache_all(send_channel: TextChannel | None):
+
+    channel_ids = [k for k, v in CHANNELS.items()]
+    for channel_id in channel_ids:
+        channel = bot.get_channel(channel_id)
+        if channel:
+    
+            init_channel_cache(channel.id)
+
+            channel_info = get_channel_info(channel)
+
+            count = 0
+            match channel_info.rip_fetch_type:
+                case RipFetchType.ALL_MESSAGES_NO_THREADS:
+                    async for message in channel.history(limit = None):
+                        if is_message_rip(message):
+                            count += 1
+
+                case RipFetchType.ALL_MESSAGES_AND_THREADS:
+                    async for message in channel.history(limit = None):
+                        if message.thread is not None:
+                            async for thread_message in message.thread.history(limit = None):
+                                if is_message_rip(thread_message):
+                                    count += 1
+                        if is_message_rip(message):
+                                count += 1
+
+                case RipFetchType.PINS:
+                    async for message in channel.pins(limit = None):
+                        if is_message_rip(message):
+                            count += 1
+
+                case _:
+                    assert "Unimplemented RipFetchType"
+            
+            if channel_info.is_cache_qoc:
+                async with CACHE_LOCK_QOC[channel.id]:
+                    if count != len(RIP_CACHE_QOC[channel.id]):
+                        msg = f'QOC Cache validation failed for {channel.jump_url}! ' + \
+                            f'Counted {count} rips in discord but counted {len(RIP_CACHE_QOC[channel.id])} in cache. Recaching...'
+                        await write_log(msg)
+                        if send_channel:
+                            await send_channel.send(msg)
+                        await get_qoc_rips(channel, True)
+
+            if channel_info.is_cache_suborqueue:
+                async with CACHE_LOCK_SUBORQUEUE[channel.id]:
+                    if count != len(RIP_CACHE_SUBORQUEUE[channel.id]):
+                        msg = f'SubOrQueue Cache validation failed for {channel.jump_url}! ' + \
+                            f'Counted {count} rips in discord but {len(RIP_CACHE_SUBORQUEUE[channel.id])} in cache. Recaching...'
+                        await write_log(msg)
+                        if send_channel:
+                            await send_channel.send(msg)
+                        await get_suborqueue_rips(channel, True)
 
 #===============================================#
 #                    EVENTS                     #
@@ -292,7 +385,6 @@ async def on_ready():
     print('#################################')
 
     await write_log("Good morning! Caching rips...")
-
     channel_ids = [k for k, v in CHANNELS.items() if 'QUEUE' in v]
     for channel_id in channel_ids:
         channel = bot.get_channel(channel_id)
@@ -300,21 +392,23 @@ async def on_ready():
             suborqueue_rips = await get_suborqueue_rips(channel)
             await write_log(f'Cached {len(suborqueue_rips)} queued rips in {channel.jump_url}.')
 
-    channel_ids = [k for k, v in CHANNELS.items() if 'SUBS' in v or 'SUBS_THREAD' in v]
+    channel_ids = [k for k, v in CHANNELS.items() if 'SUBS' in v or 'SUBS_THREAD' in v or 'SUBS_PIN' in v]
     for channel_id in channel_ids:
         channel = bot.get_channel(channel_id)
         if channel:
             suborqueue_rips = await get_suborqueue_rips(channel)
             await write_log(f'Cached {len(suborqueue_rips)} subbed rips in {channel.jump_url}.')
 
-    channel_ids = [k for k, v in CHANNELS.items() if 'QOC' in v or 'SUBS_PIN' in v]
+    channel_ids = [k for k, v in CHANNELS.items() if 'QOC' in v]
     for channel_id in channel_ids:
         channel = bot.get_channel(channel_id)
         if channel:
             qoc_rips = await get_qoc_rips(channel)
             await write_log(f'Cached {len(qoc_rips)} qoc rips in {channel.jump_url}.')
 
-    await write_log('Startup reaction caching complete.')
+    await write_log('Validating cache...')
+    await validate_cache_all(None)
+    await write_log('Startup caching complete.')
 
 import traceback
 @bot.event
@@ -917,7 +1011,7 @@ async def nofixes(ctx: Context, optional_time = None):
 
 
 @bot.command(name='nostops', aliases=['nostop'])
-async def nofixes(ctx: Context, optional_time = None):
+async def nostops(ctx: Context, optional_time = None):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.NOTHASREACT, \
                                reaction_type=ReactionType.STOP, not_found_message="No non-octogons found.")
     await send_roundup(roundup_desc, optional_time, ctx)
@@ -1610,6 +1704,15 @@ async def peek_url(ctx: Context, url: str = None, use_ffprobe = None):
             for line in long_message:
                 await ctx.channel.send(line)
 
+@bot.command(name='validate_cache', brief='makes sure all rips are in cache')
+async def validate_cache(ctx: Context):
+
+    if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
+    heard_command("validate_cache", ctx.message.author.name)
+
+    await ctx.channel.send("Validating cache of rips in all channels...")
+    await validate_cache_all(ctx.channel)
+    await ctx.channel.send("Cache validated!")
 
 # ============ Config commands ============== #
 
