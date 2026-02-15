@@ -42,18 +42,19 @@ QOC_DEFAULT_CLIPPING = '📢'
 latest_pin_time: datetime = datetime.now(timezone.utc)
 latest_scan_time: datetime = datetime.now(timezone.utc)
 
-COMMAND_PREFIX = '!'
+COMMAND_PREFIX = '$'
 
-bot = commands.Bot(
-    command_prefix = COMMAND_PREFIX,
-    help_command = commands.DefaultHelpCommand(no_category = 'Commands'), # Change only the no_category default string
+bot = discord.Client(
     intents = discord.Intents.all() # This was a change necessitated by an update to discord.py :/
     # https://stackoverflow.com/questions/71950432/how-to-resolve-the-following-error-in-discord-py-typeerror-init-missing
     # Also had to enable MESSAGE CONENT INTENT https://stackoverflow.com/questions/71553296/commands-dont-run-in-discord-py-2-0-no-errors-but-run-in-discord-py-1-7-3
     # 10/28/22 They changed it again!!! https://stackoverflow.com/questions/73458847/discord-py-error-message-discord-ext-commands-bot-privileged-message-content-i
 )
 
-bot.remove_command('help') # get rid of the dumb default !help command
+##NOTE: (Ahmayk) temporary while we refactor command framework
+bot.command = lambda *args, **kwargs: (lambda func: func)
+
+# bot.remove_command('help') # get rid of the dumb default !help command
 
 #===============================================#
 #                    CACHE                      #
@@ -479,7 +480,7 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
                 await channel.send("**Rip**: **[{}]({})**\n**Verdict**: {}\n{}-# React {} if this is resolved.".format(rip_title, link, verdict, msg, DEFAULT_CHECK))
 
 
-@bot.listen('on_raw_reaction_add')
+@bot.event
 async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
     channel = bot.get_channel(payload.channel_id)
@@ -522,7 +523,7 @@ def process_suborqueue_rip_caching(message: Message):
         cache_suborqueue_rip(message)
 
 
-@bot.listen('on_raw_reaction_remove')
+@bot.event
 async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
     if payload.channel_id in RIP_CACHE_QOC and payload.message_id in RIP_CACHE_QOC[payload.channel_id]: 
         qoc_rip = RIP_CACHE_QOC[payload.channel_id][payload.message_id]
@@ -535,7 +536,7 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
         if payload.emoji.name in suborqueue_rip.react_names:
             suborqueue_rip.react_names.remove(payload.emoji.name)
 
-@bot.listen('on_raw_reaction_clear_emoji')
+@bot.event
 async def on_raw_reaction_clear_emoji(payload: discord.RawReactionClearEmojiEvent):
     if payload.channel_id in RIP_CACHE_QOC and payload.message_id in RIP_CACHE_QOC[payload.channel_id]: 
         qoc_rip = RIP_CACHE_QOC[payload.channel_id][payload.message_id]
@@ -550,7 +551,7 @@ async def on_raw_reaction_clear_emoji(payload: discord.RawReactionClearEmojiEven
                 suborqueue_rip.react_names.remove(cached_react_name)
                 break
 
-@bot.listen('on_raw_reaction_clear')
+@bot.event
 async def on_raw_reaction_clear(payload: discord.RawReactionClearEvent):
     if payload.channel_id in RIP_CACHE_QOC and payload.message_id in RIP_CACHE_QOC[payload.channel_id]: 
         qoc_rip = RIP_CACHE_QOC[payload.channel_id][payload.message_id]
@@ -565,12 +566,12 @@ def remove_rip_from_cache(message_id: int, channel_id: int):
     if channel_id in RIP_CACHE_SUBORQUEUE and message_id in RIP_CACHE_SUBORQUEUE[channel_id]: 
         RIP_CACHE_SUBORQUEUE[channel_id].pop(message_id)
 
-@bot.listen('on_raw_message_delete')
+@bot.event
 async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
     remove_rip_from_cache(payload.message_id, payload.channel_id)
 
 
-@bot.listen('on_raw_message_edit')
+@bot.event
 async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
     if payload.channel_id in RIP_CACHE_QOC and payload.message_id in RIP_CACHE_QOC[payload.channel_id]: 
         qoc_rip = RIP_CACHE_QOC[payload.channel_id][payload.message_id]
@@ -704,7 +705,7 @@ def command(
         return func
     return decorator
 
-@bot.listen('on_message')
+@bot.event
 async def on_message(message: Message):
 
     if message.author == bot.user:
