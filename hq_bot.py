@@ -691,6 +691,14 @@ def qoc_rip_has_reaction_one_from_user(reaction_type_list: List[ReactionType], u
             return True
     return False
 
+def reaction_name_to_emoji_string(name: str, guild: discord.Guild) -> str:
+    result = f'{name}' 
+    for emoji in guild.emojis:
+        if emoji.name == name:
+            result = str(emoji)
+            break
+    return result
+
 # ============ Commands ============== #
 
 class CommandType(Enum):
@@ -835,10 +843,25 @@ async def help(args: list[str], command_context: CommandContext):
             result += f' `{info.format}`'
 
         if len(info.brief):
-            if name == 'overdue':
-                result += f' — {info.brief.replace('X', str(_get_config('overdue_days')))}'
-            else:
-                result += f' — {info.brief}'
+
+            def emoji_match_filter(match):
+                name = match.group(1)
+                result = f':{name}:' 
+                for emoji in command_context.channel.guild.emojis:
+                    if emoji.name == name:
+                        result = str(emoji)
+                        break
+                return result
+
+            brief = re.sub(r':(\w+):', emoji_match_filter, info.brief) 
+
+            def config_match_filter(match):
+                result = _get_config(match.group(1))
+                return str(result)
+
+            brief = re.sub(r'%(\w+)%', config_match_filter, brief) 
+
+            result += f' — {brief}'
 
     await send_embed(result, command_context.channel, EmbedDesc())
 
@@ -880,13 +903,11 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
     channel = await get_qoc_channel(command_context.channel)
     if channel is None: return
 
-    print(f'typing channel: {command_context.channel}')
     qoc_rips = await get_qoc_rips(channel, GetRipsDesc(typing_channel=command_context.channel))
 
     is_spec_overdue_days = _get_config('spec_overdue_days')
     is_overdue_days = _get_config('overdue_days')
     search_keys = roundup_desc.search_key.split('|')
-    emote_names = [e.name for e in channel.guild.emojis]
 
     ##TODO: (Ahmayk) fuzzy username input (ie typing "ahmayk" and matching to their username or display name)
     user_id = command_context.user.id
@@ -931,13 +952,8 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
             elif react_is(ReactionType.NUMBER, react_and_user.name):
                 specs_required = KEYCAP_EMOJIS[react_and_user.name]
 
-            if react_and_user.name in emote_names:
-                for e in channel.guild.emojis:
-                    if e.name == react_and_user.name:
-                        reacts += f"{e} "
-                        break
-            else:
-                reacts += f"{react_and_user.name} "
+            reacts += reaction_name_to_emoji_string(react_and_user.name, command_context.channel.guild) 
+            reacts += " " 
 
         indicator = ""
         check_passed = (num_checks - num_rejects >= checks_required) and not fix_or_alert
@@ -1034,7 +1050,7 @@ async def roundup(args: list[str], command_context: CommandContext):
 
 @command(
     command_type=CommandType.QOC,
-    brief="show QoC rips you've pinned",
+    brief="show QoC rips you've pinned :pushpin:",
 )
 async def mypins(args: list[str], command_context: CommandContext):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.MYPINS,
@@ -1044,7 +1060,7 @@ async def mypins(args: list[str], command_context: CommandContext):
 
 @command(
     command_type=CommandType.QOC,
-    brief="show QoC rips you've wrenched",
+    brief="show QoC rips you've wrenched :fix: :alert:",
 )
 async def myfixes(args: list[str], command_context: CommandContext):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.MYFIXES, \
@@ -1150,6 +1166,7 @@ async def checks(args: list[str], command_context: CommandContext):
 
 @command(
     command_type=CommandType.QOC,
+    brief="show QoC rips WITHOUT :check:",
     aliases=["nocheck"]
 )
 async def nochecks(args: list[str], command_context: CommandContext):
@@ -1168,6 +1185,7 @@ async def rejects(args: list[str], command_context: CommandContext):
 
 @command(
     command_type=CommandType.QOC,
+    brief="show QoC rips WITHOUT :reject:",
     aliases=["noreject"]
 )
 async def norejects(args: list[str], command_context: CommandContext):
@@ -1177,16 +1195,17 @@ async def norejects(args: list[str], command_context: CommandContext):
 
 @command(
     command_type=CommandType.QOC,
-    brief="show QoC rips with :fix: or :wrench:",
-    aliases=['wrench', 'fix', 'fixes']
+    brief="show QoC rips with :fix:",
+    aliases=['wrenches', 'fix', 'wrench']
 )
-async def wrenches(args: list[str], command_context: CommandContext):
+async def fixes(args: list[str], command_context: CommandContext):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.HASREACT, \
                                reaction_type=ReactionType.FIX, not_found_message="No wrenches found.")
     await send_roundup(roundup_desc, command_context)
 
 @command(
     command_type=CommandType.QOC,
+    brief="show QoC rips WITHOUT :fix:",
     aliases=["nowrenches", "nofix", "nowrench"]
 )
 async def nofixes(args: list[str], command_context: CommandContext):
@@ -1205,7 +1224,7 @@ async def stops(args: list[str], command_context: CommandContext):
 
 @command(
     command_type=CommandType.QOC,
-    brief=f'show QoC rips pinned for over X days'
+    brief=f'show QoC rips pinned for over %overdue_days% days'
 )
 async def overdue(args: list[str], command_context: CommandContext):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.OVERDUE, not_found_message="No overdue rips.")
