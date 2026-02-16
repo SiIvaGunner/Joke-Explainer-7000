@@ -673,8 +673,12 @@ class CommandType(Enum):
     MANAGEMENT = auto()
     QOC = auto()
 
+class CommandContext(NamedTuple):
+    channel: TextChannel | Thread 
+    user: discord.User 
+
 class CommandInfo(NamedTuple):
-    func: typing.Callable[[Message, list[str]], typing.Awaitable[typing.NoReturn]]
+    func: typing.Callable[[list[str], CommandContext], typing.Awaitable[typing.NoReturn]]
     command_type: CommandType
     brief: str
     desc: str
@@ -706,6 +710,34 @@ def command(
         return func
     return decorator
 
+
+async def send(text: str, channel: TextChannel | Thread):
+    split_message = split_long_message(text, 2000)
+    for line in split_message:
+        await channel.send(line)
+
+
+class EmbedDesc(NamedTuple):
+    delete_after_seconds: float | None = None
+    title: str = ""
+    footer: str = ""
+
+##TODO: (Ahmayk) smarter embed packaging 
+async def send_embed(text: str, channel: TextChannel | Thread, desc: EmbedDesc):
+    split_message = split_long_message(text, 4028)
+    color = _get_config('embed_color')
+    for i, line in enumerate(split_message):
+
+        if i == 0: 
+            embed = discord.Embed(description=line, color=color, title=desc.title)
+        else:
+            embed = discord.Embed(description=line, color=color)
+            
+        if i == len(split_message) - 1: 
+            embed.set_footer(text=desc.footer)
+
+        await channel.send(embed=embed, delete_after=desc.delete_after_seconds)
+
 @bot.event
 async def on_message(message: Message):
 
@@ -731,8 +763,10 @@ async def on_message(message: Message):
     if not command_info:
         return
 
+    command_context = CommandContext(message.channel, message.author)
+
     try:
-        await command_info.func(message, args[1:])
+        await command_info.func(args[1:], command_context)
     except Exception as error:
 
         error_string = f"{type(error).__name__}: {error}"
@@ -741,11 +775,7 @@ async def on_message(message: Message):
         print(f"\033[91m {error_data}\033[0m")
 
         description = f":boom: Intriguing! I have encountered an unexpected error! ```{error_string}```"
-        # NOTE: (Ahmayk) hardcoding message limit to not risk a crash
-        #as of writing, current implementation of _get_config() calls to disk
-        split_texts = split_long_message(description, 2000)
-        for m in split_texts:
-            await message.channel.send(m)
+        await send(description, message.channel)
 
         header = f'ERROR on command ${command_name}: {error_string}'
         log_channel = bot.get_channel(LOG_CHANNEL)
@@ -754,7 +784,7 @@ async def on_message(message: Message):
             string = f'```py\n{m}\n```'
             if i == 0:
                 string = f'**{header}**\n{string}'
-            await log_channel.send(string)
+            await send(string, log_channel)
 
 
 
@@ -764,14 +794,14 @@ async def on_message(message: Message):
     format="[command]",
     aliases=['commands', 'halp', 'test'],
 )
-async def help(message: Message, args: list[str]):
+async def help(args: list[str], command_context: CommandContext):
     result = ''
 
     for name, info in COMMANDS.items():
         if not info.secret:
             result += f'\n**!{name}** `{info.format}` {info.brief}'
 
-    await send_embed(message.channel, result)
+    await send_embed(result, command_context.channel, EmbedDesc())
 
 # ============ Roundup commands ============== #
 
@@ -800,21 +830,21 @@ class RoundupDesc(NamedTuple):
     reaction_type: ReactionType = ReactionType.NULL 
     not_found_message: str = ""
 
-async def send_roundup(roundup_desc: RoundupDesc, optional_time: float, message: Message):
+async def send_roundup(roundup_desc: RoundupDesc, optional_time: float, command_context: CommandContext):
     """
     Sends a roundup message of all rips that the roundup channel the message was sent in points to.
     The roundup_filter_type describes how the roundup will be filtered.
     """
-    if not channel_is_types(message.channel, ['QOC', 'PROXY_QOC']): return
-    heard_command("roundup", message.author.name)
+    if not channel_is_types(command_context.channel, ['QOC', 'PROXY_QOC']): return
+    heard_command("roundup", command_context.user.name)
 
-    time, msg = parse_optional_time(message.channel, optional_time)
-    if msg is not None: await message.channel.send(msg)
+    time, msg = parse_optional_time(command_context.channel, optional_time)
+    if msg is not None: await command_context.channel.send(msg)
 
-    channel = await get_qoc_channel(message)
+    channel = await get_qoc_channel(command_context.channel)
     if channel is None: return
 
-    async with message.channel.typing():
+    async with command_context.channel.typing():
 
         qoc_rips = await get_qoc_rips(channel)
 
@@ -824,15 +854,15 @@ async def send_roundup(roundup_desc: RoundupDesc, optional_time: float, message:
         emote_names = [e.name for e in channel.guild.emojis]
 
         ##TODO: (Ahmayk) fuzzy username input (ie typing "ahmayk" and matching to their username or display name)
-        user_id = message.author.id
+        user_id = command_context.user.id
         if roundup_desc.user_id:
             match = re.search(r'\d+', str(roundup_desc.user_id))
             if match:
                 ID = int(match.group(0))
-                if message.guild:
-                    search_author = message.guild.get_member(ID)
+                if command_context.channel.guild:
+                    search_author = command_context.channel.guild.get_member(ID)
                     if search_author:
-                        await message.channel.send(f"Searching for rips {roundup_desc.conditional_string} by {search_author.name}")
+                        await command_context.channel.send(f"Searching for rips {roundup_desc.conditional_string} by {search_author.name}")
 
         result = ""
 
@@ -948,13 +978,13 @@ async def send_roundup(roundup_desc: RoundupDesc, optional_time: float, message:
             if roundup_desc.roundup_filter_type == RoundupFilterType.VET_ALL:
                 result += f"```\nLEGEND:\n{QOC_DEFAULT_LINKERR}: Link cannot be parsed\n{DEFAULT_CHECK}: Rip is OK\n{DEFAULT_FIX}: Rip has potential issues, see below\n{QOC_DEFAULT_BITRATE}: Bitrate is not 320kbps\n{QOC_DEFAULT_CLIPPING}: Clipping```"
 
-            await send_embed(message.channel, result, time)
+            await send_embed(result, command_context.channel, EmbedDesc(delete_after_seconds=time))
         else:
 
             not_found_message = "No rips."
             if len(roundup_desc.not_found_message):
                 not_found_message = roundup_desc.not_found_message
-            await message.channel.send(not_found_message)
+            await send(not_found_message, command_context.channel)
 
 
 def parse_default_optional_time_args(args: list[str]) -> float:
@@ -974,10 +1004,10 @@ def parse_default_optional_time_args(args: list[str]) -> float:
     optional_time: controls the embed's display time *in hours*.
     """
 )
-async def roundup(message: Message, args: list[str]):
+async def roundup(args: list[str], command_context: CommandContext):
     optional_time = parse_default_optional_time_args(args)
     roundup_desc = RoundupDesc()
-    await send_roundup(roundup_desc, optional_time, message)
+    await send_roundup(roundup_desc, optional_time, command_context)
 
 
 @command(
@@ -989,11 +1019,11 @@ async def roundup(message: Message, args: list[str]):
     optional_time: controls the embed's display time *in hours*.
     """
 )
-async def mypins(message: Message, args: list[str]):
+async def mypins(args: list[str], command_context: CommandContext):
     optional_time = parse_default_optional_time_args(args)
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.MYPINS,
-                               message_author_id = message.author.id, not_found_message = "No pins are yours.")
-    await send_roundup(roundup_desc, optional_time, message)
+                               message_author_id = command_context.user.id, not_found_message = "No pins are yours.")
+    await send_roundup(roundup_desc, optional_time, command_context)
 
 
 @command(
@@ -1006,11 +1036,11 @@ async def mypins(message: Message, args: list[str]):
     optional_time: controls the embed's display time *in hours*.
     """
 )
-async def myfixes(message: Message, args: list[str]):
+async def myfixes(args: list[str], command_context: CommandContext):
     optional_time = parse_default_optional_time_args(args)
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.MYFIXES, \
-                               user_id = message.author.id, conditional_string = "with wrenches")
-    await send_roundup(roundup_desc, optional_time, message)
+                               user_id = command_context.user.id, conditional_string = "with wrenches")
+    await send_roundup(roundup_desc, optional_time, command_context)
 
 
 @command(
@@ -1022,11 +1052,11 @@ async def myfixes(message: Message, args: list[str]):
     optional_time: controls the embed's display time *in hours*.
     """
 )
-async def myfresh(message: Message, args: list[str]):
+async def myfresh(args: list[str], command_context: CommandContext):
     optional_time = parse_default_optional_time_args(args)
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.MYFRESH, \
-                               user_id = message.author.id, conditional_string = "not reviewed")
-    await send_roundup(roundup_desc, optional_time, message)
+                               user_id = command_context.user.id, conditional_string = "not reviewed")
+    await send_roundup(roundup_desc, optional_time, command_context)
 
 
 @command(
@@ -1039,11 +1069,11 @@ async def myfresh(message: Message, args: list[str]):
     optional_time: controls the embed's display time *in hours*.
     """
 )
-async def fresh(message: Message, args: list[str]):
+async def fresh(args: list[str], command_context: CommandContext):
     optional_time = parse_default_optional_time_args(args)
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.FRESH, \
             not_found_message = "No fresh rips.")
-    await send_roundup(roundup_desc, optional_time, message)
+    await send_roundup(roundup_desc, optional_time, command_context)
 
 
 @command(
@@ -1055,11 +1085,11 @@ async def fresh(message: Message, args: list[str]):
     optional_time: controls the embed's display time *in hours*.
     """
 )
-async def spicy(message: Message, args: list[str]):
+async def spicy(args: list[str], command_context: CommandContext):
     optional_time = parse_default_optional_time_args(args)
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.SPICY, \
             not_found_message = "No spicy rips :(")
-    await send_roundup(roundup_desc, optional_time, message)
+    await send_roundup(roundup_desc, optional_time, command_context)
 
 
 @command(
@@ -1067,11 +1097,11 @@ async def spicy(message: Message, args: list[str]):
     format="<search text>",
     brief="search for QoC rips with text in title",
 )
-async def search(message: Message, args: list[str]):
+async def search(args: list[str], command_context: CommandContext):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.SEARCH, \
             search_key= "".join([str(s) for s in args]),\
             not_found_message = "No pinned rips containing indicated text in title found.")
-    await send_roundup(roundup_desc, 0, message)
+    await send_roundup(roundup_desc, 0, command_context)
 
 
 @bot.command(name='emails', brief='displays emails')
@@ -1185,7 +1215,7 @@ async def count(ctx: Context):
     heard_command("count", ctx.message.author.name)
 
     if channel_is_type(ctx.channel, 'PROXY_QOC'):
-        channel = await get_qoc_channel(ctx)
+        channel = await get_qoc_channel(ctx.channel)
         if channel is None: return
         else: proxy = f"\n-# Showing results from <#{channel.id}>."
     else:
@@ -1214,7 +1244,7 @@ async def limitcheck(ctx: Context):
     heard_command("limitcheck", ctx.message.author.name)
 
     if channel_is_type(ctx.channel, 'PROXY_QOC'):
-        channel = await get_qoc_channel(ctx)
+        channel = await get_qoc_channel(ctx.channel)
         if channel is None: return
         else: proxy = f"\n-# Showing results from <#{channel.id}>."
     else:
@@ -1356,7 +1386,7 @@ async def send_suborqueue_rips(send_suborqueue_desc: SendSubOrQueueDesc, channel
                 not_found_message = send_suborqueue_desc.not_found_message
             await ctx.channel.send(not_found_message)
         else:
-            await send_embed(ctx.channel, result, time)
+            await send_embed_old(ctx.channel, result, time)
 
 
 @bot.command(name='search_subs', aliases = ['search_sub'], brief='search for submissions with text in title')
@@ -1507,7 +1537,7 @@ async def scout_stats(ctx: Context, channel_link: str = None, optional_time = No
         if len(suborqueue_rips) == 0:
             await ctx.channel.send("No approved rips found.")
         else:
-            await send_embed(ctx.channel, result, time)
+            await send_embed_old(ctx.channel, result, time)
 
 
 # ============ Basic QoC commands ============== #
@@ -1546,7 +1576,7 @@ async def vet_from(ctx: Context, from_msg):
             return
         from_timestamp = from_message.created_at
 
-    channel = await get_qoc_channel(ctx)
+    channel = await get_qoc_channel(ctx.channel)
     if channel is None: return
 
     if not ffmpegExists():
@@ -1973,7 +2003,7 @@ async def help_old(ctx: Context):
             + "\n=====================================" \
             + "\n_**Legend:**_\n`<argument: type>` Mandatory argument\n`[argument: type]` Optional argument" \
             + "\n_**Tips:**_\nUse quotes for string arguments with spaces, e.g. \"Main Theme\"\nAll embed commands accept the [embed_minutes] optional argument"
-        await send_embed(ctx.channel, result)
+        await send_embed_old(ctx.channel, result)
 
 
 @bot.command(name='channel_list', brief='show channels and their supported commands')
@@ -1995,7 +2025,7 @@ async def channel_list(ctx: Context):
         message.extend(channels)
         result = "\n".join(message)
         
-        await send_embed(ctx.channel, result)
+        await send_embed_old(ctx.channel, result)
 
 
 @bot.command(name='cleanup', brief='remove bot\'s old embed messages')
@@ -2180,7 +2210,7 @@ def split_long_message(a_message: str, character_limit: int) -> list[str]:  # av
     return result
 
 
-async def send_embed(channel: typing.Union[GuildChannel, Thread], message: str, delete_after: float = None):
+async def send_embed_old(channel: typing.Union[GuildChannel, Thread], message: str, delete_after: float = None):
     """
     Send a long message as embed.
 
@@ -2198,18 +2228,16 @@ def channel_is_type(channel: typing.Union[GuildChannel, Thread], type: str):
 def channel_is_types(channel: typing.Union[GuildChannel, Thread], types: typing.List[str]):
     return channel.id in CHANNELS.keys() and any([t in CHANNELS[channel.id] for t in types]) or hasattr(channel, "parent") and channel_is_types(channel.parent, types)
 
-async def get_qoc_channel(ctx: Context):
+async def get_qoc_channel(channel: TextChannel | Thread):
     """
     Gets the first channel labeled QOC in bot_secrets.py 
     """
-    if channel_is_type(ctx.channel, 'PROXY_QOC'):
+    if channel_is_type(channel, 'PROXY_QOC'):
         qoc_channel, msg = parse_channel_link(None, ["QOC"])
         if len(msg) > 0:
-            await ctx.channel.send(msg)
+            await channel.send(msg)
             if qoc_channel == -1: return None
         channel = bot.get_channel(qoc_channel)
-    else:
-        channel = ctx.channel
     return channel
 
 def heard_command(command_name: str, user: str):
@@ -2564,7 +2592,7 @@ async def write_log(msg: str = "Placeholder message", embed: bool = False):
     try:
         log_channel = bot.get_channel(LOG_CHANNEL)
         if embed:
-            await send_embed(log_channel, msg)
+            await send_embed_old(log_channel, msg)
         else:
             await log_channel.send(msg)
     except (discord.InvalidData, discord.HTTPException, discord.Forbidden) as e:
