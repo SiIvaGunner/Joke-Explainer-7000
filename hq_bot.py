@@ -1297,24 +1297,33 @@ async def limitcheck(args: list[str], command_context: CommandContext):
         result += proxy
         await send(result, command_context.channel)
 
+@command(
+    command_type=CommandType.STATS,
+    public=True,
+    format="[channel link]",
+    brief='Counts number of submissions',
+    desc=\
+    """
+    Counts the number of messages in the default submission channel.
+    By default chooses the subs channel listed first in this bot's config.
+    Also accepts an optional link to a subs channel to count. 
+    """
+)
+##TODO: (Ahmayk) input the channel however you want, id, link, name
+async def count_subs(args: list[str], command_context: CommandContext):
 
-@bot.command(name='count_subs', brief='count number of remaining submissions')
-async def count_subs(ctx: Context, sub_channel_link: str = None):
-    """
-    Count number of messages in a channel (e.g. submissions).
-    Retrieve the entire history of a channel and count the number of messages not in threads.
-    Accepts an optional link argument to the subs-type channel to view - if not, first valid channel in config is used.
-    """
-    if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
+    sub_channel_link = ""
+    if len(args):
+        sub_channel_link = args[0]
 
     sub_channel_id, msg = parse_channel_link(sub_channel_link, ['SUBS', 'SUBS_PIN', 'SUBS_THREAD'])
     if len(msg) > 0:
-        await ctx.channel.send(msg)
-        if sub_channel_id == -1: return
+        await send(msg, command_context.channel)
+    if sub_channel_id == -1:
+        return
 
     channel = bot.get_channel(sub_channel_id)
-
-    rips = await get_suborqueue_rips_fast(channel, GetRipsDesc(typing_channel=ctx.channel))
+    rips = await get_suborqueue_rips_fast(channel, GetRipsDesc(typing_channel=command_context.channel))
     count = len(rips)
 
     if (count < 1):
@@ -1322,7 +1331,7 @@ async def count_subs(ctx: Context, sub_channel_link: str = None):
     else:
         result = f"```ansi\n\u001b[0;31m* {count} left.\u001b[0;0m```"
 
-    await ctx.channel.send(result)
+    await send(result, command_context.channel)
 
 
 # ============ SubOrQueue Rip Commands ============== #
@@ -2550,7 +2559,7 @@ def parse_channel_link(link: str | None, types: typing.List[str], give_default: 
     except IndexError:
         return -1, f"Error: No default channels found."
     
-    if link is None:
+    if link is None or not len(link):
         return default_id, ""
 
     try:
