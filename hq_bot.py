@@ -704,7 +704,8 @@ def reaction_name_to_emoji_string(name: str, guild: discord.Guild) -> str:
 class CommandType(Enum):
     NULL = auto()
     MANAGEMENT = auto()
-    QOC = auto()
+    ROUNDUP = auto()
+    STATS = auto()
 
 class CommandContext(NamedTuple):
     channel: TextChannel | Thread 
@@ -804,6 +805,9 @@ async def on_message(message: Message):
 
     command_context = CommandContext(message.channel, message.author)
 
+    today = datetime.now() # Technically not useful, but it looks gorgeous on my CRT monitor
+    print(f"{today.strftime('%m/%d/%y %I:%M %p')}  ~~~  Heard {command_name} command from {message.author.name}!")
+
     try:
         await command_info.func(args[1:], command_context)
     except Exception as error:
@@ -831,7 +835,7 @@ async def on_message(message: Message):
     command_type=CommandType.MANAGEMENT,
     brief="Get info on all commands",
     format="[command]",
-    aliases=['commands', 'halp', 'test'],
+    aliases=['commands', 'halp', 'test', 'helpme'],
 )
 async def help(args: list[str], command_context: CommandContext):
     result = ''
@@ -898,7 +902,6 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
     The roundup_filter_type describes how the roundup will be filtered.
     """
     if not channel_is_types(command_context.channel, ['QOC', 'PROXY_QOC']): return
-    heard_command("roundup", command_context.user.name)
 
     channel = await get_qoc_channel(command_context.channel)
     if channel is None: return
@@ -1039,7 +1042,7 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
 
 
 @command(
-    command_type=CommandType.QOC,
+    command_type=CommandType.ROUNDUP,
     aliases = ['down_taunt', 'qoc', 'qocparty', 'roudnup', 'links', 'list', 'ls'],
     brief="show all Qoc rips",
 )
@@ -1049,7 +1052,7 @@ async def roundup(args: list[str], command_context: CommandContext):
 
 
 @command(
-    command_type=CommandType.QOC,
+    command_type=CommandType.ROUNDUP,
     brief="show QoC rips you've pinned :pushpin:",
 )
 async def mypins(args: list[str], command_context: CommandContext):
@@ -1059,7 +1062,7 @@ async def mypins(args: list[str], command_context: CommandContext):
 
 
 @command(
-    command_type=CommandType.QOC,
+    command_type=CommandType.ROUNDUP,
     brief="show QoC rips you've wrenched :fix: :alert:",
 )
 async def myfixes(args: list[str], command_context: CommandContext):
@@ -1069,7 +1072,7 @@ async def myfixes(args: list[str], command_context: CommandContext):
 
 
 @command(
-    command_type=CommandType.QOC,
+    command_type=CommandType.ROUNDUP,
     brief="show QoC rips you've not reviewed",
 )
 async def myfresh(args: list[str], command_context: CommandContext):
@@ -1079,7 +1082,7 @@ async def myfresh(args: list[str], command_context: CommandContext):
 
 
 @command(
-    command_type=CommandType.QOC,
+    command_type=CommandType.ROUNDUP,
     aliases = ['blank', 'bald', 'clean', 'noreacts'],
     brief="show QoC rips no one has reviewed",
 )
@@ -1090,7 +1093,7 @@ async def fresh(args: list[str], command_context: CommandContext):
 
 
 @command(
-    command_type=CommandType.QOC,
+    command_type=CommandType.ROUNDUP,
     brief="show QoC rips with at least one :check: and one :reject:",
 )
 async def spicy(args: list[str], command_context: CommandContext):
@@ -1100,7 +1103,7 @@ async def spicy(args: list[str], command_context: CommandContext):
 
 
 @command(
-    command_type=CommandType.QOC,
+    command_type=CommandType.ROUNDUP,
     format="<search text>",
     brief="search for QoC rips with text in title",
     desc="Does not need quotes.",
@@ -1121,7 +1124,7 @@ async def search(args: list[str], command_context: CommandContext):
 
 
 @command(
-    command_type=CommandType.QOC,
+    command_type=CommandType.ROUNDUP,
     brief="show QoC email rips",
     aliases=["email"]
 )
@@ -1133,12 +1136,12 @@ async def emails(args: list[str], command_context: CommandContext):
 
 
 @command(
-    command_type=CommandType.QOC,
+    command_type=CommandType.ROUNDUP,
     format="<event name>",
-    brief="show QoC event rips",
+    brief="search for QoC event rips",
     aliases=["event"],
-    desc="text is searched in the rip's author line. Does not need quotes.",
-    examples=["christmas", "secret", "deez nuts day"]
+    desc="This can also be used as a general purpose author line search tool. Does not need quotes.",
+    examples=["christmas", "secret", "deez nuts day", "ahmayk"]
 )
 async def events(args: list[str], command_context: CommandContext):
 
@@ -1155,7 +1158,7 @@ async def events(args: list[str], command_context: CommandContext):
 
 
 @command(
-    command_type=CommandType.QOC,
+    command_type=CommandType.ROUNDUP,
     brief="show QoC rips with :check:",
     desc="does not consider :goldcheck: or check number requirements such as :7check:",
 )
@@ -1165,7 +1168,7 @@ async def checks(args: list[str], command_context: CommandContext):
     await send_roundup(roundup_desc, command_context)
 
 @command(
-    command_type=CommandType.QOC,
+    command_type=CommandType.ROUNDUP,
     brief="show QoC rips WITHOUT :check:",
     aliases=["nocheck"]
 )
@@ -1175,7 +1178,7 @@ async def nochecks(args: list[str], command_context: CommandContext):
     await send_roundup(roundup_desc, command_context)
 
 @command(
-    command_type=CommandType.QOC,
+    command_type=CommandType.ROUNDUP,
     brief="show QoC rips with :reject:",
 )
 async def rejects(args: list[str], command_context: CommandContext):
@@ -1184,7 +1187,7 @@ async def rejects(args: list[str], command_context: CommandContext):
     await send_roundup(roundup_desc, command_context)
 
 @command(
-    command_type=CommandType.QOC,
+    command_type=CommandType.ROUNDUP,
     brief="show QoC rips WITHOUT :reject:",
     aliases=["noreject"]
 )
@@ -1194,7 +1197,7 @@ async def norejects(args: list[str], command_context: CommandContext):
     await send_roundup(roundup_desc, command_context)
 
 @command(
-    command_type=CommandType.QOC,
+    command_type=CommandType.ROUNDUP,
     brief="show QoC rips with :fix:",
     aliases=['wrenches', 'fix', 'wrench']
 )
@@ -1204,7 +1207,7 @@ async def fixes(args: list[str], command_context: CommandContext):
     await send_roundup(roundup_desc, command_context)
 
 @command(
-    command_type=CommandType.QOC,
+    command_type=CommandType.ROUNDUP,
     brief="show QoC rips WITHOUT :fix:",
     aliases=["nowrenches", "nofix", "nowrench"]
 )
@@ -1214,7 +1217,7 @@ async def nofixes(args: list[str], command_context: CommandContext):
     await send_roundup(roundup_desc, command_context)
 
 @command(
-    command_type=CommandType.QOC,
+    command_type=CommandType.ROUNDUP,
     brief="show QoC rips with :stop:",
 )
 async def stops(args: list[str], command_context: CommandContext):
@@ -1223,7 +1226,7 @@ async def stops(args: list[str], command_context: CommandContext):
     await send_roundup(roundup_desc, command_context)
 
 @command(
-    command_type=CommandType.QOC,
+    command_type=CommandType.ROUNDUP,
     brief=f'show QoC rips pinned for over %overdue_days% days'
 )
 async def overdue(args: list[str], command_context: CommandContext):
@@ -1233,54 +1236,59 @@ async def overdue(args: list[str], command_context: CommandContext):
 
 # ============ Counting Commands ============== #
 
+@command(
+    command_type=CommandType.STATS,
+    brief='Counts all pinned QoC rips',
+    desc='Only counts pinned messages with valid rips.'
+)
+async def count(args: list[str], command_context: CommandContext):
 
-@bot.command(name='count', brief="counts all pinned rips")
-async def count(ctx: Context):
-    """
-    Count the number of pinned messages that contain rips according to the roundup channel.
-    """
-    heard_command("count", ctx.message.author.name)
-
-    if channel_is_type(ctx.channel, 'PROXY_QOC'):
-        channel = await get_qoc_channel(ctx.channel)
-        if channel is None: return
-        else: proxy = f"\n-# Showing results from <#{channel.id}>."
+    ##TODO: (Ahmayk) Compress
+    qoc_channel = None 
+    proxy = ""
+    if channel_is_type(command_context.channel, 'PROXY_QOC'):
+        qoc_channel = await get_qoc_channel(command_context.channel)
+        if qoc_channel:
+            proxy = f"\n-# Showing results from <#{qoc_channel.id}>."
     else:
-        channel = ctx.channel
-        proxy = ""
+        qoc_channel = command_context.channel
 
-    rips = await get_suborqueue_rips_fast(channel, GetRipsDesc(typing_channel=ctx.channel))
-    pincount = len(rips)
+    if qoc_channel:
+        rips = await get_suborqueue_rips_fast(qoc_channel, GetRipsDesc(typing_channel=command_context.channel))
+        pincount = len(rips)
 
-    if (pincount < 1):
-        result = "`* Determination.`"
+        if (pincount < 1):
+            result = "`* Determination.`"
+        else:
+            result = f"`* {pincount} left.`"
+
+        result += proxy
+        await send(result, command_context.channel)
+
+
+@command(
+    command_type=CommandType.STATS,
+    brief='Reports proximity to the set pinlimit for the channel',
+    desc='Only counts pinned messages with valid rips.',
+    aliases=['pinlimit'],
+)
+async def limitcheck(args: list[str], command_context: CommandContext):
+
+    ##TODO: (Ahmayk) Compress
+    qoc_channel = None 
+    proxy = ""
+    if channel_is_type(command_context.channel, 'PROXY_QOC'):
+        qoc_channel = await get_qoc_channel(command_context.channel)
+        if qoc_channel:
+            proxy = f"\n-# Showing results from <#{qoc_channel.id}>."
     else:
-        result = f"`* {pincount} left.`"
+        qoc_channel = command_context.channel
 
-    result += proxy
-    await ctx.channel.send(result)
-
-
-@bot.command(name='limitcheck', aliases=['pinlimit'], brief="pin limit checker")
-async def limitcheck(ctx: Context):
-    """
-    Count the number of available rips below the 50 rip limit.
-    """
-    heard_command("limitcheck", ctx.message.author.name)
-
-    if channel_is_type(ctx.channel, 'PROXY_QOC'):
-        channel = await get_qoc_channel(ctx.channel)
-        if channel is None: return
-        else: proxy = f"\n-# Showing results from <#{channel.id}>."
-    else:
-        channel = ctx.channel
-        proxy = ""
-
-    rips = await get_suborqueue_rips_fast(channel, GetRipsDesc(typing_channel=ctx.channel))
-    result = f"You can pin {_get_config('soft_pin_limit') - len(rips)} more rips until I start complaining about pin space."
-
-    result += proxy
-    await ctx.channel.send(result)
+    if qoc_channel:
+        rips = await get_suborqueue_rips_fast(qoc_channel, GetRipsDesc(typing_channel=command_context.channel))
+        result = f"You can pin {_get_config('soft_pin_limit') - len(rips)} more rips until I start complaining about pin space."
+        result += proxy
+        await send(result, command_context.channel)
 
 
 @bot.command(name='count_subs', brief='count number of remaining submissions')
@@ -1291,7 +1299,6 @@ async def count_subs(ctx: Context, sub_channel_link: str = None):
     Accepts an optional link argument to the subs-type channel to view - if not, first valid channel in config is used.
     """
     if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
-    heard_command("count_subs", ctx.message.author.name)
 
     sub_channel_id, msg = parse_channel_link(sub_channel_link, ['SUBS', 'SUBS_PIN', 'SUBS_THREAD'])
     if len(msg) > 0:
@@ -1448,7 +1455,6 @@ async def frames(ctx: Context, channel_link: str = None, optional_time = None):
     """
     Search queue channel for rips with "thumbnail needed" react.
     """
-    heard_command("frames", ctx.message.author.name)
 
     desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.HASREACT, \
                               channel_types = ["QUEUE"], \
@@ -1462,7 +1468,6 @@ async def alerts(ctx: Context, channel_link: str = None, optional_time = None):
     Search queue channel for rips with alert react.
     """
     if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
-    heard_command("alerts", ctx.message.author.name)
 
     desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.HASREACT, \
                               channel_types = ["QUEUE"], \
@@ -1476,7 +1481,6 @@ async def metadata(ctx: Context, channel_link: str = None, optional_time = None)
     Search queue channel for rips with metadata react.
     """
     if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
-    heard_command("metadata", ctx.message.author.name)
 
     desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.HASREACT, \
                               channel_types = ["QUEUE"], \
@@ -1488,7 +1492,6 @@ async def unsent(ctx: Context, channel_link: str = None, optional_time = None):
     """
     Search queue channel for rips tagged email with no "approval email sent" react.
     """
-    heard_command("unsent", ctx.message.author.name)
 
     desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.UNSENT, \
                               channel_types = ["QUEUE"])
@@ -1502,7 +1505,6 @@ async def scout(ctx: Context, prefix: str = None, channel_link: str = None, opti
     The prefix is case insensitive.
     """
     if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
-    heard_command("scout", ctx.message.author.name)
 
     if prefix is None:
         await ctx.channel.send("Error: Please provide a prefix string.")
@@ -1521,7 +1523,6 @@ async def scout_stats(ctx: Context, channel_link: str = None, optional_time = No
     show count of rips starting with each letter.
     """
     if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
-    heard_command("scout_stats", ctx.message.author.name)
 
     channel_id, msg = parse_channel_link(channel_link, ['QUEUE'])
     if len(msg) > 0:
@@ -1588,7 +1589,6 @@ async def vet_from(ctx: Context, from_msg):
     Find rips in pinned messages with bitrate/clipping issues and show their details, only counting messages not older than linked message
     """
     if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
-    heard_command("vet_from", ctx.message.author.name)
 
     vet_all_pins = from_msg is None
     if not vet_all_pins:
@@ -1630,7 +1630,6 @@ async def vet_all(ctx: Context, optional_time = None):
     """
     Retrieve all pinned messages (except the first one) and perform basic QoC, giving emoji labels.
     """
-    heard_command("vet_all", ctx.message.author.name)
 
     if not ffmpegExists():
         await ctx.channel.send("WARNING: ffmpeg command not found on the bot's server. Please contact the developers.")
@@ -1648,7 +1647,6 @@ async def vet_msg(ctx: Context, msg_link: str = None):
     The first non-YouTube link found in the message is treated as the rip URL.
     """
     if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
-    heard_command("vet_msg", ctx.message.author.name)
 
     if msg_link is None:
         await ctx.channel.send("Error: Please provide a link to message.")
@@ -1672,7 +1670,6 @@ async def vet_url(ctx: Context, url: str = None):
     Perform basic QoC on an URL.
     """
     if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
-    heard_command("vet_url", ctx.message.author.name)
 
     urls = extract_rip_link(url)
     if len(urls) == 0:
@@ -1693,7 +1690,6 @@ async def count_dupe(ctx: Context, msg_link: str = None, check_queues: str = Non
     Accepts an optional argument to also count rips in queues, which can take longer.
     """
     if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
-    heard_command("count_dupe", ctx.message.author.name)
 
     if msg_link is None:
         await ctx.channel.send("Error: Please provide a link to message.")
@@ -1742,7 +1738,6 @@ async def scan(ctx: Context, channel_link: str = None, start_index: int = None, 
     - `end_index`: Last rip to look at (inclusive). Index 100 means scan until and including the 100th oldest rip. If this is not provided, scan to the latest rip.
     """
     if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
-    heard_command("scan", ctx.message.author.name)
 
     global latest_scan_time
     if latest_scan_time is not None and datetime.now(timezone.utc) - latest_scan_time > timedelta(minutes=30):
@@ -1822,7 +1817,6 @@ async def peek_msg(ctx: Context, msg_link: str = None, use_ffprobe = None):
     The first non-YouTube link found in the message is treated as the rip URL.
     """
     if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
-    heard_command("peek_msg", ctx.message.author.name)
 
     if msg_link is None:
         await ctx.channel.send("Error: Please provide a link to message.")
@@ -1864,7 +1858,6 @@ async def peek_url(ctx: Context, url: str = None, use_ffprobe = None):
     Prints the file metadata of the rip at linked URL.
     """
     if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
-    heard_command("peek_url", ctx.message.author.name)
 
     urls = extract_rip_link(url)
     if len(urls) == 0:
@@ -1891,7 +1884,6 @@ async def peek_url(ctx: Context, url: str = None, use_ffprobe = None):
 async def validate_cache(ctx: Context):
 
     if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
-    heard_command("validate_cache", ctx.message.author.name)
 
     await ctx.channel.send("Validating cache of rips in all channels...")
     await validate_cache_all(ctx.channel)
@@ -1902,7 +1894,6 @@ async def validate_cache(ctx: Context):
 async def reset_cache(ctx: Context, channel_link: str = None):
 
     if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
-    heard_command("reset_cache", ctx.message.author.name)
 
     if channel_link is None:
         await ctx.channel.send("Please provide a link to the channel you want to reset the cache for.")
@@ -2110,7 +2101,6 @@ async def stats(ctx: Context, optional_arg = None):
     Accepts an optional argument to show queue channels too.
     """
     if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
-    heard_command("stats", ctx.message.author.name)
 
     ret = "**QoC channels**\n"
 
@@ -2259,10 +2249,6 @@ async def get_qoc_channel(channel: TextChannel | Thread):
             if qoc_channel == -1: return None
         channel = bot.get_channel(qoc_channel)
     return channel
-
-def heard_command(command_name: str, user: str):
-    today = datetime.now() # Technically not useful, but it looks gorgeous on my CRT monitor
-    print(f"{today.strftime('%m/%d/%y %I:%M %p')}  ~~~  Heard {command_name} command from {user}!")
 
 
 def parse_optional_time(channel: typing.Union[GuildChannel, Thread], optional_time: float):
