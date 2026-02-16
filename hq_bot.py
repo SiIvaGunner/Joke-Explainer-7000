@@ -718,7 +718,7 @@ async def send(text: str, channel: TextChannel | Thread):
 
 
 class EmbedDesc(NamedTuple):
-    delete_after_seconds: float | None = None
+    expires: bool = False
     title: str = ""
     footer: str = ""
 
@@ -726,6 +726,12 @@ class EmbedDesc(NamedTuple):
 async def send_embed(text: str, channel: TextChannel | Thread, desc: EmbedDesc):
     split_message = split_long_message(text, 4028)
     color = _get_config('embed_color')
+    delete_after_seconds = None
+    if desc.expires:
+        if channel_is_types(channel, ['PROXY_QOC']):
+            delete_after_seconds = _get_config('proxy_embed_seconds')
+        else: _get_config('embed_seconds')
+
     for i, line in enumerate(split_message):
 
         if i == 0: 
@@ -736,7 +742,7 @@ async def send_embed(text: str, channel: TextChannel | Thread, desc: EmbedDesc):
         if i == len(split_message) - 1: 
             embed.set_footer(text=desc.footer)
 
-        await channel.send(embed=embed, delete_after=desc.delete_after_seconds)
+        await channel.send(embed=embed, delete_after=delete_after_seconds)
 
 @bot.event
 async def on_message(message: Message):
@@ -799,7 +805,13 @@ async def help(args: list[str], command_context: CommandContext):
 
     for name, info in COMMANDS.items():
         if not info.secret:
-            result += f'\n**!{name}** `{info.format}` {info.brief}'
+            result += f'\n**!{name}**'
+
+            if len(info.format):
+                result += f' `{info.format}`'
+
+            if len(info.brief):
+                result += f' — {info.brief}'
 
     await send_embed(result, command_context.channel, EmbedDesc())
 
@@ -830,16 +842,13 @@ class RoundupDesc(NamedTuple):
     reaction_type: ReactionType = ReactionType.NULL 
     not_found_message: str = ""
 
-async def send_roundup(roundup_desc: RoundupDesc, optional_time: float, command_context: CommandContext):
+async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContext):
     """
     Sends a roundup message of all rips that the roundup channel the message was sent in points to.
     The roundup_filter_type describes how the roundup will be filtered.
     """
     if not channel_is_types(command_context.channel, ['QOC', 'PROXY_QOC']): return
     heard_command("roundup", command_context.user.name)
-
-    time, msg = parse_optional_time(command_context.channel, optional_time)
-    if msg is not None: await command_context.channel.send(msg)
 
     channel = await get_qoc_channel(command_context.channel)
     if channel is None: return
@@ -978,7 +987,7 @@ async def send_roundup(roundup_desc: RoundupDesc, optional_time: float, command_
             if roundup_desc.roundup_filter_type == RoundupFilterType.VET_ALL:
                 result += f"```\nLEGEND:\n{QOC_DEFAULT_LINKERR}: Link cannot be parsed\n{DEFAULT_CHECK}: Rip is OK\n{DEFAULT_FIX}: Rip has potential issues, see below\n{QOC_DEFAULT_BITRATE}: Bitrate is not 320kbps\n{QOC_DEFAULT_CLIPPING}: Clipping```"
 
-            await send_embed(result, command_context.channel, EmbedDesc(delete_after_seconds=time))
+            await send_embed(result, command_context.channel, EmbedDesc(expires=True))
         else:
 
             not_found_message = "No rips."
@@ -987,109 +996,65 @@ async def send_roundup(roundup_desc: RoundupDesc, optional_time: float, command_
             await send(not_found_message, command_context.channel)
 
 
-def parse_default_optional_time_args(args: list[str]) -> float:
-    optional_time = 0.0
-    if len(args): optional_time = float(args[0])
-    return optional_time
-
-
 @command(
     command_type=CommandType.QOC,
-    format="[optional_time]",
     aliases = ['down_taunt', 'qoc', 'qocparty', 'roudnup', 'links', 'list', 'ls'],
-    brief="display all rips in QoC",
-    desc=\
-    """
-    Retrieve all qoc rips and their reactions.
-    optional_time: controls the embed's display time *in hours*.
-    """
+    brief="show all Qoc rips",
 )
 async def roundup(args: list[str], command_context: CommandContext):
-    optional_time = parse_default_optional_time_args(args)
     roundup_desc = RoundupDesc()
-    await send_roundup(roundup_desc, optional_time, command_context)
+    await send_roundup(roundup_desc, command_context)
 
 
 @command(
     command_type=CommandType.QOC,
-    format="[optional_time]",
-    brief="display QoC rips you've pinned",
-    desc=\
-    """
-    optional_time: controls the embed's display time *in hours*.
-    """
+    brief="show QoC rips you've pinned",
 )
 async def mypins(args: list[str], command_context: CommandContext):
-    optional_time = parse_default_optional_time_args(args)
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.MYPINS,
                                message_author_id = command_context.user.id, not_found_message = "No pins are yours.")
-    await send_roundup(roundup_desc, optional_time, command_context)
+    await send_roundup(roundup_desc, command_context)
 
 
 @command(
     command_type=CommandType.QOC,
-    format="[optional_time]",
-    brief="display QoC rips you've wrenched",
-    desc=\
-    """
-    "wrenched" means a :wrench: or an :alert: react.
-    optional_time: controls the embed's display time *in hours*.
-    """
+    brief="show QoC rips you've wrenched",
 )
 async def myfixes(args: list[str], command_context: CommandContext):
-    optional_time = parse_default_optional_time_args(args)
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.MYFIXES, \
                                user_id = command_context.user.id, conditional_string = "with wrenches")
-    await send_roundup(roundup_desc, optional_time, command_context)
+    await send_roundup(roundup_desc, command_context)
 
 
 @command(
     command_type=CommandType.QOC,
-    format="[optional_time]",
-    brief="display QoC rips you've not reviewed",
-    desc=\
-    """
-    optional_time: controls the embed's display time *in hours*.
-    """
+    brief="show QoC rips you've not reviewed",
 )
 async def myfresh(args: list[str], command_context: CommandContext):
-    optional_time = parse_default_optional_time_args(args)
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.MYFRESH, \
                                user_id = command_context.user.id, conditional_string = "not reviewed")
-    await send_roundup(roundup_desc, optional_time, command_context)
+    await send_roundup(roundup_desc, command_context)
 
 
 @command(
     command_type=CommandType.QOC,
     aliases = ['blank', 'bald', 'clean', 'noreacts'],
-    format="[optional_time]",
-    brief="display QoC rips no one has reviewed",
-    desc=\
-    """
-    optional_time: controls the embed's display time *in hours*.
-    """
+    brief="show QoC rips no one has reviewed",
 )
 async def fresh(args: list[str], command_context: CommandContext):
-    optional_time = parse_default_optional_time_args(args)
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.FRESH, \
             not_found_message = "No fresh rips.")
-    await send_roundup(roundup_desc, optional_time, command_context)
+    await send_roundup(roundup_desc, command_context)
 
 
 @command(
     command_type=CommandType.QOC,
-    format="[optional_time]",
-    brief="display QoC rips with at least one check and one reject",
-    desc=\
-    """
-    optional_time: controls the embed's display time *in hours*.
-    """
+    brief="show QoC rips with at least one check and one reject",
 )
 async def spicy(args: list[str], command_context: CommandContext):
-    optional_time = parse_default_optional_time_args(args)
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.SPICY, \
             not_found_message = "No spicy rips :(")
-    await send_roundup(roundup_desc, optional_time, command_context)
+    await send_roundup(roundup_desc, command_context)
 
 
 @command(
@@ -1101,10 +1066,10 @@ async def search(args: list[str], command_context: CommandContext):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.SEARCH, \
             search_key= "".join([str(s) for s in args]),\
             not_found_message = "No pinned rips containing indicated text in title found.")
-    await send_roundup(roundup_desc, 0, command_context)
+    await send_roundup(roundup_desc, command_context)
 
 
-@bot.command(name='emails', brief='displays emails')
+@bot.command(name='emails', brief='shows emails')
 async def emails(ctx: Context, optional_time = None):
     """
     Retrieve all messages that are tagged as email.
@@ -1179,7 +1144,7 @@ async def nostops(ctx: Context, optional_time = None):
     await send_roundup(roundup_desc, optional_time, ctx)
 
 
-@bot.command(name='overdue', brief=f'display rips that have been pinned for over X days')
+@bot.command(name='overdue', brief=f'show rips that have been pinned for over X days')
 async def overdue(ctx: Context, optional_time = None):
     """
     Retrieve all pinned messages (except the first one) that are overdue.
@@ -1188,7 +1153,7 @@ async def overdue(ctx: Context, optional_time = None):
     await send_roundup(roundup_desc, optional_time, ctx)
 
 
-@bot.command(name='events', aliases = ['event'], brief='displays event rips')
+@bot.command(name='events', aliases = ['event'], brief='shows event rips')
 async def events(ctx: Context, event: str = None, optional_time = None):
     """
     Retrieve all messages that are tagged as for an event.
@@ -1402,7 +1367,7 @@ async def search_subs(ctx: Context, search_key: str, sub_channel_link: str = Non
     await send_suborqueue_rips(desc, sub_channel_link, optional_time, ctx)
 
 
-@bot.command(name='event_subs', aliases = ['event_sub'], brief='displays event submissions from linked channel')
+@bot.command(name='event_subs', aliases = ['event_sub'], brief='shows event submissions from linked channel')
 async def event_subs(ctx: Context, event: str = None, sub_channel_link: str = None, optional_time = None):
     """
     Retrieve all messages in a submission channel that are tagged as for an event.
@@ -1495,7 +1460,7 @@ async def scout(ctx: Context, prefix: str = None, channel_link: str = None, opti
 @bot.command(name='scout_stats', brief='summarize approved rips with specific letter prefix')
 async def scout_stats(ctx: Context, channel_link: str = None, optional_time = None):
     """
-    Display count of rips starting with each letter.
+    show count of rips starting with each letter.
     """
     if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
     heard_command("scout_stats", ctx.message.author.name)
@@ -2082,7 +2047,7 @@ async def get_suborqueue_rip_stats_string(channel_id) -> str:
 
     return ret
 
-@bot.command(name='stats', brief='display remaining number of rips across channels')
+@bot.command(name='stats', brief='show remaining number of rips across channels')
 async def stats(ctx: Context, optional_arg = None):
     """
     Display the number of rips in the QoC and submission channels.
