@@ -709,7 +709,7 @@ class CommandInfo(NamedTuple):
     desc: str
     format: str
     aliases: List[str]
-    secret: bool
+    examples: List[str]
 
 COMMANDS: dict[str, CommandInfo] = {}
 
@@ -720,7 +720,7 @@ def command(
     desc: str = "",
     format: str = "",
     aliases: list[str] = [],
-    secret: bool = False,
+    examples: list[str] = [],
 ) -> typing.Callable:
     def decorator(func: typing.Callable) -> typing.Callable:
         COMMANDS[func.__name__] = CommandInfo(
@@ -730,7 +730,7 @@ def command(
             desc=desc,
             format=format,
             aliases=aliases,
-            secret=secret,
+            examples=examples,
         )
         return func
     return decorator
@@ -829,13 +829,15 @@ async def help(args: list[str], command_context: CommandContext):
     result = ''
 
     for name, info in COMMANDS.items():
-        if not info.secret:
-            result += f'\n**!{name}**'
+        result += f'\n**!{name}**'
 
-            if len(info.format):
-                result += f' `{info.format}`'
+        if len(info.format):
+            result += f' `{info.format}`'
 
-            if len(info.brief):
+        if len(info.brief):
+            if name == 'overdue':
+                result += f' — {info.brief.replace('X', str(_get_config('overdue_days')))}'
+            else:
                 result += f' — {info.brief}'
 
     await send_embed(result, command_context.channel, EmbedDesc())
@@ -850,8 +852,8 @@ class RoundupFilterType(Enum):
     MYFRESH = auto()
     FRESH = auto()
     SPICY = auto()
-    SEARCH = auto()
-    EVENTS = auto()
+    SEARCH_TITLE = auto()
+    SEARCH_AUTHOR = auto()
     HASREACT = auto()
     NOTHASREACT = auto()
     OVERDUE = auto()
@@ -971,13 +973,13 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
             case RoundupFilterType.SPICY:
                 is_valid = qoc_rip_has_reaction(ReactionType.CHECK, qoc_rip) and \
                             qoc_rip_has_reaction(ReactionType.REJECT, qoc_rip)
-            case RoundupFilterType.SEARCH:
+            case RoundupFilterType.SEARCH_TITLE:
                 is_valid = False
                 for key in search_keys:
                     if line_contains_substring(rip_title, key):
                         is_valid = True
                         break
-            case RoundupFilterType.EVENTS:
+            case RoundupFilterType.SEARCH_AUTHOR:
                 is_valid = False
                 for key in search_keys:
                     if line_contains_substring(author, key):
@@ -1073,7 +1075,7 @@ async def fresh(args: list[str], command_context: CommandContext):
 
 @command(
     command_type=CommandType.QOC,
-    brief="show QoC rips with at least one check and one reject",
+    brief="show QoC rips with at least one :check: and one :reject:",
 )
 async def spicy(args: list[str], command_context: CommandContext):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.SPICY, \
@@ -1085,112 +1087,129 @@ async def spicy(args: list[str], command_context: CommandContext):
     command_type=CommandType.QOC,
     format="<search text>",
     brief="search for QoC rips with text in title",
+    desc="Does not need quotes.",
+    examples=["Deltarune", "PAL", "Mother 3"]
 )
 async def search(args: list[str], command_context: CommandContext):
-    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.SEARCH, \
-            search_key= "".join([str(s) for s in args]),\
-            not_found_message = "No pinned rips containing indicated text in title found.")
+
+    if not len(args):
+        return await send("Error: Inclue what you want to search for! I'll search for it in the titles of QoC rips.", \
+                           command_context.channel)
+
+    input_text = "".join([str(s) for s in args])
+
+    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.SEARCH_TITLE, \
+            search_key=input_text,\
+            not_found_message = f'No rips containing `{input_text}` in title found.')
     await send_roundup(roundup_desc, command_context)
 
 
-@bot.command(name='emails', brief='shows emails')
-async def emails(ctx: Context, optional_time = None):
-    """
-    Retrieve all messages that are tagged as email.
-    """
-    await events(ctx, "email", optional_time)
+@command(
+    command_type=CommandType.QOC,
+    brief="show QoC email rips",
+    aliases=["email"]
+)
+async def emails(args: list[str], command_context: CommandContext):
+    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.SEARCH_AUTHOR, \
+            search_key= "email",\
+            not_found_message = "No emails.")
+    await send_roundup(roundup_desc, command_context)
 
 
-@bot.command(name='checks')
-async def checks(ctx: Context, optional_time = None):
-    """
-    Retrieve all pinned messages (except the first one) with :check: reactions.
-    """
+@command(
+    command_type=CommandType.QOC,
+    format="<event name>",
+    brief="show QoC event rips",
+    aliases=["event"],
+    desc="text is searched in the rip's author line. Does not need quotes.",
+    examples=["christmas", "secret", "deez nuts day"]
+)
+async def events(args: list[str], command_context: CommandContext):
+
+    if not len(args):
+        return await send("Error: Please include the event name tagged in rips.", \
+                           command_context.channel)
+
+    input_text = "".join([str(s) for s in args])
+
+    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.SEARCH_AUTHOR, \
+            search_key= input_text,\
+            not_found_message = f'No `{input_text}` rips.')
+    await send_roundup(roundup_desc, command_context)
+
+
+@command(
+    command_type=CommandType.QOC,
+    brief="show QoC rips with :check:",
+    desc="does not consider :goldcheck: or check number requirements such as :7check:",
+)
+async def checks(args: list[str], command_context: CommandContext):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.HASREACT, \
                                reaction_type=ReactionType.CHECK, not_found_message="No checks found.")
-    await send_roundup(roundup_desc, optional_time, ctx)
+    await send_roundup(roundup_desc, command_context)
 
-
-@bot.command(name='nochecks', aliases=['nocheck'])
-async def nochecks(ctx: Context, optional_time = None):
+@command(
+    command_type=CommandType.QOC,
+    aliases=["nocheck"]
+)
+async def nochecks(args: list[str], command_context: CommandContext):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.NOTHASREACT, \
                                reaction_type=ReactionType.CHECK, not_found_message="No non-checked rips found.")
-    await send_roundup(roundup_desc, optional_time, ctx)
+    await send_roundup(roundup_desc, command_context)
 
-
-@bot.command(name='rejects')
-async def rejects(ctx: Context, optional_time = None):
-    """
-    Retrieve all pinned messages (except the first one) with :reject: reactions.
-    """
+@command(
+    command_type=CommandType.QOC,
+    brief="show QoC rips with :reject:",
+)
+async def rejects(args: list[str], command_context: CommandContext):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.HASREACT, \
                                reaction_type=ReactionType.REJECT, not_found_message="No rejected rips found.")
-    await send_roundup(roundup_desc, optional_time, ctx)
+    await send_roundup(roundup_desc, command_context)
 
-
-@bot.command(name='norejects', aliases=['noreject'])
-async def norejects(ctx: Context, optional_time = None):
+@command(
+    command_type=CommandType.QOC,
+    aliases=["noreject"]
+)
+async def norejects(args: list[str], command_context: CommandContext):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.NOTHASREACT, \
                                reaction_type=ReactionType.REJECT, not_found_message="No non-rejected rips found.")
-    await send_roundup(roundup_desc, optional_time, ctx)
+    await send_roundup(roundup_desc, command_context)
 
-
-@bot.command(name='wrenches', aliases = ['fix', 'fixes'])
-async def wrenches(ctx: Context, optional_time = None):
-    """
-    Retrieve all pinned messages (except the first one) with :fix: reactions.
-    """
+@command(
+    command_type=CommandType.QOC,
+    brief="show QoC rips with :fix: or :wrench:",
+    aliases=['wrench', 'fix', 'fixes']
+)
+async def wrenches(args: list[str], command_context: CommandContext):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.HASREACT, \
                                reaction_type=ReactionType.FIX, not_found_message="No wrenches found.")
-    await send_roundup(roundup_desc, optional_time, ctx)
+    await send_roundup(roundup_desc, command_context)
 
-@bot.command(name='stops')
-async def stops(ctx: Context, optional_time = None):
-    """
-    Retrieve all pinned messages (except the first one) with :stop: reactions.
-    """
+@command(
+    command_type=CommandType.QOC,
+    aliases=["nowrenches", "nofix", "nowrench"]
+)
+async def nofixes(args: list[str], command_context: CommandContext):
+    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.NOTHASREACT, \
+                               reaction_type=ReactionType.FIX, not_found_message="No non-fix rips found.")
+    await send_roundup(roundup_desc, command_context)
+
+@command(
+    command_type=CommandType.QOC,
+    brief="show QoC rips with :stop:",
+)
+async def stops(args: list[str], command_context: CommandContext):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.HASREACT, \
                                reaction_type=ReactionType.STOP, not_found_message="No octogons found.")
-    await send_roundup(roundup_desc, optional_time, ctx)
+    await send_roundup(roundup_desc, command_context)
 
-
-@bot.command(name='nofixes', aliases = ['nofix', 'nowrenches'])
-async def nofixes(ctx: Context, optional_time = None):
-    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.NOFIXES, \
-                               not_found_message="No non-fix rips found.")
-    await send_roundup(roundup_desc, optional_time, ctx)
-
-
-@bot.command(name='nostops', aliases=['nostop'])
-async def nostops(ctx: Context, optional_time = None):
-    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.NOTHASREACT, \
-                               reaction_type=ReactionType.STOP, not_found_message="No non-octogons found.")
-    await send_roundup(roundup_desc, optional_time, ctx)
-
-
-@bot.command(name='overdue', brief=f'show rips that have been pinned for over X days')
-async def overdue(ctx: Context, optional_time = None):
-    """
-    Retrieve all pinned messages (except the first one) that are overdue.
-    """
+@command(
+    command_type=CommandType.QOC,
+    brief=f'show QoC rips pinned for over X days'
+)
+async def overdue(args: list[str], command_context: CommandContext):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.OVERDUE, not_found_message="No overdue rips.")
-    await send_roundup(roundup_desc, optional_time, ctx)
-
-
-@bot.command(name='events', aliases = ['event'], brief='shows event rips')
-async def events(ctx: Context, event: str = None, optional_time = None):
-    """
-    Retrieve all messages that are tagged as for an event.
-    The provided string must appear in the rip's author label (case insensitive).
-    Supports `|` for multiple search keys.
-    """
-    if channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']) and event is None:
-        await ctx.channel.send("Error: Please indicate the event name. Rips should be tagged with this name.")
-        return
-
-    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.EVENTS, \
-            search_key=event, not_found_message = "No pinned rips containing inteded text in author line found.")
-    await send_roundup(roundup_desc, optional_time, ctx)
+    await send_roundup(roundup_desc, command_context)
 
 
 # ============ Counting Commands ============== #
