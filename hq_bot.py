@@ -12,7 +12,8 @@ from simpleQoC.metadata import checkMetadata, countDupe, isDupe
 import re
 import functools
 import typing
-from typing import NamedTuple, List, ValuesView
+from typing import NamedTuple, List
+from contextlib import asynccontextmanager
 from enum import Enum, auto
 import math
 import json
@@ -169,7 +170,23 @@ async def cache_qoc_rip(message: Message) -> QocRip:
 
     return qoc_rip
 
-async def get_qoc_rips(channel: typing.Union[GuildChannel, Thread], rebuild_cache: bool = False) -> List[QocRip]:
+#NOTE: (Ahmayk) Dummy async context that we can call instead in the case where 
+#we do not input a channel for channel.typing()
+@asynccontextmanager
+async def empty_async_context():
+    yield
+
+async def wait_with_typing_if_locked(lock: asyncio.Lock, typing_channel: TextChannel | Thread):
+    if lock.locked():
+        async with typing_channel.typing() if typing_channel is not None else empty_async_context():
+            async with lock:
+                pass
+
+class GetRipsDesc(NamedTuple):
+    typing_channel: TextChannel | Thread | None = None
+    rebuild_cache: bool = False
+
+async def get_qoc_rips(channel: typing.Union[GuildChannel, Thread], desc: GetRipsDesc) -> List[QocRip]:
     """
     Gets all qoc rips from a channel. Makes a cache for the channel if it doesn't already exist. 
 
@@ -185,24 +202,27 @@ async def get_qoc_rips(channel: typing.Union[GuildChannel, Thread], rebuild_cach
     assert channel_info.rip_fetch_type == RipFetchType.PINS
     assert channel_info.is_cache_qoc 
 
+    await wait_with_typing_if_locked(CACHE_LOCK_QOC[channel.id], desc.typing_channel)
+
     ##NOTE: (Ahmayk) We need to prevent other processes from accessing the cache 
     ## in the case where we are updating the cache. If we allow access to the cache while
     ## it is being updated, it would likely be incomplete or wrong! 
     async with CACHE_LOCK_QOC[channel.id]:
-        if not len(RIP_CACHE_QOC[channel.id]) or rebuild_cache:
+        if not len(RIP_CACHE_QOC[channel.id]) or desc.rebuild_cache:
 
-            RIP_CACHE_QOC[channel.id]: dict[int, QocRip] = {}
+            async with desc.typing_channel.typing() if desc.typing_channel is not None else empty_async_context():
+                RIP_CACHE_QOC[channel.id]: dict[int, QocRip] = {}
 
-            async for message in channel.pins(limit=None):
+                async for message in channel.pins(limit=None):
 
-                if is_message_rip(message):
-                    # NOTE: (Ahmayk) channel.pins does not return reaction data,
-                    # so we have to fetch it manually. This is slow! But neccessary.
-                    fetched_message = await channel.fetch_message(message.id)
-                    await cache_qoc_rip(fetched_message)
+                    if is_message_rip(message):
+                        # NOTE: (Ahmayk) channel.pins does not return reaction data,
+                        # so we have to fetch it manually. This is slow! But neccessary.
+                        fetched_message = await channel.fetch_message(message.id)
+                        await cache_qoc_rip(fetched_message)
 
-                    if channel_info.is_cache_suborqueue: 
-                        cache_suborqueue_rip(fetched_message)
+                        if channel_info.is_cache_suborqueue: 
+                            cache_suborqueue_rip(fetched_message)
 
     result = list(RIP_CACHE_QOC[channel.id].values())
     ##NOTE: (Ahmayk) show rips in expected order, newest at top
@@ -231,7 +251,7 @@ def cache_suborqueue_rip(message) -> SubOrQueueRip:
     RIP_CACHE_SUBORQUEUE[message.channel.id][message.id] = suborqueue_rip
     return suborqueue_rip
 
-async def get_suborqueue_rips(channel: typing.Union[GuildChannel, Thread], rebuild_cache: bool = False) -> List[SubOrQueueRip]:
+async def get_suborqueue_rips(channel: typing.Union[GuildChannel, Thread], desc: GetRipsDesc) -> List[SubOrQueueRip]:
     """
     Gets all SubOrQueue rips from a channel. Detects the channel type and  
     grabs either 
@@ -249,53 +269,57 @@ async def get_suborqueue_rips(channel: typing.Union[GuildChannel, Thread], rebui
     init_channel_cache(channel.id)
     channel_info = get_channel_info(channel)
 
+    await wait_with_typing_if_locked(CACHE_LOCK_SUBORQUEUE[channel.id], desc.typing_channel)
+
     ##NOTE: (Ahmayk) We need to prevent other processes from accessing the cache 
     ## in the case where we are updating the cache. If we allow access to the cache while
     ## it is being updated, it would likely be incomplete or wrong! 
     async with CACHE_LOCK_SUBORQUEUE[channel.id]:
 
-        if not len(RIP_CACHE_SUBORQUEUE[channel.id]) or rebuild_cache:
+        if not len(RIP_CACHE_SUBORQUEUE[channel.id]) or desc.rebuild_cache:
 
-            match channel_info.rip_fetch_type: 
-                case RipFetchType.ALL_MESSAGES_NO_THREADS:
-                    async for message in channel.history(limit = None):
-                        if is_message_rip(message):
-                            cache_suborqueue_rip(message)
+            async with desc.typing_channel.typing() if desc.typing_channel is not None else empty_async_context():
 
-                case RipFetchType.ALL_MESSAGES_AND_THREADS:
-                    async for message in channel.history(limit = None):
-                        if message.thread is not None:
-                            thread_suborqueue_rips = await get_suborqueue_rips(message.thread)
-                            #NOTE: (Ahmayk) we insert thread rips also in its parent channel dict so that
-                            #we get all rips in theads when we get the parent channel's rips 
-                            for thread_suborqueue_rip in thread_suborqueue_rips:
-                                RIP_CACHE_SUBORQUEUE[channel.id][thread_suborqueue_rip.message_id] = thread_suborqueue_rip 
-                        if is_message_rip(message):
-                            cache_suborqueue_rip(message)
+                match channel_info.rip_fetch_type: 
+                    case RipFetchType.ALL_MESSAGES_NO_THREADS:
+                        async for message in channel.history(limit = None):
+                            if is_message_rip(message):
+                                cache_suborqueue_rip(message)
 
-                case RipFetchType.PINS:
-                    async for message in channel.pins(limit = None):
-                        if is_message_rip(message):
-                            # NOTE: (Ahmayk) channel.pins does not return reaction data,
-                            # so we have to fetch it manually. This is slow! But neccessary.
-                            fetched_message = await channel.fetch_message(message.id)
-                            cache_suborqueue_rip(fetched_message)
+                    case RipFetchType.ALL_MESSAGES_AND_THREADS:
+                        async for message in channel.history(limit = None):
+                            if message.thread is not None:
+                                thread_suborqueue_rips = await get_suborqueue_rips(message.thread, GetRipsDesc(rebuild_cache=desc.rebuild_cache))
+                                #NOTE: (Ahmayk) we insert thread rips also in its parent channel dict so that
+                                #we get all rips in theads when we get the parent channel's rips 
+                                for thread_suborqueue_rip in thread_suborqueue_rips:
+                                    RIP_CACHE_SUBORQUEUE[channel.id][thread_suborqueue_rip.message_id] = thread_suborqueue_rip 
+                            if is_message_rip(message):
+                                cache_suborqueue_rip(message)
 
-                case _:
-                    assert "Unimplemented RipFetchType"
+                    case RipFetchType.PINS:
+                        async for message in channel.pins(limit = None):
+                            if is_message_rip(message):
+                                # NOTE: (Ahmayk) channel.pins does not return reaction data,
+                                # so we have to fetch it manually. This is slow! But neccessary.
+                                fetched_message = await channel.fetch_message(message.id)
+                                cache_suborqueue_rip(fetched_message)
+
+                    case _:
+                        assert "Unimplemented RipFetchType"
 
     result = list(RIP_CACHE_SUBORQUEUE[channel.id].values())
     ##NOTE: (Ahmayk) show rips in expected order, newest at top
     result.sort(key = lambda rip: rip.created_at, reverse=True)
     return result
 
-async def get_suborqueue_rips_fast(channel: typing.Union[GuildChannel, Thread]) -> typing.List[SubOrQueueRip]:
+async def get_suborqueue_rips_fast(channel: typing.Union[GuildChannel, Thread], desc: GetRipsDesc) -> typing.List[SubOrQueueRip]:
     """
     Will return suborqueue rips of any channel type as fast as possible but may not have reaction data.
     This function is for when we we don't care about reactions 
     and only care about the number of rips or its metadata.
 
-    Channels that are not labeld with a matching channel type are assumed to be pin channels.
+    Channels that are not labeled with a matching channel type are assumed to be pin channels.
     """
 
     init_channel_cache(channel.id)
@@ -308,18 +332,19 @@ async def get_suborqueue_rips_fast(channel: typing.Union[GuildChannel, Thread]) 
 
         #NOTE: (Ahmayk) The path to get rips normally is already as fast
         #as we can get so just do that
-        result = await get_suborqueue_rips(channel)
+        result = await get_suborqueue_rips(channel, desc)
 
     else:
         if not CACHE_LOCK_SUBORQUEUE[channel.id].locked() and len(RIP_CACHE_SUBORQUEUE[channel.id]):
-            result = await get_suborqueue_rips(channel)
+            result = await get_suborqueue_rips(channel, desc)
         else:
-            async for message in channel.pins(limit = None):
-                if is_message_rip(message):
-                    ##NOTE: (Ahmayk) No fetching message for reactions for speed!
-                    suborqueue_rip = init_suborqueue_rip(message, [])
-                    result.append(suborqueue_rip)
-            result.sort(key = lambda rip: rip.created_at, reverse=True)
+            async with desc.typing_channel.typing() if desc.typing_channel is not None else empty_async_context():
+                async for message in channel.pins(limit = None):
+                    if is_message_rip(message):
+                        ##NOTE: (Ahmayk) No fetching message for reactions for speed!
+                        suborqueue_rip = init_suborqueue_rip(message, [])
+                        result.append(suborqueue_rip)
+                result.sort(key = lambda rip: rip.created_at, reverse=True)
 
     return result
 
@@ -366,7 +391,7 @@ async def validate_cache_all(send_channel: TextChannel | None):
                         await write_log(msg)
                         if send_channel:
                             await send_channel.send(msg)
-                        await get_qoc_rips(channel, True)
+                        await get_qoc_rips(channel, GetRipsDesc(rebuild_cache=True))
 
             if channel_info.is_cache_suborqueue:
                 async with CACHE_LOCK_SUBORQUEUE[channel.id]:
@@ -376,7 +401,7 @@ async def validate_cache_all(send_channel: TextChannel | None):
                         await write_log(msg)
                         if send_channel:
                             await send_channel.send(msg)
-                        await get_suborqueue_rips(channel, True)
+                        await get_suborqueue_rips(channel, GetRipsDesc(rebuild_cache=True))
 
 #===============================================#
 #                    EVENTS                     #
@@ -392,21 +417,21 @@ async def on_ready():
     for channel_id in channel_ids:
         channel = bot.get_channel(channel_id)
         if channel:
-            suborqueue_rips = await get_suborqueue_rips(channel)
+            suborqueue_rips = await get_suborqueue_rips(channel, GetRipsDesc())
             await write_log(f'Cached {len(suborqueue_rips)} queued rips in {channel.jump_url}.')
 
     channel_ids = [k for k, v in CHANNELS.items() if 'SUBS' in v or 'SUBS_THREAD' in v or 'SUBS_PIN' in v]
     for channel_id in channel_ids:
         channel = bot.get_channel(channel_id)
         if channel:
-            suborqueue_rips = await get_suborqueue_rips(channel)
+            suborqueue_rips = await get_suborqueue_rips(channel, GetRipsDesc())
             await write_log(f'Cached {len(suborqueue_rips)} subbed rips in {channel.jump_url}.')
 
     channel_ids = [k for k, v in CHANNELS.items() if 'QOC' in v]
     for channel_id in channel_ids:
         channel = bot.get_channel(channel_id)
         if channel:
-            qoc_rips = await get_qoc_rips(channel)
+            qoc_rips = await get_qoc_rips(channel, GetRipsDesc())
             await write_log(f'Cached {len(qoc_rips)} qoc rips in {channel.jump_url}.')
 
     await write_log('Validating cache...')
@@ -459,7 +484,7 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
 
             latest_pin_time = last_pin
 
-            rips = await get_suborqueue_rips_fast(channel)
+            rips = await get_suborqueue_rips_fast(channel, GetRipsDesc())
 
             SOFT_PIN_LIMIT = _get_config('soft_pin_limit')
             if len(rips) > SOFT_PIN_LIMIT:
@@ -853,147 +878,146 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
     channel = await get_qoc_channel(command_context.channel)
     if channel is None: return
 
-    async with command_context.channel.typing():
+    print(f'typing channel: {command_context.channel}')
+    qoc_rips = await get_qoc_rips(channel, GetRipsDesc(typing_channel=command_context.channel))
 
-        qoc_rips = await get_qoc_rips(channel)
+    is_spec_overdue_days = _get_config('spec_overdue_days')
+    is_overdue_days = _get_config('overdue_days')
+    search_keys = roundup_desc.search_key.split('|')
+    emote_names = [e.name for e in channel.guild.emojis]
 
-        is_spec_overdue_days = _get_config('spec_overdue_days')
-        is_overdue_days = _get_config('overdue_days')
-        search_keys = roundup_desc.search_key.split('|')
-        emote_names = [e.name for e in channel.guild.emojis]
+    ##TODO: (Ahmayk) fuzzy username input (ie typing "ahmayk" and matching to their username or display name)
+    user_id = command_context.user.id
+    if roundup_desc.user_id:
+        match = re.search(r'\d+', str(roundup_desc.user_id))
+        if match:
+            ID = int(match.group(0))
+            if command_context.channel.guild:
+                search_author = command_context.channel.guild.get_member(ID)
+                if search_author:
+                    await command_context.channel.send(f"Searching for rips {roundup_desc.conditional_string} by {search_author.name}")
 
-        ##TODO: (Ahmayk) fuzzy username input (ie typing "ahmayk" and matching to their username or display name)
-        user_id = command_context.user.id
-        if roundup_desc.user_id:
-            match = re.search(r'\d+', str(roundup_desc.user_id))
-            if match:
-                ID = int(match.group(0))
-                if command_context.channel.guild:
-                    search_author = command_context.channel.guild.get_member(ID)
-                    if search_author:
-                        await command_context.channel.send(f"Searching for rips {roundup_desc.conditional_string} by {search_author.name}")
+    result = ""
 
-        result = ""
+    for qoc_rip in qoc_rips:
 
-        for qoc_rip in qoc_rips:
+        reacts = ""
+        num_checks = 0
+        num_rejects = 0
+        num_goldchecks = 0
+        specs_required = 1
+        checks_required = 3
+        specs_needed = False
+        fix_or_alert = False
 
-            reacts = ""
-            num_checks = 0
-            num_rejects = 0
-            num_goldchecks = 0
-            specs_required = 1
-            checks_required = 3
-            specs_needed = False
-            fix_or_alert = False
+        for react_and_user in qoc_rip.react_and_users:
+            if react_is(ReactionType.GOLDCHECK, react_and_user.name):
+                num_goldchecks += 1
+            elif react_is(ReactionType.CHECKREQ, react_and_user.name):
+                try:
+                    checks_required = int(react_and_user.name.split("check")[0])
+                except ValueError:
+                    print("Error parsing checkreq react: {}".format(react_and_user.name))
+            elif react_is(ReactionType.CHECK, react_and_user.name):
+                num_checks += 1
+            elif react_is(ReactionType.REJECT, react_and_user.name):
+                num_rejects += 1
+            elif react_is_one([ReactionType.FIX, ReactionType.ALERT], react_and_user.name):
+                fix_or_alert = True
+            elif react_is(ReactionType.STOP, react_and_user.name):
+                specs_needed = True
+            elif react_is(ReactionType.NUMBER, react_and_user.name):
+                specs_required = KEYCAP_EMOJIS[react_and_user.name]
 
-            for react_and_user in qoc_rip.react_and_users:
-                if react_is(ReactionType.GOLDCHECK, react_and_user.name):
-                    num_goldchecks += 1
-                elif react_is(ReactionType.CHECKREQ, react_and_user.name):
-                    try:
-                        checks_required = int(react_and_user.name.split("check")[0])
-                    except ValueError:
-                        print("Error parsing checkreq react: {}".format(react_and_user.name))
-                elif react_is(ReactionType.CHECK, react_and_user.name):
-                    num_checks += 1
-                elif react_is(ReactionType.REJECT, react_and_user.name):
-                    num_rejects += 1
-                elif react_is_one([ReactionType.FIX, ReactionType.ALERT], react_and_user.name):
-                    fix_or_alert = True
-                elif react_is(ReactionType.STOP, react_and_user.name):
-                    specs_needed = True
-                elif react_is(ReactionType.NUMBER, react_and_user.name):
-                    specs_required = KEYCAP_EMOJIS[react_and_user.name]
+            if react_and_user.name in emote_names:
+                for e in channel.guild.emojis:
+                    if e.name == react_and_user.name:
+                        reacts += f"{e} "
+                        break
+            else:
+                reacts += f"{react_and_user.name} "
 
-                if react_and_user.name in emote_names:
-                    for e in channel.guild.emojis:
-                        if e.name == react_and_user.name:
-                            reacts += f"{e} "
-                            break
-                else:
-                    reacts += f"{react_and_user.name} "
+        indicator = ""
+        check_passed = (num_checks - num_rejects >= checks_required) and not fix_or_alert
+        specs_passed = (not specs_needed or num_goldchecks >= specs_required)
+        is_spec_overdue = (datetime.now(timezone.utc) - qoc_rip.created_at) > timedelta(days=is_spec_overdue_days)
+        is_overdue =      (datetime.now(timezone.utc) - qoc_rip.created_at) > timedelta(days=is_overdue_days)
+        if check_passed:
+            indicator = APPROVED_INDICATOR if specs_passed else AWAITING_SPECIALIST_INDICATOR
+        elif specs_needed and not specs_passed and is_spec_overdue:
+            indicator = SPECS_OVERDUE_INDICATOR
+        elif is_overdue:
+            indicator = OVERDUE_INDICATOR
 
-            indicator = ""
-            check_passed = (num_checks - num_rejects >= checks_required) and not fix_or_alert
-            specs_passed = (not specs_needed or num_goldchecks >= specs_required)
-            is_spec_overdue = (datetime.now(timezone.utc) - qoc_rip.created_at) > timedelta(days=is_spec_overdue_days)
-            is_overdue =      (datetime.now(timezone.utc) - qoc_rip.created_at) > timedelta(days=is_overdue_days)
-            if check_passed:
-                indicator = APPROVED_INDICATOR if specs_passed else AWAITING_SPECIALIST_INDICATOR
-            elif specs_needed and not specs_passed and is_spec_overdue:
-                indicator = SPECS_OVERDUE_INDICATOR
-            elif is_overdue:
-                indicator = OVERDUE_INDICATOR
+        rip_title = get_rip_title(qoc_rip.text)
+        author = get_rip_author(qoc_rip.text, qoc_rip.message_author_name)
+        author = author.replace('*', '').replace('_', '')
 
-            rip_title = get_rip_title(qoc_rip.text)
-            author = get_rip_author(qoc_rip.text, qoc_rip.message_author_name)
-            author = author.replace('*', '').replace('_', '')
+        review_react_list = [ReactionType.CHECK, ReactionType.GOLDCHECK, ReactionType.FIX, ReactionType.ALERT, ReactionType.REJECT]
+        fix_react_list = [ReactionType.FIX, ReactionType.ALERT]
 
-            review_react_list = [ReactionType.CHECK, ReactionType.GOLDCHECK, ReactionType.FIX, ReactionType.ALERT, ReactionType.REJECT]
-            fix_react_list = [ReactionType.FIX, ReactionType.ALERT]
+        is_valid = True
+        match (roundup_desc.roundup_filter_type):
+            case RoundupFilterType.MYPINS:
+                is_valid = qoc_rip.message_author_id == roundup_desc.message_author_id
+            case RoundupFilterType.MYFIXES:
+                is_valid = qoc_rip_has_reaction_one_from_user(fix_react_list, user_id, qoc_rip)
+            case RoundupFilterType.NOFIXES:
+                is_valid = not qoc_rip_has_reaction_one(fix_react_list, qoc_rip)
+            case RoundupFilterType.MYFRESH:
+                is_valid = not qoc_rip_has_reaction_one_from_user(review_react_list, user_id, qoc_rip)
+            case RoundupFilterType.FRESH:
+                is_valid = not qoc_rip_has_reaction_one(review_react_list, qoc_rip)
+            case RoundupFilterType.SPICY:
+                is_valid = qoc_rip_has_reaction(ReactionType.CHECK, qoc_rip) and \
+                            qoc_rip_has_reaction(ReactionType.REJECT, qoc_rip)
+            case RoundupFilterType.SEARCH:
+                is_valid = False
+                for key in search_keys:
+                    if line_contains_substring(rip_title, key):
+                        is_valid = True
+                        break
+            case RoundupFilterType.EVENTS:
+                is_valid = False
+                for key in search_keys:
+                    if line_contains_substring(author, key):
+                        is_valid = True
+                        break
+            case RoundupFilterType.HASREACT:
+                is_valid = qoc_rip_has_reaction(roundup_desc.reaction_type, qoc_rip)
+            case RoundupFilterType.NOTHASREACT:
+                is_valid = True
+                for react_and_user in qoc_rip.react_and_users:
+                    if react_is(roundup_desc.reaction_type, react_and_user.name):
+                        is_valid = False
+                        break
+            case RoundupFilterType.OVERDUE:
+                is_valid = is_overdue
+            case RoundupFilterType.VET_ALL:
+                vet_reacts, msg = await vet_message(qoc_rip.text) 
+                reacts = vet_reacts
+                is_valid = True 
 
-            is_valid = True
-            match (roundup_desc.roundup_filter_type):
-                case RoundupFilterType.MYPINS:
-                    is_valid = qoc_rip.message_author_id == roundup_desc.message_author_id
-                case RoundupFilterType.MYFIXES:
-                    is_valid = qoc_rip_has_reaction_one_from_user(fix_react_list, user_id, qoc_rip)
-                case RoundupFilterType.NOFIXES:
-                    is_valid = not qoc_rip_has_reaction_one(fix_react_list, qoc_rip)
-                case RoundupFilterType.MYFRESH:
-                    is_valid = not qoc_rip_has_reaction_one_from_user(review_react_list, user_id, qoc_rip)
-                case RoundupFilterType.FRESH:
-                    is_valid = not qoc_rip_has_reaction_one(review_react_list, qoc_rip)
-                case RoundupFilterType.SPICY:
-                    is_valid = qoc_rip_has_reaction(ReactionType.CHECK, qoc_rip) and \
-                               qoc_rip_has_reaction(ReactionType.REJECT, qoc_rip)
-                case RoundupFilterType.SEARCH:
-                    is_valid = False
-                    for key in search_keys:
-                        if line_contains_substring(rip_title, key):
-                            is_valid = True
-                            break
-                case RoundupFilterType.EVENTS:
-                    is_valid = False
-                    for key in search_keys:
-                        if line_contains_substring(author, key):
-                            is_valid = True
-                            break
-                case RoundupFilterType.HASREACT:
-                    is_valid = qoc_rip_has_reaction(roundup_desc.reaction_type, qoc_rip)
-                case RoundupFilterType.NOTHASREACT:
-                    is_valid = True
-                    for react_and_user in qoc_rip.react_and_users:
-                        if react_is(roundup_desc.reaction_type, react_and_user.name):
-                            is_valid = False
-                            break
-                case RoundupFilterType.OVERDUE:
-                    is_valid = is_overdue
-                case RoundupFilterType.VET_ALL:
-                    vet_reacts, msg = await vet_message(qoc_rip.text) 
-                    reacts = vet_reacts
-                    is_valid = True 
+        if is_valid:
+            link = format_message_link(channel.guild.id, channel.id, qoc_rip.message_id)
+            base_message = f'**[{rip_title}]({link})**\n{author}'
+            if len(indicator) > 0:
+                base_message = f'{indicator} **[{rip_title}]({link})** {indicator}\n{author}'
+            result += base_message + f' | {reacts}\n'
+            result += "━━━━━━━━━━━━━━━━━━\n" # a line for readability!
 
-            if is_valid:
-                link = format_message_link(channel.guild.id, channel.id, qoc_rip.message_id)
-                base_message = f'**[{rip_title}]({link})**\n{author}'
-                if len(indicator) > 0:
-                    base_message = f'{indicator} **[{rip_title}]({link})** {indicator}\n{author}'
-                result += base_message + f' | {reacts}\n'
-                result += "━━━━━━━━━━━━━━━━━━\n" # a line for readability!
+    if result != "":
 
-        if result != "":
+        if roundup_desc.roundup_filter_type == RoundupFilterType.VET_ALL:
+            result += f"```\nLEGEND:\n{QOC_DEFAULT_LINKERR}: Link cannot be parsed\n{DEFAULT_CHECK}: Rip is OK\n{DEFAULT_FIX}: Rip has potential issues, see below\n{QOC_DEFAULT_BITRATE}: Bitrate is not 320kbps\n{QOC_DEFAULT_CLIPPING}: Clipping```"
 
-            if roundup_desc.roundup_filter_type == RoundupFilterType.VET_ALL:
-                result += f"```\nLEGEND:\n{QOC_DEFAULT_LINKERR}: Link cannot be parsed\n{DEFAULT_CHECK}: Rip is OK\n{DEFAULT_FIX}: Rip has potential issues, see below\n{QOC_DEFAULT_BITRATE}: Bitrate is not 320kbps\n{QOC_DEFAULT_CLIPPING}: Clipping```"
+        await send_embed(result, command_context.channel, EmbedDesc(expires=True))
+    else:
 
-            await send_embed(result, command_context.channel, EmbedDesc(expires=True))
-        else:
-
-            not_found_message = "No rips."
-            if len(roundup_desc.not_found_message):
-                not_found_message = roundup_desc.not_found_message
-            await send(not_found_message, command_context.channel)
+        not_found_message = "No rips."
+        if len(roundup_desc.not_found_message):
+            not_found_message = roundup_desc.not_found_message
+        await send(not_found_message, command_context.channel)
 
 
 @command(
@@ -1187,18 +1211,16 @@ async def count(ctx: Context):
         channel = ctx.channel
         proxy = ""
 
-    async with ctx.channel.typing():
+    rips = await get_suborqueue_rips_fast(channel, GetRipsDesc(typing_channel=ctx.channel))
+    pincount = len(rips)
 
-        rips = await get_suborqueue_rips_fast(channel)
-        pincount = len(rips)
+    if (pincount < 1):
+        result = "`* Determination.`"
+    else:
+        result = f"`* {pincount} left.`"
 
-        if (pincount < 1):
-            result = "`* Determination.`"
-        else:
-            result = f"`* {pincount} left.`"
-
-        result += proxy
-        await ctx.channel.send(result)
+    result += proxy
+    await ctx.channel.send(result)
 
 
 @bot.command(name='limitcheck', aliases=['pinlimit'], brief="pin limit checker")
@@ -1216,12 +1238,11 @@ async def limitcheck(ctx: Context):
         channel = ctx.channel
         proxy = ""
 
-    async with ctx.channel.typing():
-        rips = await get_suborqueue_rips_fast(channel)
-        result = f"You can pin {_get_config('soft_pin_limit') - len(rips)} more rips until I start complaining about pin space."
+    rips = await get_suborqueue_rips_fast(channel, GetRipsDesc(typing_channel=ctx.channel))
+    result = f"You can pin {_get_config('soft_pin_limit') - len(rips)} more rips until I start complaining about pin space."
 
-        result += proxy
-        await ctx.channel.send(result)
+    result += proxy
+    await ctx.channel.send(result)
 
 
 @bot.command(name='count_subs', brief='count number of remaining submissions')
@@ -1239,18 +1260,17 @@ async def count_subs(ctx: Context, sub_channel_link: str = None):
         await ctx.channel.send(msg)
         if sub_channel_id == -1: return
 
-    async with ctx.channel.typing():
-        channel = bot.get_channel(sub_channel_id)
+    channel = bot.get_channel(sub_channel_id)
 
-        rips = await get_suborqueue_rips_fast(channel)
-        count = len(rips)
+    rips = await get_suborqueue_rips_fast(channel, GetRipsDesc(typing_channel=ctx.channel))
+    count = len(rips)
 
-        if (count < 1):
-            result = "```ansi\n\u001b[0;31m* Determination.\u001b[0;0m```"
-        else:
-            result = f"```ansi\n\u001b[0;31m* {count} left.\u001b[0;0m```"
+    if (count < 1):
+        result = "```ansi\n\u001b[0;31m* Determination.\u001b[0;0m```"
+    else:
+        result = f"```ansi\n\u001b[0;31m* {count} left.\u001b[0;0m```"
 
-        await ctx.channel.send(result)
+    await ctx.channel.send(result)
 
 
 # ============ SubOrQueue Rip Commands ============== #
@@ -1305,7 +1325,7 @@ async def send_suborqueue_rips(send_suborqueue_desc: SendSubOrQueueDesc, channel
         for channel_id in channel_ids:
             channel = bot.get_channel(channel_id)
 
-            rips = await get_suborqueue_rips(channel)
+            rips = await get_suborqueue_rips(channel, GetRipsDesc(typing_channel=ctx.channel))
 
             result += f'<#{channel_id}>:\n'
 
@@ -1476,33 +1496,32 @@ async def scout_stats(ctx: Context, channel_link: str = None, optional_time = No
     channel = bot.get_channel(channel_id)
     if channel is None: await ctx.channel.send("Error: Invalid channel found. Contact bot developers to update list of channels.")
 
-    async with ctx.channel.typing():
-        suborqueue_rips = await get_suborqueue_rips_fast(channel)
+    suborqueue_rips = await get_suborqueue_rips_fast(channel, GetRipsDesc(typing_channel=ctx.channel))
 
-        count = {}
-        for letter in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ': # could have done string.ascii_uppercase but i dont think the alphabet is getting any updates
-            count[letter] = 0
+    count = {}
+    for letter in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ': # could have done string.ascii_uppercase but i dont think the alphabet is getting any updates
+        count[letter] = 0
 
-        for suborqueue_rip in suborqueue_rips:
-            rip_title = get_raw_rip_title(suborqueue_rip.text)
-            prefix = rip_title.lower()[0]
-            if prefix in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ':  # isalpha becomes fucked with unicode characters i think
-                count[prefix.upper()] += 1
-            else:
-                if prefix in count.keys():
-                    count[prefix] += 1
-                else:
-                    count[prefix] = 1
-        
-        result = ""
-        maxCount = max(max(count.values()), 20)
-        for k, v in sorted(count.items()):
-            result += f"{k}: " + ("▮" * int(v / maxCount * 20)) + f" ({v})\n"
-
-        if len(suborqueue_rips) == 0:
-            await ctx.channel.send("No approved rips found.")
+    for suborqueue_rip in suborqueue_rips:
+        rip_title = get_raw_rip_title(suborqueue_rip.text)
+        prefix = rip_title.lower()[0]
+        if prefix in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ':  # isalpha becomes fucked with unicode characters i think
+            count[prefix.upper()] += 1
         else:
-            await send_embed_old(ctx.channel, result, time)
+            if prefix in count.keys():
+                count[prefix] += 1
+            else:
+                count[prefix] = 1
+    
+    result = ""
+    maxCount = max(max(count.values()), 20)
+    for k, v in sorted(count.items()):
+        result += f"{k}: " + ("▮" * int(v / maxCount * 20)) + f" ({v})\n"
+
+    if len(suborqueue_rips) == 0:
+        await ctx.channel.send("No approved rips found.")
+    else:
+        await send_embed_old(ctx.channel, result, time)
 
 
 # ============ Basic QoC commands ============== #
@@ -1549,7 +1568,7 @@ async def vet_from(ctx: Context, from_msg):
         return
 
     async with ctx.channel.typing():
-        rips = await get_suborqueue_rips_fast(channel)
+        rips = await get_suborqueue_rips_fast(channel, GetRipsDesc())
 
         for rip in rips:
             if not vet_all_pins and rip.created_at < from_timestamp:
@@ -1642,29 +1661,28 @@ async def count_dupe(ctx: Context, msg_link: str = None, check_queues: str = Non
         await ctx.channel.send("Error: Please provide a link to message.")
         return
 
-    async with ctx.channel.typing():
-        server, channel, message, status = await parse_message_link(msg_link)
-        if message is None:
-            await ctx.channel.send(status)
-            return
+    server, channel, message, status = await parse_message_link(msg_link)
+    if message is None:
+        await ctx.channel.send(status)
+        return
 
-        playlistId = extract_playlist_id('\n'.join(message.content.splitlines()[1:])) # ignore author line
-        description = get_rip_description(message.content)
-        rip_title = get_rip_title(message.content)
+    playlistId = extract_playlist_id('\n'.join(message.content.splitlines()[1:])) # ignore author line
+    description = get_rip_description(message.content)
+    rip_title = get_rip_title(message.content)
 
-        p, msg = await run_blocking(countDupe, description, YOUTUBE_CHANNEL_NAME, playlistId, YOUTUBE_API_KEY)
-        if len(msg) > 0:
-            await ctx.channel.send(msg)
-            if check_queues is None: return
+    p, msg = await run_blocking(countDupe, description, YOUTUBE_CHANNEL_NAME, playlistId, YOUTUBE_API_KEY)
+    if len(msg) > 0:
+        await ctx.channel.send(msg)
+        if check_queues is None: return
 
-        if check_queues is not None:
-            q = 0
-            queue_channels = [k for k, v in CHANNELS.items() if 'QUEUE' in v]
-            for queue_channel_id in queue_channels:
-                queue_channel = server.get_channel(queue_channel_id)
-                if queue_channel:
-                    suborqueue_rips = await get_suborqueue_rips(queue_channel)
-                    q += sum([isDupe(description, get_rip_description(r.text)) for r in suborqueue_rips if r.message_id != message.id])
+    if check_queues is not None:
+        q = 0
+        queue_channels = [k for k, v in CHANNELS.items() if 'QUEUE' in v]
+        for queue_channel_id in queue_channels:
+            queue_channel = server.get_channel(queue_channel_id)
+            if queue_channel:
+                suborqueue_rips = await get_suborqueue_rips_fast(queue_channel, GetRipsDesc(typing_channel=ctx.channel))
+                q += sum([isDupe(description, get_rip_description(r.text)) for r in suborqueue_rips if r.message_id != message.id])
 
         # https://codegolf.stackexchange.com/questions/4707/outputting-ordinal-numbers-1st-2nd-3rd#answer-4712 how
         ordinal = lambda n: "%d%s" % (n,"tsnrhtdd"[(n//10%10!=1)*(n%10<4)*n%10::4])
@@ -1705,7 +1723,7 @@ async def scan(ctx: Context, channel_link: str = None, start_index: int = None, 
     channel = bot.get_channel(channel_id)
     if channel is None: await ctx.channel.send("Error: Invalid channel found. Contact bot developers to update list of channels.")
 
-    rips = await get_suborqueue_rips_fast(channel)
+    rips = await get_suborqueue_rips_fast(channel, GetRipsDesc(typing_channel=ctx.channel))
     rips.reverse()
     num_rips = len(rips)
 
@@ -1877,11 +1895,11 @@ async def reset_cache(ctx: Context, channel_link: str = None):
     return_message = f'Cache rebuilt!'
 
     if channel_info.is_cache_suborqueue:
-        suborqueue_rips = await get_suborqueue_rips(channel, True)
+        suborqueue_rips = await get_suborqueue_rips(channel, GetRipsDesc(typing_channel=ctx.channel, rebuild_cache=True))
         return_message += f'\nSubOrQueue rip count: {suborqueue_count_old} => {len(suborqueue_rips)}' 
 
     if channel_info.is_cache_qoc:
-        qoc_rips = await get_qoc_rips(channel, True)
+        qoc_rips = await get_qoc_rips(channel, GetRipsDesc(typing_channel=ctx.channel, rebuild_cache=True))
         return_message += f'\nQoc rip count: {qoc_count_old} => {len(qoc_rips)}' 
 
     await ctx.channel.send(return_message)
@@ -2018,12 +2036,12 @@ async def cat(ctx: Context):
     await ctx.channel.send("meow!")
 
 
-async def get_suborqueue_rip_stats_string(channel_id) -> str:
+async def get_suborqueue_rip_stats_string(channel_id: int, typing_channel: TextChannel | Thread) -> str:
     ret = ""
     channel = bot.get_channel(channel_id)
     if channel:
 
-        rips = await get_suborqueue_rips_fast(channel)
+        rips = await get_suborqueue_rips_fast(channel, GetRipsDesc(typing_channel=typing_channel))
 
         if channel_is_types(channel, ['SUBS', 'SUBS_PIN']):
             ret += f"- <#{channel_id}>: **{len(rips)}** rips\n"
@@ -2056,39 +2074,38 @@ async def stats(ctx: Context, optional_arg = None):
     if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
     heard_command("stats", ctx.message.author.name)
 
-    async with ctx.channel.typing():
-        ret = "**QoC channels**\n"
+    ret = "**QoC channels**\n"
 
-        sub_channels = [k for k, v in CHANNELS.items() if any(t in v for t in ['SUBS', 'SUBS_PIN', 'SUBS_THREAD'])]
+    sub_channels = [k for k, v in CHANNELS.items() if any(t in v for t in ['SUBS', 'SUBS_PIN', 'SUBS_THREAD'])]
 
-        qoc_channels = [k for k, v in CHANNELS.items() if 'QOC' in v and k not in sub_channels]
-        for channel_id in qoc_channels:
-            team_count = 0
-            email_count = 0
-            channel = bot.get_channel(channel_id)
-            if channel:
-                rips = await get_suborqueue_rips_fast(channel)
-                for rip in rips:
-                    author = get_rip_author(rip.text, rip.message_author_name)
-                    if 'email' in author.lower():
-                        email_count += 1
-                    else:
-                        team_count += 1
-                ret += f"- <#{channel_id}>: **{team_count + email_count}** rips\n  - {team_count} team subs\n  - {email_count} email subs\n"
+    qoc_channels = [k for k, v in CHANNELS.items() if 'QOC' in v and k not in sub_channels]
+    for channel_id in qoc_channels:
+        team_count = 0
+        email_count = 0
+        channel = bot.get_channel(channel_id)
+        if channel:
+            rips = await get_suborqueue_rips_fast(channel, GetRipsDesc(typing_channel=ctx.channel))
+            for rip in rips:
+                author = get_rip_author(rip.text, rip.message_author_name)
+                if 'email' in author.lower():
+                    email_count += 1
+                else:
+                    team_count += 1
+            ret += f"- <#{channel_id}>: **{team_count + email_count}** rips\n  - {team_count} team subs\n  - {email_count} email subs\n"
 
-        ret += "**Submission channels**\n"
-        for channel_id in sub_channels:
-            ret += await get_suborqueue_rip_stats_string(channel_id)
+    ret += "**Submission channels**\n"
+    for channel_id in sub_channels:
+        ret += await get_suborqueue_rip_stats_string(channel_id, ctx.channel)
 
-        if optional_arg is not None:
-            ret += "**Queues**\n"
-            queue_channels = [k for k, v in CHANNELS.items() if 'QUEUE' in v]
-            for channel_id in queue_channels:
-                ret += await get_suborqueue_rip_stats_string(channel_id)
+    if optional_arg is not None:
+        ret += "**Queues**\n"
+        queue_channels = [k for k, v in CHANNELS.items() if 'QUEUE' in v]
+        for channel_id in queue_channels:
+            ret += await get_suborqueue_rip_stats_string(channel_id, ctx.channel)
 
-        long_message = split_long_message(ret, _get_config('character_limit'))
-        for line in long_message:
-            await ctx.channel.send(line)
+    long_message = split_long_message(ret, _get_config('character_limit'))
+    for line in long_message:
+        await ctx.channel.send(line)
 
 
 # While it might occur to folks in the future that a good command to write would be a rip feedback-sending command, something like that
@@ -2426,7 +2443,7 @@ async def check_metadata(text: str, message_id: int, message_author_name: str, f
         for channel_id in channel_ids:
             channel = bot.get_channel(channel_id)
             if channel:
-                rips = await get_suborqueue_rips_fast(channel)
+                rips = await get_suborqueue_rips_fast(channel, GetRipsDesc(typing_channel=ctx.channel))
 
         title = get_raw_rip_title(text)
         desc = get_rip_description(text)
