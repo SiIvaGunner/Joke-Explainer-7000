@@ -712,6 +712,7 @@ class CommandContext(NamedTuple):
 class CommandInfo(NamedTuple):
     func: typing.Callable[[list[str], CommandContext], typing.Awaitable[typing.NoReturn]]
     command_type: CommandType
+    public: bool 
     brief: str
     desc: str
     format: str
@@ -723,6 +724,7 @@ COMMANDS: dict[str, CommandInfo] = {}
 ##NOTE: (Ahmayk) This nonsense is so that we can have a simpler way of defining commands
 def command(
     command_type: CommandType = CommandType.NULL,
+    public: bool = False,
     brief: str = "",
     desc: str = "",
     format: str = "",
@@ -733,6 +735,7 @@ def command(
         COMMANDS[func.__name__] = CommandInfo(
             func=func,
             command_type=command_type,
+            public=public,
             brief=brief,
             desc=desc,
             format=format,
@@ -799,6 +802,11 @@ async def on_message(message: Message):
                 break
 
     if not command_info:
+        return
+
+    if not command_info.public and not channel_is_types(message.channel, ['QOC', 'PROXY_QOC']):
+        ##NOTE: (Ahmayk) consider giving feedback on a command not being avaliable
+        # if not having any feedback is confusing, probably is fine tho
         return
 
     command_context = CommandContext(message.channel, message.author)
@@ -899,7 +907,6 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
     Sends a roundup message of all rips that the roundup channel the message was sent in points to.
     The roundup_filter_type describes how the roundup will be filtered.
     """
-    if not channel_is_types(command_context.channel, ['QOC', 'PROXY_QOC']): return
 
     channel = await get_qoc_channel(command_context.channel)
     if channel is None: return
@@ -1236,6 +1243,7 @@ async def overdue(args: list[str], command_context: CommandContext):
 
 @command(
     command_type=CommandType.STATS,
+    public=True,
     brief='Counts all pinned QoC rips',
     desc='Only counts pinned messages with valid rips.'
 )
@@ -1266,6 +1274,7 @@ async def count(args: list[str], command_context: CommandContext):
 
 @command(
     command_type=CommandType.STATS,
+    public=True,
     brief='Reports proximity to the set pinlimit for the channel',
     desc='Only counts pinned messages with valid rips.',
     aliases=['pinlimit'],
