@@ -129,7 +129,6 @@ class RipFetchType(Enum):
 class ChannelInfo(NamedTuple):
     rip_fetch_type: RipFetchType
     is_cache_qoc: bool
-    is_cache_suborqueue: bool
 
 def get_channel_info(channel: TextChannel) -> ChannelInfo:
 
@@ -142,9 +141,8 @@ def get_channel_info(channel: TextChannel) -> ChannelInfo:
         rip_fetch_type = RipFetchType.ALL_MESSAGES_AND_THREADS
 
     is_cache_qoc = channel_is_types(channel, ['QOC'])
-    is_cache_suborqueue = channel_is_types(channel, ['SUBS', 'SUBS_PIN', 'SUBS_THREAD', 'QUEUE'])
     
-    return ChannelInfo(rip_fetch_type, is_cache_qoc, is_cache_suborqueue)
+    return ChannelInfo(rip_fetch_type, is_cache_qoc)
 
 async def cache_qoc_rip(message: Message) -> QocRip:
 
@@ -221,8 +219,9 @@ async def get_qoc_rips(channel: typing.Union[GuildChannel, Thread], desc: GetRip
                         fetched_message = await channel.fetch_message(message.id)
                         await cache_qoc_rip(fetched_message)
 
-                        if channel_info.is_cache_suborqueue: 
-                            cache_suborqueue_rip(fetched_message)
+                        # NOTE: (Ahmayk) always cache suborqueue versions
+                        # so that the data is easily accessible via get_suborqueue_rips_fast()
+                        cache_suborqueue_rip(fetched_message)
 
     result = list(RIP_CACHE_QOC[channel.id].values())
     ##NOTE: (Ahmayk) show rips in expected order, newest at top
@@ -393,15 +392,14 @@ async def validate_cache_all(send_channel: TextChannel | None):
                             await send_channel.send(msg)
                         await get_qoc_rips(channel, GetRipsDesc(rebuild_cache=True))
 
-            if channel_info.is_cache_suborqueue:
-                async with CACHE_LOCK_SUBORQUEUE[channel.id]:
-                    if count != len(RIP_CACHE_SUBORQUEUE[channel.id]):
-                        msg = f'SubOrQueue Cache validation failed for {channel.jump_url}! ' + \
-                            f'Counted {count} rips in discord but {len(RIP_CACHE_SUBORQUEUE[channel.id])} in cache. Recaching...'
-                        await write_log(msg)
-                        if send_channel:
-                            await send_channel.send(msg)
-                        await get_suborqueue_rips(channel, GetRipsDesc(rebuild_cache=True))
+            async with CACHE_LOCK_SUBORQUEUE[channel.id]:
+                if count != len(RIP_CACHE_SUBORQUEUE[channel.id]):
+                    msg = f'SubOrQueue Cache validation failed for {channel.jump_url}! ' + \
+                        f'Counted {count} rips in discord but {len(RIP_CACHE_SUBORQUEUE[channel.id])} in cache. Recaching...'
+                    await write_log(msg)
+                    if send_channel:
+                        await send_channel.send(msg)
+                    await get_suborqueue_rips(channel, GetRipsDesc(rebuild_cache=True))
 
 #===============================================#
 #                    EVENTS                     #
@@ -1909,9 +1907,6 @@ async def reset_cache(ctx: Context, channel_link: str = None):
     init_channel_cache(channel.id)
     channel_info = get_channel_info(channel)
 
-    if not channel_info.is_cache_qoc and not channel_info.is_cache_suborqueue:
-        return await ctx.channel.send(f'{channel.jump_url} is not cacheable!')
-
     await ctx.channel.send("Rebuilding cache...")
 
     suborqueue_count_old = 0 
@@ -1923,9 +1918,8 @@ async def reset_cache(ctx: Context, channel_link: str = None):
 
     return_message = f'Cache rebuilt!'
 
-    if channel_info.is_cache_suborqueue:
-        suborqueue_rips = await get_suborqueue_rips(channel, GetRipsDesc(typing_channel=ctx.channel, rebuild_cache=True))
-        return_message += f'\nSubOrQueue rip count: {suborqueue_count_old} => {len(suborqueue_rips)}' 
+    suborqueue_rips = await get_suborqueue_rips(channel, GetRipsDesc(typing_channel=ctx.channel, rebuild_cache=True))
+    return_message += f'\nSubOrQueue rip count: {suborqueue_count_old} => {len(suborqueue_rips)}' 
 
     if channel_info.is_cache_qoc:
         qoc_rips = await get_qoc_rips(channel, GetRipsDesc(typing_channel=ctx.channel, rebuild_cache=True))
