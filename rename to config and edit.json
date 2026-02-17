@@ -21,7 +21,7 @@
     "channels": [
         {
             "name": "qoc",
-            "id": 183382868725071872,
+            "id": -1,
             "types": ["QOC"],
             "pinlimit_must_die_mode": false
         }
