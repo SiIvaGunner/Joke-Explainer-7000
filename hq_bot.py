@@ -708,6 +708,7 @@ class CommandType(Enum):
     SUB = auto()
     QUEUE = auto()
     ANALYZE = auto()
+    SECRET = auto()
 
 class CommandContext(NamedTuple):
     channel: TextChannel | Thread 
@@ -1914,28 +1915,30 @@ async def peek_url(args: list[str], command_context: CommandContext):
         else:
             await send(f'**File metadata**:\n{msg}', command_context.channel)
 
-@bot.command(name='validate_cache', brief='makes sure all rips are in rip cache')
-async def validate_cache(ctx: Context):
+@command(
+    command_type=CommandType.MANAGEMENT,
+    brief='makes sure all rips are in rip cache',
+)
+async def validate_cache(args: list[str], command_context: CommandContext):
+    await send("Validating cache of rips in all channels...", command_context.channel)
+    await validate_cache_all(command_context.channel)
+    await send("Cache validated!", command_context.channel)
 
-    if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
+@command(
+    command_type=CommandType.MANAGEMENT,
+    format='<channel link>',
+    brief='force reset rip cache for a channel',
+)
+async def reset_cache(args: list[str], command_context: CommandContext):
 
-    await ctx.channel.send("Validating cache of rips in all channels...")
-    await validate_cache_all(ctx.channel)
-    await ctx.channel.send("Cache validated!")
+    if not len(args):
+        return await send("Please provide a link to the channel you want to reset the cache for.", command_context.channel)
 
-
-@bot.command(name='reset_cache', brief='force reset rip cache for a channel')
-async def reset_cache(ctx: Context, channel_link: str = None):
-
-    if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
-
-    if channel_link is None:
-        await ctx.channel.send("Please provide a link to the channel you want to reset the cache for.")
-        return
+    channel_link = args[0] 
 
     channel_id, msg = parse_channel_link(channel_link, ['SUBS', 'SUBS_PIN', 'SUBS_THREAD', 'QUEUE', 'QOC'], False)
     if len(msg) > 0:
-        await ctx.channel.send(msg)
+        await send(msg, command_context.channel)
     if not channel_id:
         return
     
@@ -1943,7 +1946,7 @@ async def reset_cache(ctx: Context, channel_link: str = None):
     init_channel_cache(channel.id)
     channel_info = get_channel_info(channel)
 
-    await ctx.channel.send("Rebuilding cache...")
+    await send("Rebuilding cache...", command_context.channel)
 
     suborqueue_count_old = 0 
     async with CACHE_LOCK_SUBORQUEUE[channel.id]:
@@ -1954,41 +1957,48 @@ async def reset_cache(ctx: Context, channel_link: str = None):
 
     return_message = f'Cache rebuilt!'
 
-    suborqueue_rips = await get_suborqueue_rips(channel, GetRipsDesc(typing_channel=ctx.channel, rebuild_cache=True))
+    suborqueue_rips = await get_suborqueue_rips(channel, GetRipsDesc(typing_channel=command_context.channel, rebuild_cache=True))
     return_message += f'\nSubOrQueue rip count: {suborqueue_count_old} => {len(suborqueue_rips)}' 
 
     if channel_info.is_cache_qoc:
-        qoc_rips = await get_qoc_rips(channel, GetRipsDesc(typing_channel=ctx.channel, rebuild_cache=True))
+        qoc_rips = await get_qoc_rips(channel, GetRipsDesc(typing_channel=command_context.channel, rebuild_cache=True))
         return_message += f'\nQoc rip count: {qoc_count_old} => {len(qoc_rips)}' 
 
-    await ctx.channel.send(return_message)
+    await send(return_message, command_context.channel)
 
 # ============ Config commands ============== #
 
-@bot.command(name='enable_metadata')
-async def enable_metadata(ctx: Context): 
+@command(
+    command_type=CommandType.MANAGEMENT,
+)
+async def enable_metadata(args: list[str], command_context: CommandContext):
     set_config('metadata', True)
-    await ctx.channel.send("Advanced metadata checking enabled.")
+    await send("Advanced metadata checking enabled.", command_context.channel)
 
-@bot.command(name='disable_metadata')
-async def disable_metadata(ctx: Context): 
+@command(
+    command_type=CommandType.MANAGEMENT,
+)
+async def disable_metadata(args: list[str], command_context: CommandContext):
     set_config('metadata', False)
-    await ctx.channel.send("Advanced metadata checking disabled.")
+    await send("Advanced metadata checking disabled.", command_context.channel)
 
-@bot.command(name='enable_pinlimit_must_die')
-async def enable_pinlimit_must_die(ctx: Context): 
-    set_channel_pinlimit_mode(ctx.channel.id, True)
-    await ctx.channel.send("Soft pin limit is now hard pin limit. Good luck.")
+@command(
+    command_type=CommandType.MANAGEMENT,
+)
+async def enable_pinlimit_must_die(args: list[str], command_context: CommandContext):
+    set_channel_pinlimit_mode(command_context.channel.id, True)
+    await send("Soft pin limit is now hard pin limit. Good luck.", command_context.channel)
 
-@bot.command(name='disable_pinlimit_must_die')
-async def disable_pinlimit_must_die(ctx: Context): 
-    set_channel_pinlimit_mode(ctx.channel.id, False)
-    await ctx.channel.send("Back to normal.")
+@command(
+    command_type=CommandType.MANAGEMENT,
+)
+async def disable_pinlimit_must_die(args: list[str], command_context: CommandContext):
+    set_channel_pinlimit_mode(command_context.channel.id, False)
+    await send("Back to normal.", command_context.channel)
 
 
 # ============ Helper/test commands ============== #
 
-@bot.command(name='help_old')
 async def help_old(ctx: Context):    
     async with ctx.channel.typing():
         result = "_**YOU ARE NOW QoCING:**_\n`!roundup [embed_minutes: float]`" + roundup.brief \
@@ -2025,9 +2035,13 @@ async def help_old(ctx: Context):
         await send_embed_old(ctx.channel, result)
 
 
-@bot.command(name='channel_list', brief='show channels and their supported commands')
-async def channel_list(ctx: Context):
-    async with ctx.channel.typing():
+@command(
+    command_type=CommandType.MANAGEMENT,
+    public=True,
+    brief="show channels info"
+)
+async def channel_list(args: list[str], command_context: CommandContext):
+    async with command_context.channel.typing():
         message = [
             "_**Command channel types**_",
             "`QOC`: QoC channel. Rips are pinned. All Qoc tools are avaliable here.",
@@ -2049,32 +2063,47 @@ async def channel_list(ctx: Context):
             )
         result = "\n".join(message)
         
-        await send_embed_old(ctx.channel, result)
+        await send_embed(result, command_context.channel, EmbedDesc())
 
+@command(
+    command_type=CommandType.MANAGEMENT,
+    format='[search limit]',
+    public=True,
+    brief="remove bot's old embed messages",
+    desc=\
+    """
+    By default searches the channel for messages with embeds up to 200 messages.
+    Include a different number to search back a different amount of messages."
+    """
+)
+async def cleanup(args: list[str], command_context: CommandContext):
 
-@bot.command(name='cleanup', brief='remove bot\'s old embed messages')
-async def cleanup(ctx: Context, search_limit: int = None):
-    if search_limit is None:
-        search_limit = 200
+    search_limit = 200
+    if len(args):
+        search_limit = int(args[0]) 
     
     count = 0
-    async for message in ctx.channel.history(limit = search_limit):
+    async for message in command_context.channel.history(limit = search_limit):
         if message.author == bot.user and message.embeds:
             await message.delete()
             count += 1
     
-    await ctx.channel.send(f"Removed {count} embed messages.")
+    await send(f"Removed {count} embed messages.", command_context.channel)
 
+@command(
+    command_type=CommandType.SECRET,
+    public=True,
+)
+async def op(args: list[str], command_context: CommandContext):
+    await send("op", command_context.channel)
 
-@bot.command(name='op')
-async def test(ctx: Context):
-    print(f"op ({ctx.message.author.name})")
-    await ctx.channel.send("op")
-
-@bot.command(name='cat', aliases = ['meow'], brief='cat')
-async def cat(ctx: Context):
-    print(f"cat ({ctx.message.author.name})")
-    await ctx.channel.send("meow!")
+@command(
+    command_type=CommandType.SECRET,
+    public=True,
+    aliases=["cat"],
+)
+async def meow(args: list[str], command_context: CommandContext):
+    await send("meow!", command_context.channel)
 
 
 async def get_suborqueue_rip_stats_string(channel_id: int, typing_channel: TextChannel | Thread) -> str:
@@ -2106,13 +2135,14 @@ async def get_suborqueue_rip_stats_string(channel_id: int, typing_channel: TextC
 
     return ret
 
-@bot.command(name='stats', brief='show remaining number of rips across channels')
-async def stats(ctx: Context, optional_arg = None):
-    """
-    Display the number of rips in the QoC and submission channels.
-    Accepts an optional argument to show queue channels too.
-    """
-    if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
+@command(
+    command_type=CommandType.STATS,
+    public=True,
+    format="[all]",
+    brief="show number of rips in QoC and submission channels",
+    desc="include `all` to show rips in all queue channels as well",
+)
+async def stats(args: list[str], command_context: CommandContext):
 
     ret = "**QoC channels**\n"
 
@@ -2124,7 +2154,7 @@ async def stats(ctx: Context, optional_arg = None):
         email_count = 0
         channel = bot.get_channel(channel_id)
         if channel:
-            rips = await get_suborqueue_rips_fast(channel, GetRipsDesc(typing_channel=ctx.channel))
+            rips = await get_suborqueue_rips_fast(channel, GetRipsDesc(typing_channel=command_context.channel))
             for rip in rips:
                 author = get_rip_author(rip.text, rip.message_author_name)
                 if 'email' in author.lower():
@@ -2135,21 +2165,21 @@ async def stats(ctx: Context, optional_arg = None):
 
     ret += "**Submission channels**\n"
     for channel_id in sub_channels:
-        ret += await get_suborqueue_rip_stats_string(channel_id, ctx.channel)
+        ret += await get_suborqueue_rip_stats_string(channel_id, command_context.channel)
 
-    if optional_arg is not None:
+    ##TODO: (Ahmayk) considering any arguemnts to show everything is kind of jank, but maybe fine since that's what ppl are used to
+    if len(args):
         ret += "**Queues**\n"
         queue_channels = get_channel_ids(lambda t: 'QUEUE' in t)
         for channel_id in queue_channels:
-            ret += await get_suborqueue_rip_stats_string(channel_id, ctx.channel)
+            ret += await get_suborqueue_rip_stats_string(channel_id, command_context.channel)
 
-    long_message = split_long_message(ret, get_config('character_limit'))
-    for line in long_message:
-        await ctx.channel.send(line)
+    await send(ret, command_context.channel)
 
 
 # While it might occur to folks in the future that a good command to write would be a rip feedback-sending command, something like that
 # would be way too impersonal imo.
+# NOTE: (Ahmayk) yeah no this should never happen
 
 # This thing here is for when I start attempting slash commands again. Until then, this should be unused.
 # Thank you to cibere on the Digiwind server for having the patience of a saint.
