@@ -719,6 +719,7 @@ class CommandInfo(NamedTuple):
     func: typing.Callable[[list[str], CommandContext], typing.Awaitable[typing.NoReturn]]
     command_type: CommandType
     public: bool 
+    admin: bool 
     brief: str
     desc: str
     format: str
@@ -731,6 +732,7 @@ COMMANDS: dict[str, CommandInfo] = {}
 def command(
     command_type: CommandType = CommandType.NULL,
     public: bool = False,
+    admin: bool = False,
     brief: str = "",
     desc: str = "",
     format: str = "",
@@ -742,6 +744,7 @@ def command(
             func=func,
             command_type=command_type,
             public=public,
+            admin=admin,
             brief=brief,
             desc=desc,
             format=format,
@@ -814,6 +817,11 @@ async def on_message(message: Message):
         ##NOTE: (Ahmayk) consider giving feedback on a command not being avaliable
         # if not having any feedback is confusing, probably is fine tho
         return
+
+    if command_info.admin:
+        assert type(message.author) is discord.Member
+        if not message.author.guild_permissions.administrator:
+            return await send("Error: Only users with admin access in this server can use this command.", message.channel)
 
     command_context = CommandContext(message.channel, message.author, message.reference)
 
@@ -2191,14 +2199,25 @@ async def stats(args: list[str], command_context: CommandContext):
 
 # some owner-only commands to config or kill bot if necessary
 
-@bot.command(name='shutdown')
-@commands.is_owner()
-async def shutdown(ctx: Context):
+@command(
+    command_type=CommandType.SECRET,
+    public=True,
+    admin=True,
+)
+async def shutdown(args: list[str], command_context: CommandContext):
+    await send("Goodnight!", command_context.channel)
     await bot.close()
 
-@bot.command(name='current_config', aliases = ['get_config'])
-@commands.is_owner()
-async def current_config(ctx: Context, conf: str = None):
+@command(
+    command_type=CommandType.SECRET,
+    public=True,
+    admin=True,
+    aliases=['get_config']
+)
+async def current_config(args: list[str], command_context: CommandContext):
+    conf = None
+    if len(args):
+        conf = args[0]
     if os.path.exists('config.json'):
         with open('config.json', 'r', encoding='utf-8') as file:
             configs = json.load(file)
@@ -2206,21 +2225,26 @@ async def current_config(ctx: Context, conf: str = None):
                 all_configs = ""
                 for k, v in configs.items():
                     all_configs += f"{k}: {v}\n"
-                await ctx.channel.send(all_configs)
+                await send(all_configs, command_context.channel)
             else:
                 try:
-                    await ctx.channel.send(configs[conf])
+                    await send(configs[conf], command_context.channel)
                 except KeyError:
-                    await ctx.channel.send(f"Error: No config named {conf}.")
+                    await send(f"Error: No config named {conf}.", command_context.channel)
     else:
-        await ctx.channel.send("Error: Config file not found.")
+        await send("Error: Config file not found.", command_context.channel)
 
-@bot.command(name='modify_config', aliases = ['set_config'])
-@commands.is_owner()
-async def modify_config(ctx: Context, conf: str, value: str):
-    if conf is None or value is None:
-        await ctx.channel.send("Invalid syntax.")
-        return
+@command(
+    command_type=CommandType.SECRET,
+    admin=True,
+    aliases=['set_config'],
+)
+async def modify_config(args: list[str], command_context: CommandContext):
+    if len(args) < 2:
+        return await send("Invalid syntax. Usage: !modify_config [config] [new value]", command_context.channel)
+    
+    conf = args[0]
+    value = args[1]
     
     cur_val = get_config(conf)
     if value == 'true':
@@ -2231,11 +2255,10 @@ async def modify_config(ctx: Context, conf: str, value: str):
         try:
             new_val = int(value)
         except ValueError:
-            await ctx.channel.send("Error: Invalid value type.")
-            return
+            return await send(f'Error: Invalid value type: {value}', command_context.channel)
     
     set_config(conf, new_val)
-    await ctx.channel.send(f"Modified config {conf} from {cur_val} to {new_val}.")
+    await send(f"Modified config {conf} from {cur_val} to {new_val}.", command_context.channel)
 
 #===============================================#
 #               HELPER FUNCTIONS                #
