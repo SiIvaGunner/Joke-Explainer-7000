@@ -704,6 +704,8 @@ class CommandType(Enum):
     MANAGEMENT = auto()
     ROUNDUP = auto()
     STATS = auto()
+    SUB = auto()
+    QUEUE = auto()
 
 class CommandContext(NamedTuple):
     channel: TextChannel | Thread 
@@ -839,6 +841,7 @@ async def on_message(message: Message):
 
 @command(
     command_type=CommandType.MANAGEMENT,
+    public=True,
     brief="Get info on all commands",
     format="[command]",
     aliases=['commands', 'halp', 'test', 'helpme'],
@@ -1110,7 +1113,7 @@ async def spicy(args: list[str], command_context: CommandContext):
 @command(
     command_type=CommandType.ROUNDUP,
     format="<search text>",
-    brief="search for QoC rips with text in title",
+    brief="search for QoC rips with searched text in title",
     desc="Does not need quotes.",
     examples=["Deltarune", "PAL", "Mother 3"]
 )
@@ -1340,218 +1343,228 @@ class SubOrQueueRipFilterType(Enum):
     NULL = auto()
     HASREACT = auto()
     UNSENT = auto()
-    SEARCH = auto()
-    EVENT = auto()
+    SEARCH_TITLE = auto()
+    SEARCH_AUTHOR = auto()
     SCOUT = auto()
 
 class SendSubOrQueueDesc(NamedTuple):
     suborqueue_rip_filter_type: SubOrQueueRipFilterType = SubOrQueueRipFilterType.NULL 
     reaction_type: ReactionType = ReactionType.NULL 
+    channel_link: str = ""
     channel_types: List[str] = []
     search_key: str = ""
     not_found_message: str = ""
 
-async def send_suborqueue_rips(send_suborqueue_desc: SendSubOrQueueDesc, channel_link: str, optional_time: float, ctx: Context):
+async def send_suborqueue_rips(desc: SendSubOrQueueDesc, command_context: CommandContext):
     """
     Sends a list of rips from either all submission or queue channels according to a filter.
     """
-    channel_id, msg = parse_channel_link(channel_link, send_suborqueue_desc.channel_types)
-    if len(msg) > 0 or channel_link is None:
-        if channel_link is not None:
-            await ctx.channel.send("Warning: something went wrong parsing channel link. Defaulting to showing from all known queues.")
+    channel_id, msg = parse_channel_link(desc.channel_link, desc.channel_types)
+    if len(msg) > 0 or not len(desc.channel_link):
+        if desc.channel_link is not None and len(desc.channel_link):
+            await command_context.channel.send("Warning: something went wrong parsing channel link. Defaulting to showing from all known queues.")
         channel_ids = []
         for k, v in CHANNELS.items():
-            for type in send_suborqueue_desc.channel_types:
+            for type in desc.channel_types:
                 if type in v:
                     channel_ids.append(k)
     else:
         channel_ids = [channel_id]
 
-    time, msg = parse_optional_time(ctx.channel, optional_time)
-    if msg is not None: await ctx.channel.send(msg)
+    result = ""
+    count = 0
 
-    async with ctx.channel.typing():
-        result = ""
-        count = 0
+    prefix = desc.search_key.lower()
 
-        search_keys = send_suborqueue_desc.search_key.split('|')
-        prefix = send_suborqueue_desc.search_key.lower()
+    qoc_emote = DEFAULT_QOC
+    if command_context.channel.guild:
+        for e in command_context.channel.guild.emojis:
+            if e.name.lower() == "qoc":
+                qoc_emote = str(e)
 
-        qoc_emote = DEFAULT_QOC
-        if ctx.guild:
-            for e in ctx.guild.emojis:
-                if e.name.lower() == "qoc":
-                    qoc_emote = e
+    for channel_id in channel_ids:
+        channel = bot.get_channel(channel_id)
+        if channel is None: continue
 
-        for channel_id in channel_ids:
-            channel = bot.get_channel(channel_id)
+        rips = await get_suborqueue_rips(channel, GetRipsDesc(typing_channel=command_context.channel))
 
-            rips = await get_suborqueue_rips(channel, GetRipsDesc(typing_channel=ctx.channel))
+        result += f'<#{channel_id}>:\n'
 
-            result += f'<#{channel_id}>:\n'
+        for suborqueue_rip in rips:
 
-            for suborqueue_rip in rips:
+            rip_title = get_rip_title(suborqueue_rip.text)
+            rip_author = get_raw_rip_author(suborqueue_rip.text)
 
-                rip_title = get_rip_title(suborqueue_rip.text)
-                rip_author = get_raw_rip_author(suborqueue_rip.text)
+            is_valid = False
+            match(desc.suborqueue_rip_filter_type):
+                case SubOrQueueRipFilterType.HASREACT:
+                    is_valid = suborqueue_rip_has_reaction(desc.reaction_type, suborqueue_rip)
+                case SubOrQueueRipFilterType.UNSENT:
+                    is_valid = line_contains_substring(rip_author, 'email') and \
+                            not suborqueue_rip_has_reaction(ReactionType.EMAILSENT, suborqueue_rip)
+                case SubOrQueueRipFilterType.SEARCH_TITLE:
+                    is_valid = line_contains_substring(rip_title, desc.search_key)
+                case SubOrQueueRipFilterType.SEARCH_AUTHOR:
+                    is_valid = line_contains_substring(rip_author, desc.search_key)
+                case SubOrQueueRipFilterType.SCOUT:
+                    is_valid = rip_title.lower().startswith(prefix)
+                case _:
+                    assert "Unimplemented SubOrQueueRipFilterType"
 
-                is_valid = False
-                match(send_suborqueue_desc.suborqueue_rip_filter_type):
-                    case SubOrQueueRipFilterType.HASREACT:
-                        is_valid = suborqueue_rip_has_reaction(send_suborqueue_desc.reaction_type, suborqueue_rip)
-                    case SubOrQueueRipFilterType.UNSENT:
-                        is_valid = line_contains_substring(rip_author, 'email') and \
-                                not suborqueue_rip_has_reaction(ReactionType.EMAILSENT, suborqueue_rip)
-                    case SubOrQueueRipFilterType.SEARCH:
-                        for key in search_keys:
-                            if line_contains_substring(rip_title, key):
-                                is_valid = True
-                                break
-                    case SubOrQueueRipFilterType.EVENT:
-                        for key in search_keys:
-                            if line_contains_substring(rip_author, key):
-                                is_valid = True
-                                break
-                    case SubOrQueueRipFilterType.SCOUT:
-                        is_valid = rip_title.lower().startswith(prefix)
-                    case _:
-                        assert "Unimplemented SubOrQueueRipFilterType"
+            if is_valid:
+                if suborqueue_rip_has_reaction(ReactionType.QOC, suborqueue_rip):
+                    result += f"{qoc_emote} "
+                rip_link = format_message_link(channel.guild.id, suborqueue_rip.channel_id, suborqueue_rip.message_id)
+                result += f'**[{rip_title}]({rip_link})**\n'
+                count += 1
 
-                if is_valid:
-                    if suborqueue_rip_has_reaction(ReactionType.QOC, suborqueue_rip):
-                        result += f"{qoc_emote} "
-                    rip_link = format_message_link(channel.guild.id, suborqueue_rip.channel_id, suborqueue_rip.message_id)
-                    result += f'**[{rip_title}]({rip_link})**\n'
-                    count += 1
+        result += '------------------------------\n'
 
-            result += '------------------------------\n'
-
-        if count == 0:
-            not_found_message = "No rips found."
-            if len(send_suborqueue_desc.not_found_message):
-                not_found_message = send_suborqueue_desc.not_found_message
-            await ctx.channel.send(not_found_message)
-        else:
-            await send_embed_old(ctx.channel, result, time)
+    if count == 0:
+        not_found_message = "No rips found."
+        if len(desc.not_found_message):
+            not_found_message = desc.not_found_message
+        await send(not_found_message, command_context.channel)
+    else:
+        await send_embed(result, command_context.channel, EmbedDesc(expires=True))
 
 
-@bot.command(name='search_subs', aliases = ['search_sub'], brief='search for submissions with text in title')
-async def search_subs(ctx: Context, search_key: str, sub_channel_link: str = None, optional_time = None):
-    """
-    Search for submissions by rip title.
-    Supports `|` for multiple search keys.
-    """
-    desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.SEARCH, \
+@command(
+    command_type=CommandType.SUB,
+    public=True,
+    format="<search text>",
+    brief='searches for submissions with searched text in title',
+    desc="Does not need quotes.",
+    aliases=['search_sub'],
+)
+async def search_subs(args: list[str], command_context: CommandContext):
+
+    if not len(args):
+        return await send("Error: Inclue what you want to search for! I'll search for it in the titles of submitted rips.", \
+                           command_context.channel)
+
+    input_text = "".join([str(s) for s in args])
+    desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.SEARCH_TITLE, \
                               channel_types = ['SUBS', 'SUBS_PIN', 'SUBS_THREAD'], \
-                              search_key = search_key, \
-                              not_found_message = "No submissions containing indicated text in title found.")
-    await send_suborqueue_rips(desc, sub_channel_link, optional_time, ctx)
+                              search_key = input_text, \
+                              not_found_message = f'No submissions containing `{input_text}` in title found.')
+    await send_suborqueue_rips(desc, command_context)
 
 
-@bot.command(name='event_subs', aliases = ['event_sub'], brief='shows event submissions from linked channel')
-async def event_subs(ctx: Context, event: str = None, sub_channel_link: str = None, optional_time = None):
-    """
-    Retrieve all messages in a submission channel that are tagged as for an event.
-    The provided string must appear in the rip's author label (case insensitive).
-    Supports `|` for multiple search keys.
-    """
-    if channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']) and event is None:
-        await ctx.channel.send("Error: Please indicate the event name. Rips should be tagged with this name.")
-        return
+@command(
+    command_type=CommandType.SUB,
+    public=True,
+    format="<event text>",
+    brief='searches for submissions event rips',
+    desc="This can also be used as a general purpose author line search tool. Does not need quotes.",
+    aliases=['event_sub'],
+)
+async def event_subs(args: list[str], command_context: CommandContext):
 
-    desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.EVENT, \
+    if not len(args):
+        return await send("Error: Please include the event name tagged in submitted rips.", \
+                           command_context.channel)
+
+    input_text = "".join([str(s) for s in args])
+    desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.SEARCH_AUTHOR, \
                               channel_types = ['SUBS', 'SUBS_PIN', 'SUBS_THREAD'], \
-                              search_key = event, \
-                              not_found_message = "No submissions containing indicated text in author line found.")
-    await send_suborqueue_rips(desc, sub_channel_link, optional_time, ctx)
+                              search_key = input_text, \
+                              not_found_message = f'No submissions containing `{input_text}` in author line found.')
+    await send_suborqueue_rips(desc, command_context)
 
 
-@bot.command(name='frames', brief='find approved rips with thumbnail reacts')
-async def frames(ctx: Context, channel_link: str = None, optional_time = None):
-    """
-    Search queue channel for rips with "thumbnail needed" react.
-    """
-
+@command(
+    command_type=CommandType.QUEUE,
+    public=True,
+    brief='show approved rips with "thumbnail needed" reacts :thumbnail:',
+    aliases=['thumbnails'],
+)
+async def frames(args: list[str], command_context: CommandContext):
     desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.HASREACT, \
                               channel_types = ["QUEUE"], \
                               reaction_type = ReactionType.THUMBNAIL)
-    await send_suborqueue_rips(desc, channel_link, optional_time, ctx)
+    await send_suborqueue_rips(desc, command_context)
 
 
-@bot.command(name='alerts', brief='find approved rips with alert reacts')
-async def alerts(ctx: Context, channel_link: str = None, optional_time = None):
-    """
-    Search queue channel for rips with alert react.
-    """
-    if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
-
+@command(
+    command_type=CommandType.QUEUE,
+    public=True,
+    brief='show approved rips with alert reacts :alert:',
+)
+async def alerts(args: list[str], command_context: CommandContext):
     desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.HASREACT, \
                               channel_types = ["QUEUE"], \
                               reaction_type = ReactionType.ALERT)
-    await send_suborqueue_rips(desc, channel_link, optional_time, ctx)
+    await send_suborqueue_rips(desc, command_context)
 
 
-@bot.command(name='metadata', brief='find approved rips with metadata reacts')
-async def metadata(ctx: Context, channel_link: str = None, optional_time = None):
-    """
-    Search queue channel for rips with metadata react.
-    """
-    if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
-
+@command(
+    command_type=CommandType.QUEUE,
+    public=True,
+    brief='show approved rips with metadata reacts :metadata:',
+)
+async def metadata(args: list[str], command_context: CommandContext):
     desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.HASREACT, \
                               channel_types = ["QUEUE"], \
                               reaction_type = ReactionType.METADATA)
-    await send_suborqueue_rips(desc, channel_link, optional_time, ctx)
+    await send_suborqueue_rips(desc, command_context)
 
-@bot.command(name='unsent', brief='find approved emails with no emailsent reacts')
-async def unsent(ctx: Context, channel_link: str = None, optional_time = None):
-    """
-    Search queue channel for rips tagged email with no "approval email sent" react.
-    """
 
+@command(
+    command_type=CommandType.QUEUE,
+    public=True,
+    brief='show approved email rips with no emailsent reacts :emailsent:',
+)
+async def unsent(args: list[str], command_context: CommandContext):
     desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.UNSENT, \
                               channel_types = ["QUEUE"])
-    await send_suborqueue_rips(desc, channel_link, optional_time, ctx)
+    await send_suborqueue_rips(desc, command_context)
 
 
-@bot.command(name='scout', brief='find approved rips with specific title prefix')
-async def scout(ctx: Context, prefix: str = None, channel_link: str = None, optional_time = None):
-    """
-    Search queue channel for rips starting with the specific prefix (e.g. letter E).
-    The prefix is case insensitive.
-    """
-    if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
+@command(
+    command_type=CommandType.QUEUE,
+    public=True,
+    format="<prefix>",
+    brief='find approved rips that starts with a prefix',
+    desc='The prefix can contain spaces.',
+    examples=['e', 'Level', 'deez nuts']
+)
+async def scout(args: list[str], command_context: CommandContext):
 
-    if prefix is None:
-        await ctx.channel.send("Error: Please provide a prefix string.")
-        return
+    if not len(args):
+        return await send("Error: Please provide a prefix. I'll find approved rips that start with it.", \
+                           command_context.channel)
+
+    input_text = "".join([str(s) for s in args])
 
     desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.SCOUT, \
                               channel_types = ['QUEUE'], \
-                              search_key = prefix, \
-                              not_found_message = 'No approved rips starting with {prefix} found.')
-    await send_suborqueue_rips(desc, channel_link, optional_time, ctx)
+                              search_key = input_text, \
+                              not_found_message = f'No approved rips starting with {input_text} found.')
+    await send_suborqueue_rips(desc, command_context)
 
+@command(
+    command_type=CommandType.QUEUE,
+    public=True,
+    format="[channel_link]",
+    brief='tally approved rips via its first letter',
+    desc='Optionally takes a channel link as an argument to tally only that queue channel.',
+)
+async def scout_stats(args: list[str], command_context: CommandContext):
 
-@bot.command(name='scout_stats', brief='summarize approved rips with specific letter prefix')
-async def scout_stats(ctx: Context, channel_link: str = None, optional_time = None):
-    """
-    show count of rips starting with each letter.
-    """
-    if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
+    channel_link = ""
+    if len(args):
+        channel_link = args[0]
 
     channel_id, msg = parse_channel_link(channel_link, ['QUEUE'])
     if len(msg) > 0:
-        await ctx.channel.send(msg)
-        return
-
-    time, msg = parse_optional_time(ctx.channel, optional_time)
-    if msg is not None: await ctx.channel.send(msg)
+        return await command_context.channel.send(msg)
 
     channel = bot.get_channel(channel_id)
-    if channel is None: await ctx.channel.send("Error: Invalid channel found. Contact bot developers to update list of channels.")
+    if channel is None: 
+        return await send("Error: Invalid channel found. Contact bot developers to update list of channels.", command_context.channel)
 
-    suborqueue_rips = await get_suborqueue_rips_fast(channel, GetRipsDesc(typing_channel=ctx.channel))
+    suborqueue_rips = await get_suborqueue_rips_fast(channel, GetRipsDesc(typing_channel=command_context.channel))
 
     count = {}
     for letter in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ': # could have done string.ascii_uppercase but i dont think the alphabet is getting any updates
@@ -1574,9 +1587,9 @@ async def scout_stats(ctx: Context, channel_link: str = None, optional_time = No
         result += f"{k}: " + ("▮" * int(v / maxCount * 20)) + f" ({v})\n"
 
     if len(suborqueue_rips) == 0:
-        await ctx.channel.send("No approved rips found.")
+        await send("No approved rips found.", command_context.channel)
     else:
-        await send_embed_old(ctx.channel, result, time)
+        await send_embed(result, command_context.channel, EmbedDesc(expires=True))
 
 
 # ============ Basic QoC commands ============== #
