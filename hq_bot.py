@@ -7,7 +7,7 @@ from discord.ext.commands import Context
 from datetime import datetime, timezone, timedelta
 
 from bot_secrets import TOKEN, YOUTUBE_API_KEY, YOUTUBE_CHANNEL_NAME
-from config import get_channel_ids, get_channel_config, get_log_channel, add_channel, remove_channel, set_config, get_config
+from config import *
 from simpleQoC.qoc import performQoC, msgContainsBitrateFix, msgContainsClippingFix, msgContainsSigninErr, ffmpegExists, getFileMetadataMutagen, getFileMetadataFfprobe
 from simpleQoC.metadata import checkMetadata, countDupe, isDupe
 
@@ -487,7 +487,7 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
 
             SOFT_PIN_LIMIT = get_config('soft_pin_limit')
             if len(rips) > SOFT_PIN_LIMIT:
-                if get_config("pinlimit_must_die_mode"):
+                if get_channel_config(channel.id).pinlimit_must_die_mode:
                     await message.unpin()
                     await channel.send(f"**Error**: More than {SOFT_PIN_LIMIT} rips in pins. Unpinned.")
                 else:
@@ -1972,12 +1972,12 @@ async def disable_metadata(ctx: Context):
 
 @bot.command(name='enable_pinlimit_must_die')
 async def enable_pinlimit_must_die(ctx: Context): 
-    set_config('pinlimit_must_die_mode', True)
+    set_channel_pinlimit_mode(ctx.channel.id, True)
     await ctx.channel.send("Soft pin limit is now hard pin limit. Good luck.")
 
 @bot.command(name='disable_pinlimit_must_die')
 async def disable_pinlimit_must_die(ctx: Context): 
-    set_config('pinlimit_must_die_mode', False)
+    set_channel_pinlimit_mode(ctx.channel.id, False)
     await ctx.channel.send("Back to normal.")
 
 

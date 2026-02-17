@@ -37,6 +37,7 @@ def get_log_channel():
 def add_channel(name: str, id: int, types: List[str]):
     configs = _read_config_file()
     assert CHANNEL_KEY in configs.keys(), "Channel list missing from config.json. Please contact bot owner."
+    assert id != -1, "Invalid channel ID."
     new_channel = {
         "name": name,
         "id": id,
@@ -50,6 +51,7 @@ def add_channel(name: str, id: int, types: List[str]):
 def remove_channel(id: int):
     configs = _read_config_file()
     assert CHANNEL_KEY in configs.keys(), "Channel list missing from config.json. Please contact bot owner."
+    assert id != -1, "Invalid channel ID."
     index_to_remove = -1
     for i in range(len(configs[CHANNEL_KEY])):
         if configs[CHANNEL_KEY][i].get("id", -1) == id:
@@ -57,6 +59,16 @@ def remove_channel(id: int):
             break
     assert index_to_remove != -1, "Channel ID doesn't exist in list."
     configs[CHANNEL_KEY].pop(index_to_remove)
+    _write_config_file(configs)
+
+def set_channel_pinlimit_mode(id: int, enabled: bool):
+    configs = _read_config_file()
+    assert CHANNEL_KEY in configs.keys(), "Channel list missing from config.json. Please contact bot owner."
+    assert id != -1, "Invalid channel ID."
+    for i in range(len(configs[CHANNEL_KEY])):
+        if configs[CHANNEL_KEY][i].get("id", -1) == id:
+            if "QOC" in configs[CHANNEL_KEY][i].get("types", []):
+                configs[CHANNEL_KEY][i]["pinlimit_must_die_mode"] = enabled
     _write_config_file(configs)
 
 # ============ Other configs ============== #
