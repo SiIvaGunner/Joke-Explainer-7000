@@ -7,7 +7,7 @@ from discord.ext.commands import Context
 from datetime import datetime, timezone, timedelta
 
 from bot_secrets import TOKEN, YOUTUBE_API_KEY, YOUTUBE_CHANNEL_NAME
-from config import get_channel_ids, get_channel_config, add_channel, remove_channel, set_config, get_config
+from config import get_channel_ids, get_channel_config, get_log_channel, add_channel, remove_channel, set_config, get_config
 from simpleQoC.qoc import performQoC, msgContainsBitrateFix, msgContainsClippingFix, msgContainsSigninErr, ffmpegExists, getFileMetadataMutagen, getFileMetadataFfprobe
 from simpleQoC.metadata import checkMetadata, countDupe, isDupe
 
@@ -830,13 +830,16 @@ async def on_message(message: Message):
         await send(description, message.channel)
 
         header = f'ERROR on command ${command_name}: {error_string}'
-        log_channel = bot.get_channel(get_config("log_channel"))
-        split_texts = split_long_message(error_data, 2000 - len(header))
-        for i, m in enumerate(split_texts):
-            string = f'```py\n{m}\n```'
-            if i == 0:
-                string = f'**{header}**\n{string}'
-            await send(string, log_channel)
+        log_channel = bot.get_channel(get_log_channel())
+        if log_channel is not None:
+            split_texts = split_long_message(error_data, 2000 - len(header))
+            for i, m in enumerate(split_texts):
+                string = f'```py\n{m}\n```'
+                if i == 0:
+                    string = f'**{header}**\n{string}'
+                await send(string, log_channel)
+        else:
+            print("No log channel found.")
 
 
 
@@ -2600,7 +2603,7 @@ async def write_log(msg: str = "Placeholder message", embed: bool = False):
     Also write to a log file as backup.
     """
     try:
-        log_channel = bot.get_channel(get_config("log_channel"))
+        log_channel = bot.get_channel(get_log_channel())
         if embed:
             await send_embed_old(log_channel, msg)
         else:

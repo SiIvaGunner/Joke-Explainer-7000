@@ -30,6 +30,10 @@ def get_channel_config(id: int):
     # dummy value
     return ChannelConfig("`[Channel Not Found]`", id, [], False)
 
+def get_log_channel():
+    configs = _read_config_file()
+    return configs[LOG_CHANNEL_KEY] if LOG_CHANNEL_KEY in configs.keys() else -1
+
 def add_channel(name: str, id: int, types: List[str]):
     configs = _read_config_file()
     assert CHANNEL_KEY in configs.keys(), "Channel list missing from config.json. Please contact bot owner."
