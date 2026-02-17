@@ -707,10 +707,12 @@ class CommandType(Enum):
     STATS = auto()
     SUB = auto()
     QUEUE = auto()
+    ANALYZE = auto()
 
 class CommandContext(NamedTuple):
     channel: TextChannel | Thread 
     user: discord.User 
+    message_reference: discord.MessageReference
 
 class CommandInfo(NamedTuple):
     func: typing.Callable[[list[str], CommandContext], typing.Awaitable[typing.NoReturn]]
@@ -812,7 +814,7 @@ async def on_message(message: Message):
         # if not having any feedback is confusing, probably is fine tho
         return
 
-    command_context = CommandContext(message.channel, message.author)
+    command_context = CommandContext(message.channel, message.author, message.reference)
 
     today = datetime.now() # Technically not useful, but it looks gorgeous on my CRT monitor
     print(f"{today.strftime('%m/%d/%y %I:%M %p')}  ~~~  Heard {command_name} command from {message.author.name}!")
@@ -1591,50 +1593,53 @@ async def scout_stats(args: list[str], command_context: CommandContext):
     else:
         await send_embed(result, command_context.channel, EmbedDesc(expires=True))
 
+##TODO: (Ahmayk) subs_all [channel_link]
 
 # ============ Basic QoC commands ============== #
 
-@bot.command(name='vet', brief='scan pinned messages for bitrate and clipping issues')
-async def vet(ctx: Context, optional_arg = None):
-    """
-    Find rips in pinned messages with bitrate/clipping issues and show their details
-    """
-    if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
+##TODO: (Ahmayk) vet command UX needs to be refactored it's confusing as hell 
 
-    if optional_arg is not None:
-        await ctx.channel.send("WARNING: ``!vet`` takes no argument. Did you mean to use ``!vet_msg`` or ``!vet_url``?")
-        return
+@command(
+    command_type=CommandType.ANALYZE,
+    brief='scan pinned messages for bitrate and clipping issues',
+)
+async def vet(args: list[str], command_context: CommandContext):
+    if len(args):
+        return await send("WARNING: ``!vet`` takes no argument. Did you mean to use ``!vet_msg`` or ``!vet_url``?", command_context.channel)
     
-    if ctx.message.reference is not None:
-        await ctx.channel.send("WARNING: ``!vet`` takes no argument (nor replies). Did you mean to use ``!vet_msg`` or ``!vet_url``?")
-        return
+    if command_context.message_reference:
+        return await send("WARNING: ``!vet`` takes no argument (nor replies). Did you mean to use ``!vet_msg`` or ``!vet_url``?", command_context.channel)
     
-    await vet_from(ctx)
+    await vet_from(args, command_context)
 
 
-@bot.command(name='vet_from', brief='!vet but start from a message')
-async def vet_from(ctx: Context, from_msg):
-    """
-    Find rips in pinned messages with bitrate/clipping issues and show their details, only counting messages not older than linked message
-    """
-    if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
+@command(
+    command_type=CommandType.ANALYZE,
+    format='[message link]',
+    brief='vet rips in a queue starting from message link',
+    desc='Find rips in pinned messages with bitrate/clipping issues and show their details, only counting messages not older than linked message'
+)
+async def vet_from(args: list[str], command_context: CommandContext):
+
+    from_msg = None
+    if len(args):
+        from_msg = args[0]
 
     vet_all_pins = from_msg is None
-    if not vet_all_pins:
+    if not vet_all_pins and from_msg:
         _, _, from_message, status = await parse_message_link(from_msg)
         if from_message is None:
-            await ctx.channel.send(status)
+            await send(status, command_context.channel)
             return
         from_timestamp = from_message.created_at
 
-    channel = await get_qoc_channel(ctx.channel)
+    channel = await get_qoc_channel(command_context.channel)
     if channel is None: return
 
     if not ffmpegExists():
-        await ctx.channel.send("WARNING: ffmpeg command not found on the bot's server. Please contact the developers.")
-        return
+        return await send("WARNING: ffmpeg command not found on the bot's server. Please contact the developers.", command_context.channel)
 
-    async with ctx.channel.typing():
+    async with command_context.channel.typing():
         rips = await get_suborqueue_rips_fast(channel, GetRipsDesc())
 
         for rip in rips:
@@ -1646,88 +1651,83 @@ async def vet_from(ctx: Context, from_msg):
                 rip_title = get_rip_title(rip.text)
                 verdict = code_to_verdict(qcCode, qcMsg)
                 link = format_message_link(channel.guild.id, channel.id, rip.message_id)
-                await ctx.channel.send("**Rip**: **[{}]({})**\n**Verdict**: {}\n{}\n-# React {} if this is resolved.".format(rip_title, link, verdict, qcMsg, DEFAULT_CHECK))
+                await send("**Rip**: **[{}]({})**\n**Verdict**: {}\n{}\n-# React {} if this is resolved.".format(rip_title, link, verdict, qcMsg, DEFAULT_CHECK), command_context.channel)
 
         if len(rips) == 0:
-            await ctx.channel.send("No pinned rips found to QoC.")
+            await send("No pinned rips found to QoC.", command_context.channel)
         else:
-            await ctx.channel.send("Finished QoC-ing. Please note that these are only automated detections - you should verify the issues in Audacity and react manually.")
+            await send("Finished QoC-ing. Please note that these are only automated detections - you should verify the issues in Audacity and react manually.", command_context.channel)
 
-
-@bot.command(name='vet_all', brief='vet all pinned messages and show summary')
-async def vet_all(ctx: Context, optional_time = None):
-    """
-    Retrieve all pinned messages (except the first one) and perform basic QoC, giving emoji labels.
-    """
+@command(
+    command_type=CommandType.ANALYZE,
+    brief='vet all QoC rips at once with summary',
+)
+async def vet_all(args: list[str], command_context: CommandContext):
 
     if not ffmpegExists():
-        await ctx.channel.send("WARNING: ffmpeg command not found on the bot's server. Please contact the developers.")
-        return
+        return await send("WARNING: ffmpeg command not found on the bot's server. Please contact the developers.", command_context.channel)
 
-    async with ctx.channel.typing():
+    async with command_context.channel.typing():
         roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.VET_ALL)
-        await send_roundup(roundup_desc, optional_time, ctx)
+        await send_roundup(roundup_desc, command_context)
 
 
-@bot.command(name='vet_msg', brief='vet a single message link')
-async def vet_msg(ctx: Context, msg_link: str = None):
-    """
-    Perform basic QoC on a linked message.
-    The first non-YouTube link found in the message is treated as the rip URL.
-    """
-    if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
+@command(
+    command_type=CommandType.ANALYZE,
+    format='<message link>',
+    brief='vet a message link',
+    desc='The first non-YouTube link found in the message is treated as the rip URL.'
+)
+async def vet_msg(args: list[str], command_context: CommandContext):
 
-    if msg_link is None:
-        await ctx.channel.send("Error: Please provide a link to message.")
-        return
+    if not len(args):
+        return await send("Error: Please provide a link to message.", command_context.channel)
 
-    async with ctx.channel.typing():
-        server, channel, message, status = await parse_message_link(msg_link)
+    async with command_context.channel.typing():
+        server, channel, message, status = await parse_message_link(args[0])
         if message is None:
-            await ctx.channel.send(status)
-            return
+            return await send(status, command_context.channel)
 
         verdict, msg = await check_qoc_and_metadata(message.content, message.id, str(message.author), True)
         rip_title = get_rip_title(message.content)
 
-        await ctx.channel.send("**Rip**: **{}**\n**Verdict**: {}\n**Comments**:\n{}".format(rip_title, verdict, msg))
+        await send("**Rip**: **{}**\n**Verdict**: {}\n**Comments**:\n{}".format(rip_title, verdict, msg), command_context.channel)
 
 
-@bot.command(name='vet_url', brief='vet a single url')
-async def vet_url(ctx: Context, url: str = None):
-    """
-    Perform basic QoC on an URL.
-    """
-    if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
+@command(
+    command_type=CommandType.ANALYZE,
+    format='<url to rip>',
+    brief='vet a single url',
+)
+async def vet_url(args: list[str], command_context: CommandContext):
 
-    urls = extract_rip_link(url)
-    if len(urls) == 0:
-        await ctx.channel.send("Error: Please provide an URL to rip.")
-        return
+    if not len(args):
+        return await send("Error: Please provide an url to a rip", command_context.channel)
 
-    async with ctx.channel.typing():
+    urls = extract_rip_link(args[0])
+
+    if not len(urls):
+        return await send(f'Error: no url found in {args[0]}', command_context.channel)
+
+    async with command_context.channel.typing():
         code, msg = await run_blocking(performQoC, urls[0])
         verdict = code_to_verdict(code, msg)
+        await command_context.channel.send("**Verdict**: {}\n**Comments**:\n{}".format(verdict, msg))
 
-        await ctx.channel.send("**Verdict**: {}\n**Comments**:\n{}".format(verdict, msg))
 
+@command(
+    command_type=CommandType.ANALYZE,
+    format='<message url>',
+    brief='count number of dupes on YouTube and in rip queues',
+)
+async def count_dupe(args: list[str], command_context: CommandContext):
 
-@bot.command(name='count_dupe', brief='count the number of dupes')
-async def count_dupe(ctx: Context, msg_link: str = None, check_queues: str = None):
-    """
-    Count the number of dupes for a given link to rip message.
-    Accepts an optional argument to also count rips in queues, which can take longer.
-    """
-    if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
+    if not len(args):
+        return await send("Error: Please provide a link to message.", command_context.channel)
 
-    if msg_link is None:
-        await ctx.channel.send("Error: Please provide a link to message.")
-        return
-
-    server, channel, message, status = await parse_message_link(msg_link)
+    server, channel, message, status = await parse_message_link(args[0])
     if message is None:
-        await ctx.channel.send(status)
-        return
+        return await send(status, command_context.channel)
 
     playlistId = extract_playlist_id('\n'.join(message.content.splitlines()[1:])) # ignore author line
     description = get_rip_description(message.content)
@@ -1735,37 +1735,32 @@ async def count_dupe(ctx: Context, msg_link: str = None, check_queues: str = Non
 
     p, msg = await run_blocking(countDupe, description, YOUTUBE_CHANNEL_NAME, playlistId, YOUTUBE_API_KEY)
     if len(msg) > 0:
-        await ctx.channel.send(msg)
-        if check_queues is None: return
+        await send(msg, command_context.channel)
 
-    if check_queues is not None:
-        q = 0
-        queue_channels = get_channel_ids(lambda t: 'QUEUE' in t)
-        for queue_channel_id in queue_channels:
-            queue_channel = server.get_channel(queue_channel_id)
-            if queue_channel:
-                suborqueue_rips = await get_suborqueue_rips_fast(queue_channel, GetRipsDesc(typing_channel=ctx.channel))
-                q += sum([isDupe(description, get_rip_description(r.text)) for r in suborqueue_rips if r.message_id != message.id])
+    q = 0
+    queue_channels = get_channel_ids(lambda t: 'QUEUE' in t)
+    for queue_channel_id in queue_channels:
+        queue_channel = server.get_channel(queue_channel_id)
+        if queue_channel:
+            suborqueue_rips = await get_suborqueue_rips_fast(queue_channel, GetRipsDesc(typing_channel=command_context.channel))
+            q += sum([isDupe(description, get_rip_description(r.text)) for r in suborqueue_rips if r.message_id != message.id])
 
-        # https://codegolf.stackexchange.com/questions/4707/outputting-ordinal-numbers-1st-2nd-3rd#answer-4712 how
-        ordinal = lambda n: "%d%s" % (n,"tsnrhtdd"[(n//10%10!=1)*(n%10<4)*n%10::4])
+    # https://codegolf.stackexchange.com/questions/4707/outputting-ordinal-numbers-1st-2nd-3rd#answer-4712 how
+    ordinal = lambda n: "%d%s" % (n,"tsnrhtdd"[(n//10%10!=1)*(n%10<4)*n%10::4])
 
-        if check_queues is not None:
-            await ctx.channel.send(f"**Rip**: **{rip_title}**\nFound {p + q} rips of the same track ({p} on the channel, {q} in queues). This is the {ordinal(p + q + 1)} rip of this track.")
-        else:
-            await ctx.channel.send(f"**Rip**: **{rip_title}**\nFound {p} rips of the same track on the channel. This is the {ordinal(p + 1)} rip of this track.")
+    await send(f"**Rip**: **{rip_title}**\nFound {p + q} rips of the same track ({p} on the channel, {q} in queues). This is the {ordinal(p + q + 1)} rip of this track.", command_context.channel)
 
 
-@bot.command(name='scan', brief='scan queue/sub channel for metadata issues')
+##TODO: (Ahmayk) redesign this command considering YouTube api limits (as is it's too easy to start a process that bricks bot's quota)
+"""
+@bot.command(name='scan', brief='')
 async def scan(ctx: Context, channel_link: str = None, start_index: int = None, end_index: int = None):
-    """
-    Scan through a submission or queue channel for metadata issues.
-    Channel link must be provided as argument.
-    Accepts two optional arguments to specify the range of rips to scan through, if the channel has too many rips.
+    # Scan through a submission or queue channel for metadata issues.
+    # Channel link must be provided as argument.
+    # Accepts two optional arguments to specify the range of rips to scan through, if the channel has too many rips.
 
-    - `start_index`: First rip to look at (inclusive). Index 1 means start from the oldest rip.
-    - `end_index`: Last rip to look at (inclusive). Index 100 means scan until and including the 100th oldest rip. If this is not provided, scan to the latest rip.
-    """
+    # - `start_index`: First rip to look at (inclusive). Index 1 means start from the oldest rip.
+    # - `end_index`: Last rip to look at (inclusive). Index 100 means scan until and including the 100th oldest rip. If this is not provided, scan to the latest rip.
     if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
 
     global latest_scan_time
@@ -1837,35 +1832,36 @@ async def scan(ctx: Context, channel_link: str = None, start_index: int = None, 
         
         latest_scan_time = datetime.now(timezone.utc)
         await ctx.channel.send("Finished checking metadata of {} rips. Wait for ~30 minutes and contact bot developers if you wish to use this command again today.".format(eInd - sInd))
+"""
 
 
-@bot.command(name='peek_msg', brief='print file metadata from message link')
-async def peek_msg(ctx: Context, msg_link: str = None, use_ffprobe = None):
-    """
-    Prints the file metadata of the rip at linked message.
-    The first non-YouTube link found in the message is treated as the rip URL.
-    """
-    if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
+@command(
+    command_type=CommandType.ANALYZE,
+    format='<message url>',
+    brief='show rip file metadata from message url',
+    desc='The first non-YouTube link found in the message is treated as the rip URL.'
+)
+async def peek_msg(args: list[str], command_context: CommandContext):
 
-    if msg_link is None:
-        await ctx.channel.send("Error: Please provide a link to message.")
-        return
+    if not len(args):
+        return await send("Error: Please provide a link to message.", command_context.channel)
 
-    async with ctx.channel.typing():
-        server, channel, message, status = await parse_message_link(msg_link)
+    async with command_context.channel.typing():
+        server, channel, message, status = await parse_message_link(args[0])
         if message is None:
-            await ctx.channel.send(status)
-            return
+            return await send(status, command_context.channel)
         
         rip_title = get_rip_title(message.content)
+
+        #TODO: (Ahmayk) making a new command that uses ffprob instead
+        use_ffprobe = len(args) > 1
         
         urls = extract_rip_link(message.content)
         errs = []
         for url in urls:
-            if use_ffprobe is not None:
+            if use_ffprobe:
                 if not ffmpegExists():
-                    await ctx.channel.send("ffmpeg not found on remote. Please contact developers, or run this command without the extra argument.")
-                    return
+                    return await send("ffmpeg not found on remote. Please contact developers, or run this command without the extra argument.", command_context.channel)
                 code, msg = await run_blocking(getFileMetadataFfprobe, url)
             else:
                 code, msg = await run_blocking(getFileMetadataMutagen, url)
@@ -1874,40 +1870,49 @@ async def peek_msg(ctx: Context, msg_link: str = None, use_ffprobe = None):
                 break
             errs.append(msg)
         if code == -1:
-            await ctx.channel.send("Error reading message:\n{}".format('\n'.join(errs)))
+            await send("Error reading message:\n{}".format('\n'.join(errs)), command_context.channel)
         else:
             long_message = split_long_message("**Rip**: **{}**\n**File metadata**:\n{}".format(rip_title, msg), get_config('character_limit'))
             for line in long_message:
-                await ctx.channel.send(line)
+                await send(line, command_context.channel)
 
 
-@bot.command(name='peek_url', brief='print file metadata from url')
-async def peek_url(ctx: Context, url: str = None, use_ffprobe = None):
-    """
-    Prints the file metadata of the rip at linked URL.
-    """
-    if not channel_is_types(ctx.channel, ['QOC', 'PROXY_QOC']): return
+@command(
+    command_type=CommandType.ANALYZE,
+    format='<message url>',
+    brief='show rip file metadata from rip url',
+    desc='The first non-YouTube link found in the message is treated as the rip URL.'
+)
+async def peek_url(args: list[str], command_context: CommandContext):
 
-    urls = extract_rip_link(url)
-    if len(urls) == 0:
-        await ctx.channel.send("Error: Please provide an URL to rip.")
-        return
+    if not len(args):
+        return await send("Error: Please provide a link to message.", command_context.channel)
 
-    async with ctx.channel.typing():
-        if use_ffprobe is not None:
+    urls = extract_rip_link(args[0])
+
+    if not len(urls):
+        return await send(f'Error: no url found in {args[0]}', command_context.channel)
+
+    url = urls[0]
+
+    async with command_context.channel.typing():
+
+        #TODO: (Ahmayk) making a new command that uses ffprob instead
+        #also compress
+        use_ffprobe = len(args) > 1
+
+        if use_ffprobe:
             if not ffmpegExists():
-                await ctx.channel.send("ffmpeg not found on remote. Please contact developers, or run this command without the extra argument.")
+                await send("ffmpeg not found on remote. Please contact developers, or run this command without the extra argument.", command_context.channel)
                 return
-            code, msg = await run_blocking(getFileMetadataFfprobe, url)
+            code, msg = await run_blocking(getFileMetadataFfprobe, urls)
         else:
-            code, msg = await run_blocking(getFileMetadataMutagen, url)
+            code, msg = await run_blocking(getFileMetadataMutagen, urls)
         
         if code == -1:
-            await ctx.channel.send("Error reading URL: {}".format(msg))
+            await send(f'Error reading URL: {msg}', command_context.channel)
         else:
-            long_message = split_long_message("**File metadata**:\n{}".format(msg), get_config('character_limit'))
-            for line in long_message:
-                await ctx.channel.send(line)
+            await send(f'**File metadata**:\n{msg}', command_context.channel)
 
 @bot.command(name='validate_cache', brief='makes sure all rips are in rip cache')
 async def validate_cache(ctx: Context):
