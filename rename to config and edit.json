@@ -16,5 +16,15 @@
     "pin_limit": 250,
     "soft_pin_limit": 50,
 
-    "qoc_contains_pinned_rule": true
+    "qoc_contains_pinned_rule": true,
+
+    "channels": [
+        {
+            "name": "qoc",
+            "id": 183382868725071872,
+            "types": ["QOC"],
+            "pinlimit_must_die_mode": false
+        }
+    ],
+    "log_channel": -1
 }

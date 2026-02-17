@@ -4,11 +4,13 @@ from discord import Message, Thread, TextChannel
 from discord.abc import GuildChannel
 from discord.ext import commands
 from discord.ext.commands import Context
-from bot_secrets import TOKEN, YOUTUBE_API_KEY, YOUTUBE_CHANNEL_NAME, CHANNELS, LOG_CHANNEL
 from datetime import datetime, timezone, timedelta
 
+from bot_secrets import TOKEN, YOUTUBE_API_KEY, YOUTUBE_CHANNEL_NAME
+from config import get_channel_ids, get_channel_config, add_channel, remove_channel, set_config, get_config
 from simpleQoC.qoc import performQoC, msgContainsBitrateFix, msgContainsClippingFix, msgContainsSigninErr, ffmpegExists, getFileMetadataMutagen, getFileMetadataFfprobe
 from simpleQoC.metadata import checkMetadata, countDupe, isDupe
+
 import re
 import functools
 import typing
@@ -349,8 +351,7 @@ async def get_suborqueue_rips_fast(channel: typing.Union[GuildChannel, Thread], 
 
 async def validate_cache_all(send_channel: TextChannel | None):
 
-    channel_ids = [k for k, v in CHANNELS.items()]
-    for channel_id in channel_ids:
+    for channel_id in get_channel_ids():
         channel = bot.get_channel(channel_id)
         if channel:
     
@@ -411,21 +412,21 @@ async def on_ready():
     print('#################################')
 
     await write_log("Good morning! Caching rips...")
-    channel_ids = [k for k, v in CHANNELS.items() if 'QUEUE' in v]
+    channel_ids = get_channel_ids(lambda t: 'QUEUE' in t)
     for channel_id in channel_ids:
         channel = bot.get_channel(channel_id)
         if channel:
             suborqueue_rips = await get_suborqueue_rips(channel, GetRipsDesc())
             await write_log(f'Cached {len(suborqueue_rips)} queued rips in {channel.jump_url}.')
 
-    channel_ids = [k for k, v in CHANNELS.items() if 'SUBS' in v or 'SUBS_THREAD' in v or 'SUBS_PIN' in v]
+    channel_ids = get_channel_ids(lambda t: any(s in t for s in ['SUBS', 'SUBS_THREAD', 'SUBS_PIN']))
     for channel_id in channel_ids:
         channel = bot.get_channel(channel_id)
         if channel:
             suborqueue_rips = await get_suborqueue_rips(channel, GetRipsDesc())
             await write_log(f'Cached {len(suborqueue_rips)} subbed rips in {channel.jump_url}.')
 
-    channel_ids = [k for k, v in CHANNELS.items() if 'QOC' in v]
+    channel_ids = get_channel_ids(lambda t: 'QOC' in t)
     for channel_id in channel_ids:
         channel = bot.get_channel(channel_id)
         if channel:
@@ -484,9 +485,9 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
 
             rips = await get_suborqueue_rips_fast(channel, GetRipsDesc())
 
-            SOFT_PIN_LIMIT = _get_config('soft_pin_limit')
+            SOFT_PIN_LIMIT = get_config('soft_pin_limit')
             if len(rips) > SOFT_PIN_LIMIT:
-                if _get_config("pinlimit_must_die_mode"):
+                if get_config("pinlimit_must_die_mode"):
                     await message.unpin()
                     await channel.send(f"**Error**: More than {SOFT_PIN_LIMIT} rips in pins. Unpinned.")
                 else:
@@ -760,12 +761,12 @@ class EmbedDesc(NamedTuple):
 ##TODO: (Ahmayk) smarter embed packaging 
 async def send_embed(text: str, channel: TextChannel | Thread, desc: EmbedDesc):
     split_message = split_long_message(text, 4028)
-    color = _get_config('embed_color')
+    color = get_config('embed_color')
     delete_after_seconds = None
     if desc.expires:
         if channel_is_types(channel, ['PROXY_QOC']):
-            delete_after_seconds = _get_config('proxy_embed_seconds')
-        else: _get_config('embed_seconds')
+            delete_after_seconds = get_config('proxy_embed_seconds')
+        else: get_config('embed_seconds')
 
     for i, line in enumerate(split_message):
 
@@ -827,7 +828,7 @@ async def on_message(message: Message):
         await send(description, message.channel)
 
         header = f'ERROR on command ${command_name}: {error_string}'
-        log_channel = bot.get_channel(LOG_CHANNEL)
+        log_channel = bot.get_channel(get_config("log_channel"))
         split_texts = split_long_message(error_data, 2000 - len(header))
         for i, m in enumerate(split_texts):
             string = f'```py\n{m}\n```'
@@ -866,7 +867,7 @@ async def help(args: list[str], command_context: CommandContext):
             brief = re.sub(r':(\w+):', emoji_match_filter, info.brief) 
 
             def config_match_filter(match):
-                result = _get_config(match.group(1))
+                result = get_config(match.group(1))
                 return str(result)
 
             brief = re.sub(r'%(\w+)%', config_match_filter, brief) 
@@ -913,8 +914,8 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
 
     qoc_rips = await get_qoc_rips(channel, GetRipsDesc(typing_channel=command_context.channel))
 
-    is_spec_overdue_days = _get_config('spec_overdue_days')
-    is_overdue_days = _get_config('overdue_days')
+    is_spec_overdue_days = get_config('spec_overdue_days')
+    is_overdue_days = get_config('overdue_days')
     search_keys = roundup_desc.search_key.split('|')
 
     ##TODO: (Ahmayk) fuzzy username input (ie typing "ahmayk" and matching to their username or display name)
@@ -1293,7 +1294,7 @@ async def limitcheck(args: list[str], command_context: CommandContext):
 
     if qoc_channel:
         rips = await get_suborqueue_rips_fast(qoc_channel, GetRipsDesc(typing_channel=command_context.channel))
-        result = f"You can pin {_get_config('soft_pin_limit') - len(rips)} more rips until I start complaining about pin space."
+        result = f"You can pin {get_config('soft_pin_limit') - len(rips)} more rips until I start complaining about pin space."
         result += proxy
         await send(result, command_context.channel)
 
@@ -1350,11 +1351,7 @@ async def send_suborqueue_rips(send_suborqueue_desc: SendSubOrQueueDesc, channel
     if len(msg) > 0 or channel_link is None:
         if channel_link is not None:
             await ctx.channel.send("Warning: something went wrong parsing channel link. Defaulting to showing from all known queues.")
-        channel_ids = []
-        for k, v in CHANNELS.items():
-            for type in send_suborqueue_desc.channel_types:
-                if type in v:
-                    channel_ids.append(k)
+        channel_ids = get_channel_ids(lambda t: any([type in t for type in send_suborqueue_desc.channel_types]))
     else:
         channel_ids = [channel_id]
 
@@ -1718,7 +1715,7 @@ async def count_dupe(ctx: Context, msg_link: str = None, check_queues: str = Non
 
     if check_queues is not None:
         q = 0
-        queue_channels = [k for k, v in CHANNELS.items() if 'QUEUE' in v]
+        queue_channels = get_channel_ids(lambda t: 'QUEUE' in t)
         for queue_channel_id in queue_channels:
             queue_channel = server.get_channel(queue_channel_id)
             if queue_channel:
@@ -1854,7 +1851,7 @@ async def peek_msg(ctx: Context, msg_link: str = None, use_ffprobe = None):
         if code == -1:
             await ctx.channel.send("Error reading message:\n{}".format('\n'.join(errs)))
         else:
-            long_message = split_long_message("**Rip**: **{}**\n**File metadata**:\n{}".format(rip_title, msg), _get_config('character_limit'))
+            long_message = split_long_message("**Rip**: **{}**\n**File metadata**:\n{}".format(rip_title, msg), get_config('character_limit'))
             for line in long_message:
                 await ctx.channel.send(line)
 
@@ -1883,7 +1880,7 @@ async def peek_url(ctx: Context, url: str = None, use_ffprobe = None):
         if code == -1:
             await ctx.channel.send("Error reading URL: {}".format(msg))
         else:
-            long_message = split_long_message("**File metadata**:\n{}".format(msg), _get_config('character_limit'))
+            long_message = split_long_message("**File metadata**:\n{}".format(msg), get_config('character_limit'))
             for line in long_message:
                 await ctx.channel.send(line)
 
@@ -1940,47 +1937,24 @@ async def reset_cache(ctx: Context, channel_link: str = None):
 
 @bot.command(name='enable_metadata')
 async def enable_metadata(ctx: Context): 
-    _set_config('metadata', True)
+    set_config('metadata', True)
     await ctx.channel.send("Advanced metadata checking enabled.")
 
 @bot.command(name='disable_metadata')
 async def disable_metadata(ctx: Context): 
-    _set_config('metadata', False)
+    set_config('metadata', False)
     await ctx.channel.send("Advanced metadata checking disabled.")
 
 @bot.command(name='enable_pinlimit_must_die')
 async def enable_pinlimit_must_die(ctx: Context): 
-    _set_config('pinlimit_must_die_mode', True)
+    set_config('pinlimit_must_die_mode', True)
     await ctx.channel.send("Soft pin limit is now hard pin limit. Good luck.")
 
 @bot.command(name='disable_pinlimit_must_die')
 async def disable_pinlimit_must_die(ctx: Context): 
-    _set_config('pinlimit_must_die_mode', False)
+    set_config('pinlimit_must_die_mode', False)
     await ctx.channel.send("Back to normal.")
 
-
-def _set_config(config: str, value):
-    if os.path.exists('config.json'):
-        with open('config.json', 'r', encoding='utf-8') as file:
-            configs = json.load(file)
-    else:
-        configs = {}
-    configs[config] = value
-    with open('config.json', 'w', encoding='utf-8') as file:
-        json.dump(configs, file, indent=4)
-
-def _get_config(config: str):
-    if os.path.exists('config.json'):
-        with open('config.json', 'r', encoding='utf-8') as file:
-            configs = json.load(file)
-            try:
-                value = configs[config]
-            except KeyError:
-                raise Exception("Unknown Config: " + config)
-                value = None
-            return value
-    else:
-        return None
 
 # ============ Helper/test commands ============== #
 
@@ -1997,7 +1971,7 @@ async def help_old(ctx: Context):
             + "\n`!emails` " + emails.brief + "\n`!events <arg1: str|arg2: str|...>` " + events.brief \
             + "\n`!checks`, `!rejects`, `!wrenches`, `!stops`" \
             + "\n`!nochecks`, `!norejects`, `!nofixes`, `!nostops" \
-            + "\n`!overdue` " + overdue.brief.replace('X', str(_get_config('overdue_days'))) \
+            + "\n`!overdue` " + overdue.brief.replace('X', str(get_config('overdue_days'))) \
             + "\n_**Misc. tools:**_\n`!count` " + count.brief \
             + "\n`!limitcheck` " + limitcheck.brief \
             + "\n`!count_subs [sub_channel: link]` " + count_subs.brief \
@@ -2014,7 +1988,7 @@ async def help_old(ctx: Context):
             + "\n`!peek_msg <message: link> [ffprobe: any]` " + peek_msg.brief + "\n`!peek_url <URL: link> [ffprobe: any]` " + peek_url.brief \
             + "\n`!count_dupe <message: link> [count_queues: any]` " + count_dupe.brief \
             + "\n_**Experimental tools:**_\n`!scan <queue_channel: link> [start_index: int] [end_index: int]` " + scan.brief \
-            + "\n_**Config:**_\n`![enable/disable]_metadata` enables/disables advanced metadata checking (currently {})".format("enabled" if _get_config('metadata') else "disabled") \
+            + "\n_**Config:**_\n`![enable/disable]_metadata` enables/disables advanced metadata checking (currently {})".format("enabled" if get_config('metadata') else "disabled") \
             + "\n=====================================" \
             + "\n_**Legend:**_\n`<argument: type>` Mandatory argument\n`[argument: type]` Optional argument" \
             + "\n_**Tips:**_\nUse quotes for string arguments with spaces, e.g. \"Main Theme\"\nAll embed commands accept the [embed_minutes] optional argument"
@@ -2024,7 +1998,6 @@ async def help_old(ctx: Context):
 @bot.command(name='channel_list', brief='show channels and their supported commands')
 async def channel_list(ctx: Context):
     async with ctx.channel.typing():
-        channels = [f"<#{channel_id}>: " + ", ".join(types) for channel_id, types in CHANNELS.items()]
         message = [
             "_**Command channel types**_",
             "`QOC`: QoC channel. Rips are pinned. All Qoc tools are avaliable here.",
@@ -2037,7 +2010,13 @@ async def channel_list(ctx: Context):
             "`QUEUE`: Queue channel. Rips are posted as messages in main channel or threads.",
             "_**Channels**_",
         ]
-        message.extend(channels)
+        for channel in get_channel_ids():
+            channel_config = get_channel_config(channel)
+            message.append(
+                f"<#{channel_config.id}>: " \
+                + ", ".join(channel_config.types) \
+                + " [pinlimit must die mode {}]".format("enabled" if channel_config.pinlimit_must_die_mode else "disabled") if 'QOC' in channel_config.types else ""
+            )
         result = "\n".join(message)
         
         await send_embed_old(ctx.channel, result)
@@ -2107,9 +2086,9 @@ async def stats(ctx: Context, optional_arg = None):
 
     ret = "**QoC channels**\n"
 
-    sub_channels = [k for k, v in CHANNELS.items() if any(t in v for t in ['SUBS', 'SUBS_PIN', 'SUBS_THREAD'])]
+    sub_channels = get_channel_ids(lambda t: any(s in t for s in ['SUBS', 'SUBS_THREAD', 'SUBS_PIN']))
+    qoc_channels = get_channel_ids(lambda t: 'QOC' in t and not any(s in t for s in ['SUBS', 'SUBS_THREAD', 'SUBS_PIN']))
 
-    qoc_channels = [k for k, v in CHANNELS.items() if 'QOC' in v and k not in sub_channels]
     for channel_id in qoc_channels:
         team_count = 0
         email_count = 0
@@ -2130,11 +2109,11 @@ async def stats(ctx: Context, optional_arg = None):
 
     if optional_arg is not None:
         ret += "**Queues**\n"
-        queue_channels = [k for k, v in CHANNELS.items() if 'QUEUE' in v]
+        queue_channels = get_channel_ids(lambda t: 'QUEUE' in t)
         for channel_id in queue_channels:
             ret += await get_suborqueue_rip_stats_string(channel_id, ctx.channel)
 
-    long_message = split_long_message(ret, _get_config('character_limit'))
+    long_message = split_long_message(ret, get_config('character_limit'))
     for line in long_message:
         await ctx.channel.send(line)
 
@@ -2183,7 +2162,7 @@ async def modify_config(ctx: Context, conf: str, value: str):
         await ctx.channel.send("Invalid syntax.")
         return
     
-    cur_val = _get_config(conf)
+    cur_val = get_config(conf)
     if value == 'true':
         new_val = True
     elif value == 'false':
@@ -2195,7 +2174,7 @@ async def modify_config(ctx: Context, conf: str, value: str):
             await ctx.channel.send("Error: Invalid value type.")
             return
     
-    _set_config(conf, new_val)
+    set_config(conf, new_val)
     await ctx.channel.send(f"Modified config {conf} from {cur_val} to {new_val}.")
 
 #===============================================#
@@ -2230,16 +2209,16 @@ async def send_embed_old(channel: typing.Union[GuildChannel, Thread], message: s
     - message: Text to send as embed
     - delete_after: Number of seconds to automatically remove the message. Defaults to constant at the beginning of file. If set to None, message will not delete.
     """
-    long_message = split_long_message(message, _get_config('embed_character_limit'))
+    long_message = split_long_message(message, get_config('embed_character_limit'))
     for line in long_message:
-        fancy_message = discord.Embed(description=line, color=_get_config('embed_color'))
+        fancy_message = discord.Embed(description=line, color=get_config('embed_color'))
         await channel.send(embed=fancy_message, delete_after=delete_after)
 
 def channel_is_type(channel: typing.Union[GuildChannel, Thread], type: str):
-    return channel.id in CHANNELS.keys() and type in CHANNELS[channel.id] or hasattr(channel, "parent") and channel_is_type(channel.parent, type)
+    return type in get_channel_config(channel.id).types or hasattr(channel, "parent") and channel_is_type(channel.parent, type)
 
 def channel_is_types(channel: typing.Union[GuildChannel, Thread], types: typing.List[str]):
-    return channel.id in CHANNELS.keys() and any([t in CHANNELS[channel.id] for t in types]) or hasattr(channel, "parent") and channel_is_types(channel.parent, types)
+    return any([t in get_channel_config(channel.id).types for t in types]) or hasattr(channel, "parent") and channel_is_types(channel.parent, types)
 
 async def get_qoc_channel(channel: TextChannel | Thread):
     """
@@ -2258,7 +2237,7 @@ def parse_optional_time(channel: typing.Union[GuildChannel, Thread], optional_ti
     """
     Get the number of houminutesrs from user input for roundup embed commands.
     """
-    time = _get_config('proxy_embed_seconds') if channel_is_type(channel, 'PROXY_QOC') else _get_config('embed_seconds')
+    time = get_config('proxy_embed_seconds') if channel_is_type(channel, 'PROXY_QOC') else get_config('embed_seconds')
     msg = None
     if optional_time:
         try:
@@ -2452,7 +2431,7 @@ async def check_metadata(text: str, message_id: int, message_author_name: str, f
     """
     playlistId = extract_playlist_id('\n'.join(text.splitlines()[1:])) # ignore author line
     description = get_rip_description(text)
-    advancedCheck = _get_config('metadata')
+    advancedCheck = get_config('metadata')
     skipCheck = "unusual metadata" in text.lower()
     mtCode = 0
     mtMsgs = []
@@ -2466,7 +2445,7 @@ async def check_metadata(text: str, message_id: int, message_author_name: str, f
 
     if mtCode != -1 and not skipCheck:
         rips = []
-        channel_ids = [k for k, v in CHANNELS.items() if 'QUEUE' in v or 'QOC' in v]
+        channel_ids = get_channel_ids(lambda t: any(q in t for q in ['QUEUE', 'QOC']))
         for channel_id in channel_ids:
             channel = bot.get_channel(channel_id)
             if channel:
@@ -2546,9 +2525,9 @@ def parse_channel_link(link: str | None, types: typing.List[str], give_default: 
     - `msg`: Message to print if `channel_id` is not parsed from `link`, empty string otherwise
     """
     try:
-        default_id = [k for k, v in CHANNELS.items() if any(t in v for t in types)][0]
+        default_id = get_channel_ids(lambda t: any(type in t for type in types))[0]
     except IndexError:
-        return -1, f"Error: No default channels found."
+        return -1, "Error: No default channels found."
     
     if link is None:
         return default_id, ""
@@ -2564,7 +2543,7 @@ def parse_channel_link(link: str | None, types: typing.List[str], give_default: 
     elif give_default:
         return default_id, f"Warning: Link is not a valid roundup channel, defaulting to <#{default_id}>."
     else:
-        return None, f"Error: Link is not a valid roundup channel."
+        return None, "Error: Link is not a valid roundup channel."
 
 async def parse_message_link(link: str):
     """
@@ -2599,7 +2578,7 @@ async def write_log(msg: str = "Placeholder message", embed: bool = False):
     Also write to a log file as backup.
     """
     try:
-        log_channel = bot.get_channel(LOG_CHANNEL)
+        log_channel = bot.get_channel(get_config("log_channel"))
         if embed:
             await send_embed_old(log_channel, msg)
         else:
