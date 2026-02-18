@@ -337,7 +337,7 @@ async def get_suborqueue_rips_fast(channel: typing.Union[GuildChannel, Thread], 
 
 async def validate_cache_all(send_channel: TextChannel | None):
 
-    for channel_id in get_channel_ids():
+    for channel_id in get_channel_ids_of_types(['QOC', 'SUBS', 'SUBS_PIN', 'SUBS_THREAD', 'QUEUE']):
         channel = bot.get_channel(channel_id)
         if channel:
     
@@ -634,7 +634,7 @@ def parse_channel_link(link: str | None, types: typing.List[str], give_default: 
     - `msg`: Message to print if `channel_id` is not parsed from `link`, empty string otherwise
     """
     try:
-        default_id = get_channel_ids(lambda t: any(type in t for type in types))[0]
+        default_id = get_channel_ids_all()[0]
     except IndexError:
         return -1, "Error: No default channels found."
     
@@ -959,11 +959,11 @@ async def check_metadata(text: str, message_id: int, message_author_name: str, f
 
     if mtCode != -1 and not skipCheck:
         rips = []
-        channel_ids = get_channel_ids(lambda t: any(q in t for q in ['QUEUE', 'QOC']))
+        channel_ids = get_channel_ids_of_types(['QUEUE', 'QOC'])
         for channel_id in channel_ids:
             channel = bot.get_channel(channel_id)
             if channel:
-                rips = await get_suborqueue_rips_fast(channel, GetRipsDesc(typing_channel=ctx.channel))
+                rips = await get_suborqueue_rips_fast(channel, GetRipsDesc())
 
         title = get_raw_rip_title(text)
         desc = get_rip_description(text)
@@ -1038,21 +1038,21 @@ async def on_ready():
     print('#################################')
 
     await write_log("Good morning! Caching rips...")
-    channel_ids = get_channel_ids(lambda t: 'QUEUE' in t)
+    channel_ids = get_channel_ids_of_types(['QUEUE'])
     for channel_id in channel_ids:
         channel = bot.get_channel(channel_id)
         if channel:
             suborqueue_rips = await get_suborqueue_rips(channel, GetRipsDesc())
             await write_log(f'Cached {len(suborqueue_rips)} queued rips in {channel.jump_url}.')
 
-    channel_ids = get_channel_ids(lambda t: any(s in t for s in ['SUBS', 'SUBS_THREAD', 'SUBS_PIN']))
+    channel_ids = get_channel_ids_of_types(['SUBS', 'SUBS_THREAD', 'SUBS_PIN'])
     for channel_id in channel_ids:
         channel = bot.get_channel(channel_id)
         if channel:
             suborqueue_rips = await get_suborqueue_rips(channel, GetRipsDesc())
             await write_log(f'Cached {len(suborqueue_rips)} subbed rips in {channel.jump_url}.')
 
-    channel_ids = get_channel_ids(lambda t: 'QOC' in t)
+    channel_ids = get_channel_ids_of_types(['QOC'])
     for channel_id in channel_ids:
         channel = bot.get_channel(channel_id)
         if channel:

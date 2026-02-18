@@ -95,7 +95,7 @@ async def help(args: list[str], command_context: CommandContext):
                         brief = parse_emojis_in_string(info.brief, command_context.channel.guild)
                         result += f': {brief}'
 
-        qoc_channel_ids = get_channel_ids(lambda t: any(s in t for s in ['QOC', 'PROXY_QOC']))
+        qoc_channel_ids = get_channel_ids_of_types(['QOC', 'PROXY_QOC'])
         qoc_channels_strings: list[str] = [] 
         for id in qoc_channel_ids:
             channel = bot.get_channel(int(id))
@@ -595,7 +595,7 @@ async def send_suborqueue_rips(desc: SendSubOrQueueDesc, command_context: Comman
     if len(msg) > 0 or not len(desc.channel_link):
         if desc.channel_link is not None and len(desc.channel_link):
             await command_context.channel.send("Warning: something went wrong parsing channel link. Defaulting to showing from all known queues.")
-        channel_ids = get_channel_ids(lambda t: any([type in t for type in desc.channel_types]))
+        channel_ids = get_channel_ids_of_types(desc.channel_types)
     else:
         channel_ids = [channel_id]
 
@@ -959,7 +959,7 @@ async def count_dupe(args: list[str], command_context: CommandContext):
         await send(msg, command_context.channel)
 
     q = 0
-    queue_channels = get_channel_ids(lambda t: 'QUEUE' in t)
+    queue_channels = get_channel_ids_of_types(['QUEUE'])
     for queue_channel_id in queue_channels:
         queue_channel = server.get_channel(queue_channel_id)
         if queue_channel:
@@ -1276,7 +1276,7 @@ async def channel_list(args: list[str], command_context: CommandContext):
             "`QUEUE`: Queue channel. Rips are posted as messages in main channel or threads.",
             "_**Channels**_",
         ]
-        for channel in get_channel_ids():
+        for channel in get_channel_ids_all():
             channel_config = get_channel_config(channel)
             message.append(
                 f"<#{channel_config.id}>: " \
@@ -1362,28 +1362,28 @@ async def get_suborqueue_rip_stats_string(channel_id: int, typing_channel: TextC
     public=True,
     format="[all]",
     brief="Show # of rips in channels",
-    desc="include `all` to show rips in all queue channels as well",
+    desc="include `all` or `a` to show rips in all queue channels as well",
 )
 async def stats(args: list[str], command_context: CommandContext):
 
     ret = "**QoC channels**\n"
 
-    sub_channels = get_channel_ids(lambda t: any(s in t for s in ['SUBS', 'SUBS_THREAD', 'SUBS_PIN']))
-    qoc_channels = get_channel_ids(lambda t: 'QOC' in t and not any(s in t for s in ['SUBS', 'SUBS_THREAD', 'SUBS_PIN']))
-
+    qoc_channels = get_channel_ids_of_types(['QOC'])
+    sub_channels = get_channel_ids_of_types(['SUBS', 'SUBS_THREAD', 'SUBS_PIN'])
     for channel_id in qoc_channels:
-        team_count = 0
-        email_count = 0
-        channel = bot.get_channel(channel_id)
-        if channel:
-            rips = await get_suborqueue_rips_fast(channel, GetRipsDesc(typing_channel=command_context.channel))
-            for rip in rips:
-                author = get_rip_author(rip.text, rip.message_author_name)
-                if 'email' in author.lower():
-                    email_count += 1
-                else:
-                    team_count += 1
-            ret += f"- <#{channel_id}>: **{team_count + email_count}** rips\n  - {team_count} team subs\n  - {email_count} email subs\n"
+        if channel_id not in sub_channels:
+            team_count = 0
+            email_count = 0
+            channel = bot.get_channel(channel_id)
+            if channel:
+                rips = await get_suborqueue_rips_fast(channel, GetRipsDesc(typing_channel=command_context.channel))
+                for rip in rips:
+                    author = get_rip_author(rip.text, rip.message_author_name)
+                    if 'email' in author.lower():
+                        email_count += 1
+                    else:
+                        team_count += 1
+                ret += f"- <#{channel_id}>: **{team_count + email_count}** rips\n  - {team_count} team subs\n  - {email_count} email subs\n"
 
     ret += "**Submission channels**\n"
     for channel_id in sub_channels:
@@ -1392,7 +1392,7 @@ async def stats(args: list[str], command_context: CommandContext):
     ##TODO: (Ahmayk) considering any arguemnts to show everything is kind of jank, but maybe fine since that's what ppl are used to
     if len(args):
         ret += "**Queues**\n"
-        queue_channels = get_channel_ids(lambda t: 'QUEUE' in t)
+        queue_channels = get_channel_ids_of_types(['QUEUE'])
         for channel_id in queue_channels:
             ret += await get_suborqueue_rip_stats_string(channel_id, command_context.channel)
 

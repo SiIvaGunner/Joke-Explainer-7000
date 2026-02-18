@@ -13,9 +13,21 @@ class ChannelConfig(NamedTuple):
 CHANNEL_KEY = "channels"
 LOG_CHANNEL_KEY = "log_channel"
 
-def get_channel_ids(type_filter: Callable[[List[str]], bool] = lambda _: True) -> List[str]:
-    _channels = get_config(CHANNEL_KEY)
-    return [channel["id"] for channel in _channels if "id" in channel.keys() and type_filter(channel.get("types", []))]
+def get_channel_ids_all() -> List[str]:
+    result = []
+    channels_json = get_config(CHANNEL_KEY)
+    for channel in channels_json:
+        result.append(channel["id"])
+    return result
+
+def get_channel_ids_of_types(types: List[str]) -> List[str]:
+    result = []
+    channels_json = get_config(CHANNEL_KEY)
+    for channel in channels_json:
+        for type in types:
+            if type in channel["types"]: 
+                result.append(channel["id"])
+    return result
 
 def get_channel_config(id: int):
     _channels = get_config(CHANNEL_KEY)
