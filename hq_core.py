@@ -2,8 +2,8 @@
 import discord
 from discord import Message, Thread, TextChannel
 from discord.abc import GuildChannel
-from discord.ext import commands
-from datetime import datetime, timezone, timedelta
+from discord.ext import commands, tasks
+from datetime import datetime, timezone, timedelta, time
 
 from bot_secrets import YOUTUBE_API_KEY, YOUTUBE_CHANNEL_NAME
 from simpleQoC.qoc import performQoC, msgContainsBitrateFix, msgContainsClippingFix, msgContainsSigninErr, ffmpegExists, getFileMetadataMutagen, getFileMetadataFfprobe
@@ -21,7 +21,6 @@ import re
 
 import discord
 from discord.abc import GuildChannel
-from datetime import datetime
 
 from hq_config import *
 
@@ -452,6 +451,16 @@ async def validate_cache_all() -> str:
             result += f'\nFailed to find channel of id {channel_id}'
                 
     return result
+
+times = []
+for i in range(0, 23):
+    times.append(time(hour=i, tzinfo=timezone.utc))
+
+@tasks.loop(time=times)
+async def validate_cache_regularly():
+    result = await validate_cache_all()
+    if len(result):
+        await write_log(f'**Cache validation had issues:**\n{result}')
 
 
 #===============================================#
@@ -1100,10 +1109,12 @@ async def check_qoc_and_metadata(text: str, message_id: int, message_author_name
 
 @bot.event
 async def on_ready():
+
     print(f'Logged in as {bot.user.name}')
     print('#################################')
 
     await write_log("Good morning! Caching rips...")
+
     channel_ids = get_channel_ids_of_types(['QUEUE'])
     for channel_id in channel_ids:
         channel = bot.get_channel(channel_id)
@@ -1129,6 +1140,8 @@ async def on_ready():
     validate_result = await validate_cache_all()
     validate_result += '\n**Startup caching complete.**'
     await write_log(validate_result)
+
+    validate_cache_regularly.start()
 
 import traceback
 @bot.event
