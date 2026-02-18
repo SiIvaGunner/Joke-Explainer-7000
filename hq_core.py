@@ -491,6 +491,27 @@ def get_qoc_emoji(guild: discord.Guild) -> str:
                 break
     return qoc_emote
 
+def parse_emojis_in_string(string: str, guild: discord.Guild):
+
+    def emoji_match_filter(match):
+        name = match.group(1)
+        result = f':{name}:' 
+        for emoji in guild.emojis:
+            if emoji.name == name:
+                result = str(emoji)
+                break
+        return result
+
+    result = re.sub(r':(\w+):', emoji_match_filter, string) 
+
+    def config_match_filter(match):
+        result = get_config(match.group(1))
+        return str(result)
+
+    result = re.sub(r'%(\w+)%', config_match_filter, result) 
+
+    return result
+
 #===============================================#
 #                   COMMANDS 
 #===============================================#
@@ -520,6 +541,7 @@ class CommandContext(NamedTuple):
     message_reference: discord.MessageReference
 
 class CommandInfo(NamedTuple):
+    name: str
     func: typing.Callable[[list[str], CommandContext], typing.Awaitable[typing.NoReturn]]
     command_type: CommandType
     public: bool 
@@ -545,6 +567,7 @@ def command(
 ) -> typing.Callable:
     def decorator(func: typing.Callable) -> typing.Callable:
         COMMANDS[func.__name__] = CommandInfo(
+            name=func.__name__,
             func=func,
             command_type=command_type,
             public=public,
@@ -558,6 +581,17 @@ def command(
         return func
     return decorator
 
+
+def find_command_info(input: str) -> CommandInfo | None:
+    command_info = None
+    if input in COMMANDS:
+        command_info = COMMANDS[input]
+    else:
+        for info in COMMANDS.values():
+            if input in info.aliases:
+                command_info = info
+                break
+    return command_info 
 
 #===============================================#
 #                    HELPERS                    #
@@ -1200,7 +1234,6 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
         suborqueue_rip = suborqueue_rip._replace(text = payload.message.content)
         RIP_CACHE_SUBORQUEUE[payload.channel_id][payload.message_id] = suborqueue_rip
 
-
 @bot.event
 async def on_message(message: Message):
 
@@ -1214,14 +1247,7 @@ async def on_message(message: Message):
 
     args = message.content.split(' ')
     command_name = args[0][1:].lower()
-    command_info = None
-    if command_name in COMMANDS:
-        command_info = COMMANDS[command_name]
-    else:
-        for info in COMMANDS.values():
-            if command_name in info.aliases:
-                command_info = info
-                break
+    command_info = find_command_info(command_name)
 
     if not command_info:
         return

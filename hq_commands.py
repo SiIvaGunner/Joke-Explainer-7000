@@ -1,6 +1,6 @@
 
 import discord
-from discord import TextChannel, Thread
+from discord import TextChannel, Thread, Guild
 from datetime import datetime, timezone, timedelta
 
 from bot_secrets import YOUTUBE_API_KEY, YOUTUBE_CHANNEL_NAME
@@ -25,71 +25,91 @@ import os
     aliases=['commands', 'halp', 'test', 'helpme'],
 )
 async def help(args: list[str], command_context: CommandContext):
-    result = ''
+
+    result = "" 
 
     qoc_emote = get_qoc_emoji(command_context.channel.guild)
 
-    for enum in CommandType:
+    if len(args):
 
-        if enum == CommandType.SECRET or enum == CommandType.NULL: 
-            continue
+        search_input = args[0].lower()
 
-        assert enum in COMMAND_TYPE_DATA
+        command_info = find_command_info(search_input)
+        if not command_info:
+            return await send(f'No command named {search_input}', command_context.channel)
 
-        result += f'\n\n:small_blue_diamond: __**{enum.name}**__ — *{COMMAND_TYPE_DATA[enum].desc}*'
+        title = f'!{command_info.name} {command_info.format}'
 
-        for name, info in COMMANDS.items():
+        brief = parse_emojis_in_string(command_info.brief, command_context.channel.guild)
+        desc = f':small_blue_diamond: __**Description**__: {brief}' 
 
-            if info.command_type == enum:
+        if len(command_info.desc):
+            details = parse_emojis_in_string(command_info.desc, command_context.channel.guild)
+            desc += f'\n:small_blue_diamond: __**Details**__: {details}'
 
-                result += '\n'
+        if not command_info.public:
+            desc += f'\n\n{qoc_emote} *Only accessable in QoC channels.*' 
+        if command_info.admin:
+            desc += f'\n\n:nerd: *Only accessable by admins of this discord server.*' 
 
-                if not info.public:
-                    result += f'{qoc_emote} '
+        desc += '\n'
 
-                result += f'**!{name}**'
+        if len(command_info.aliases):
+            desc += '\n__*Aliases:*__ '
+        for alias in command_info.aliases:
+            desc += f'`!{alias}` ' 
 
-                if len(info.format):
-                    result += f' **{info.format}**'
+        if len(command_info.examples):
+            desc += '\n__*Examples:*__: '
+        for example in command_info.examples:
+            desc += f'\n- `!{command_info.name} {example}` ' 
 
-                if len(info.brief):
+        return await send_embed(desc, command_context.channel, EmbedDesc(title=title))
+        
+    else:
 
-                    def emoji_match_filter(match):
-                        name = match.group(1)
-                        result = f':{name}:' 
-                        for emoji in command_context.channel.guild.emojis:
-                            if emoji.name == name:
-                                result = str(emoji)
-                                break
-                        return result
+        for enum in CommandType:
 
-                    brief = re.sub(r':(\w+):', emoji_match_filter, info.brief) 
+            if enum == CommandType.SECRET or enum == CommandType.NULL: 
+                continue
 
-                    def config_match_filter(match):
-                        result = get_config(match.group(1))
-                        return str(result)
+            assert enum in COMMAND_TYPE_DATA
 
-                    brief = re.sub(r'%(\w+)%', config_match_filter, brief) 
+            result += f'\n\n:small_blue_diamond: __**{enum.name}**__ — *{COMMAND_TYPE_DATA[enum].desc}*'
 
-                    result += f': {brief}'
+            for name, info in COMMANDS.items():
 
-    qoc_channel_ids = get_channel_ids(lambda t: any(s in t for s in ['QOC', 'PROXY_QOC']))
-    print(qoc_channel_ids)
-    qoc_channels_strings: list[str] = [] 
-    for id in qoc_channel_ids:
-        channel = bot.get_channel(int(id))
-        if channel:
-            qoc_channels_strings.append(channel.jump_url)
-    print(qoc_channels_strings)
+                if info.command_type == enum:
 
-    result += '\n\n__**Legend:**__'
-    result += '\n**<argument>**: Required argument'
-    result += '\n**[argument]**: Optional argument'
-    result += f'\n{qoc_emote}: Command only accessible in QoC channels:'
-    result += f'\n{" ".join(qoc_channels_strings)}'
-    result += f'\n\n*To learn more about a command, use `!help <command>`*'
+                    result += '\n'
 
-    await send_embed(result, command_context.channel, EmbedDesc())
+                    if not info.public:
+                        result += f'{qoc_emote} '
+
+                    result += f'**!{name}**'
+
+                    if len(info.format):
+                        result += f' **{info.format}**'
+
+                    if len(info.brief):
+                        brief = parse_emojis_in_string(info.brief, command_context.channel.guild)
+                        result += f': {brief}'
+
+        qoc_channel_ids = get_channel_ids(lambda t: any(s in t for s in ['QOC', 'PROXY_QOC']))
+        qoc_channels_strings: list[str] = [] 
+        for id in qoc_channel_ids:
+            channel = bot.get_channel(int(id))
+            if channel:
+                qoc_channels_strings.append(channel.jump_url)
+
+        result += '\n\n__**Legend:**__'
+        result += '\n**<argument>**: Required argument'
+        result += '\n**[argument]**: Optional argument'
+        result += f'\n{qoc_emote}: Command only accessible in QoC channels:'
+        result += f'\n{" ".join(qoc_channels_strings)}'
+        result += f'\n\n*To learn more about a command, use `!help <command>`*'
+
+        await send_embed(result, command_context.channel, EmbedDesc())
 
 # ============ Roundup commands ============== #
 
