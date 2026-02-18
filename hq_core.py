@@ -131,26 +131,38 @@ def get_channel_info(channel: TextChannel) -> ChannelInfo:
     
     return ChannelInfo(rip_fetch_type, is_cache_qoc)
 
+def get_reaction_emoji_name(reaction: discord.Reaction) -> str:
+    name = ""
+    if isinstance(reaction.emoji, str):
+        name = reaction.emoji
+    elif hasattr(reaction.emoji, "name"):
+        name = reaction.emoji.name
+    return name
+
+async def get_react_and_users_of_reaction(reaction: discord.Reaction) -> List[ReactAndUser]:
+    react_and_users = []
+    name = get_reaction_emoji_name(reaction)
+    # NOTE: (Ahmayk) this is slow! We have to do an api call for each user.
+    # But is also neccessary
+    user_ids = [user.id async for user in reaction.users()]
+    for user_id in user_ids:
+        react_and_users.append(ReactAndUser(name, user_id))
+    return react_and_users
+
+def init_qoc_rip(message, react_and_users) -> QocRip:
+    return QocRip(message.content, message.id, message.channel.id, message.author.id, \
+            str(message.author), react_and_users, message.created_at)
+
+
 async def cache_qoc_rip(message: Message) -> QocRip:
 
     init_channel_cache(message.channel.id)
 
-    react_and_users = []
+    react_and_users: List[ReactAndUser] = []
     for reaction in message.reactions:
-        name = ""
-        if isinstance(reaction.emoji, str):
-            name = reaction.emoji
-        elif hasattr(reaction.emoji, "name"):
-            name = reaction.emoji.name
-        # NOTE: (Ahmayk) this is slow! We have to do an api call for each user.
-        # But is also neccessary
-        user_ids = [user.id async for user in reaction.users()]
-        for user_id in user_ids:
-            react_and_users.append(ReactAndUser(name, user_id))
+        react_and_users.extend(await get_react_and_users_of_reaction(reaction))
 
-    qoc_rip = QocRip(message.content, message.id, message.channel.id, message.author.id, \
-            str(message.author), react_and_users, message.created_at)
-
+    qoc_rip = init_qoc_rip(message, react_and_users)
     RIP_CACHE_QOC[message.channel.id][message.id] = qoc_rip
 
     return qoc_rip
@@ -225,11 +237,7 @@ def cache_suborqueue_rip(message) -> SubOrQueueRip:
 
     react_names = []
     for reaction in message.reactions:
-        name = ""
-        if isinstance(reaction.emoji, str):
-            name = reaction.emoji
-        elif hasattr(reaction.emoji, "name"):
-            name = reaction.emoji.name
+        name = get_reaction_emoji_name(reaction) 
         react_names.append(name)
 
     suborqueue_rip = init_suborqueue_rip(message, react_names)
@@ -334,8 +342,80 @@ async def get_suborqueue_rips_fast(channel: typing.Union[GuildChannel, Thread], 
 
     return result
 
+def qoc_react_error_string(text: str, react_and_user: ReactAndUser, message: Message) -> str:
+    emoji_string = reaction_name_to_emoji_string(react_and_user.name, message.guild)
+    user = bot.get_user(react_and_user.user_id)
+    user_string = "[unknown user]"
+    if user:
+        user_string = user.name
+    result = f'\n{text} {get_rip_title(message.content)}: {message.jump_url} {emoji_string} ({user_string})'
+    return result
 
-async def validate_cache_all(send_channel: TextChannel | None):
+async def validate_rip_message(message: Message, channel_info: ChannelInfo) -> str:
+    result = ""
+
+    if is_message_rip(message):
+        needs_suborqueue_recache = False
+        if message.id in RIP_CACHE_SUBORQUEUE[message.channel.id]:
+            suborqueue_rip = RIP_CACHE_SUBORQUEUE[message.channel.id][message.id]
+
+            if suborqueue_rip.text != message.content:
+                needs_suborqueue_recache = True
+                result += f'\nText outdated in SubOrQueue cache in {get_rip_title(message.content)}! {message.jump_url}'
+
+            for reaction in message.reactions:
+                name = get_reaction_emoji_name(reaction)
+                cached_reaction_count = 0
+                for cached_name in suborqueue_rip.react_names:
+                    if cached_name == name:
+                        cached_reaction_count += 1
+                if cached_reaction_count != reaction.count:
+                    needs_suborqueue_recache = True
+                    emoji_string = reaction_name_to_emoji_string(name, message.guild)
+                    result += f'\nReaction mismatch in SubOrQueue cache for {get_rip_title(message.content)} '+\
+                        f'{message.jump_url}{emoji_string}: ~~{cached_reaction_count}~~ {reaction.count}'
+        else:
+            result += f'\nRip missing from SubOrQueue cache: ${message.jump_url}'
+            needs_suborqueue_recache = True
+
+        if needs_suborqueue_recache:
+            cache_suborqueue_rip(message)
+
+        if channel_info.is_cache_qoc:
+            if message.id in RIP_CACHE_QOC[message.channel.id]:
+                needs_qoc_recache = False
+                qoc_rip = RIP_CACHE_QOC[message.channel.id][message.id]
+
+                if qoc_rip.text != message.content:
+                    needs_qoc_recache = True
+                    result += f'\nText outdated in QoC cache for {get_rip_title(message.content)}! {message.jump_url}'
+
+                react_and_users = [] 
+                for reaction in message.reactions:
+                    fetched_react_and_users = await get_react_and_users_of_reaction(reaction)
+
+                    for fetched_react_and_user in fetched_react_and_users:
+                        if fetched_react_and_user not in qoc_rip.react_and_users:
+                            needs_qoc_recache = True
+                            result += qoc_react_error_string(f'Fetched reaction not found in QoC cache for', fetched_react_and_user, message)
+                    react_and_users.extend(fetched_react_and_users)
+
+                for cached_react_and_user in qoc_rip.react_and_users:
+                    if cached_react_and_user not in react_and_users:
+                        needs_qoc_recache = True
+                        result += qoc_react_error_string(f'Cached QoC reaction outdated for', cached_react_and_user, message)
+
+                if needs_qoc_recache:
+                    RIP_CACHE_QOC[message.channel.id][message.id] = init_qoc_rip(message, react_and_users) 
+            else:
+                await cache_qoc_rip(message)
+
+    return result
+
+
+async def validate_cache_all() -> str:
+
+    result = ""
 
     for channel_id in get_channel_ids_of_types(['QOC', 'SUBS', 'SUBS_PIN', 'SUBS_THREAD', 'QUEUE']):
         channel = bot.get_channel(channel_id)
@@ -345,48 +425,32 @@ async def validate_cache_all(send_channel: TextChannel | None):
 
             channel_info = get_channel_info(channel)
 
-            count = 0
-            match channel_info.rip_fetch_type:
-                case RipFetchType.ALL_MESSAGES_NO_THREADS:
-                    async for message in channel.history(limit = None):
-                        if is_message_rip(message):
-                            count += 1
+            async with CACHE_LOCK_QOC[channel.id]:
+                async with CACHE_LOCK_SUBORQUEUE[channel.id]:
 
-                case RipFetchType.ALL_MESSAGES_AND_THREADS:
-                    async for message in channel.history(limit = None):
-                        if message.thread is not None:
-                            async for thread_message in message.thread.history(limit = None):
-                                if is_message_rip(thread_message):
-                                    count += 1
-                        if is_message_rip(message):
-                                count += 1
+                    match channel_info.rip_fetch_type:
+                        case RipFetchType.ALL_MESSAGES_NO_THREADS:
+                            async for message in channel.history(limit = None):
+                                result += await validate_rip_message(message, channel_info)
 
-                case RipFetchType.PINS:
-                    async for message in channel.pins(limit = None):
-                        if is_message_rip(message):
-                            count += 1
 
-                case _:
-                    assert "Unimplemented RipFetchType"
-            
-            if channel_info.is_cache_qoc:
-                async with CACHE_LOCK_QOC[channel.id]:
-                    if count != len(RIP_CACHE_QOC[channel.id]):
-                        msg = f'QOC Cache validation failed for {channel.jump_url}! ' + \
-                            f'Counted {count} rips in discord but counted {len(RIP_CACHE_QOC[channel.id])} in cache. Recaching...'
-                        await write_log(msg)
-                        if send_channel:
-                            await send_channel.send(msg)
-                        await get_qoc_rips(channel, GetRipsDesc(rebuild_cache=True))
+                        case RipFetchType.ALL_MESSAGES_AND_THREADS:
+                            async for message in channel.history(limit = None):
+                                if message.thread is not None:
+                                    async for thread_message in message.thread.history(limit = None):
+                                        result += await validate_rip_message(thread_message, channel_info)
 
-            async with CACHE_LOCK_SUBORQUEUE[channel.id]:
-                if count != len(RIP_CACHE_SUBORQUEUE[channel.id]):
-                    msg = f'SubOrQueue Cache validation failed for {channel.jump_url}! ' + \
-                        f'Counted {count} rips in discord but {len(RIP_CACHE_SUBORQUEUE[channel.id])} in cache. Recaching...'
-                    await write_log(msg)
-                    if send_channel:
-                        await send_channel.send(msg)
-                    await get_suborqueue_rips(channel, GetRipsDesc(rebuild_cache=True))
+                        case RipFetchType.PINS:
+                            async for message in channel.pins(limit = None):
+                                fetched_message = await channel.fetch_message(message.id)
+                                result += await validate_rip_message(fetched_message, channel_info)
+
+                        case _:
+                            assert "Unimplemented RipFetchType"
+        else:
+            result += f'\nFailed to find channel of id {channel_id}'
+                
+    return result
 
 
 #===============================================#
@@ -474,12 +538,13 @@ def qoc_rip_has_reaction_one_from_user(reaction_type_list: List[ReactionType], u
             return True
     return False
 
-def reaction_name_to_emoji_string(name: str, guild: discord.Guild) -> str:
+def reaction_name_to_emoji_string(name: str, guild: discord.Guild | None) -> str:
     result = f'{name}' 
-    for emoji in guild.emojis:
-        if emoji.name == name:
-            result = str(emoji)
-            break
+    if guild:
+        for emoji in guild.emojis:
+            if emoji.name == name:
+                result = str(emoji)
+                break
     return result
 
 def get_qoc_emoji(guild: discord.Guild) -> str:
@@ -1060,8 +1125,9 @@ async def on_ready():
             await write_log(f'Cached {len(qoc_rips)} qoc rips in {channel.jump_url}.')
 
     await write_log('Validating cache...')
-    await validate_cache_all(None)
-    await write_log('Startup caching complete.')
+    validate_result = await validate_cache_all()
+    validate_result += '\n**Startup caching complete.**'
+    await write_log(validate_result)
 
 import traceback
 @bot.event

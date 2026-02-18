@@ -1141,8 +1141,13 @@ async def peek_url(args: list[str], command_context: CommandContext):
 )
 async def validate_cache(args: list[str], command_context: CommandContext):
     await send("Validating cache of rips in all channels...", command_context.channel)
-    await validate_cache_all(command_context.channel)
-    await send("Cache validated!", command_context.channel)
+
+    async with command_context.channel.typing():
+        validate_result = await validate_cache_all()
+        if len(validate_result):
+            await send(f'{validate_result}\n**Validation complete. Issues found.**', command_context.channel)
+        else:
+            await send("Validation complete! No issues found.", command_context.channel)
 
 @command(
     command_type=CommandType.MANAGEMENT,
