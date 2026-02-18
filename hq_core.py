@@ -238,7 +238,8 @@ def cache_suborqueue_rip(message) -> SubOrQueueRip:
     react_names = []
     for reaction in message.reactions:
         name = get_reaction_emoji_name(reaction) 
-        react_names.append(name)
+        for i in range(0, reaction.count):
+            react_names.append(name)
 
     suborqueue_rip = init_suborqueue_rip(message, react_names)
 
