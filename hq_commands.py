@@ -27,32 +27,67 @@ import os
 async def help(args: list[str], command_context: CommandContext):
     result = ''
 
-    for name, info in COMMANDS.items():
-        result += f'\n**!{name}**'
+    qoc_emote = get_qoc_emoji(command_context.channel.guild)
 
-        if len(info.format):
-            result += f' `{info.format}`'
+    for enum in CommandType:
 
-        if len(info.brief):
+        if enum == CommandType.SECRET or enum == CommandType.NULL: 
+            continue
 
-            def emoji_match_filter(match):
-                name = match.group(1)
-                result = f':{name}:' 
-                for emoji in command_context.channel.guild.emojis:
-                    if emoji.name == name:
-                        result = str(emoji)
-                        break
-                return result
+        assert enum in COMMAND_TYPE_DATA
 
-            brief = re.sub(r':(\w+):', emoji_match_filter, info.brief) 
+        result += f'\n\n:small_blue_diamond: __**{enum.name}**__ — *{COMMAND_TYPE_DATA[enum].desc}*'
 
-            def config_match_filter(match):
-                result = get_config(match.group(1))
-                return str(result)
+        for name, info in COMMANDS.items():
 
-            brief = re.sub(r'%(\w+)%', config_match_filter, brief) 
+            if info.command_type == enum:
 
-            result += f' — {brief}'
+                result += '\n'
+
+                if not info.public:
+                    result += f'{qoc_emote} '
+
+                result += f'**!{name}**'
+
+                if len(info.format):
+                    result += f' **{info.format}**'
+
+                if len(info.brief):
+
+                    def emoji_match_filter(match):
+                        name = match.group(1)
+                        result = f':{name}:' 
+                        for emoji in command_context.channel.guild.emojis:
+                            if emoji.name == name:
+                                result = str(emoji)
+                                break
+                        return result
+
+                    brief = re.sub(r':(\w+):', emoji_match_filter, info.brief) 
+
+                    def config_match_filter(match):
+                        result = get_config(match.group(1))
+                        return str(result)
+
+                    brief = re.sub(r'%(\w+)%', config_match_filter, brief) 
+
+                    result += f': {brief}'
+
+    qoc_channel_ids = get_channel_ids(lambda t: any(s in t for s in ['QOC', 'PROXY_QOC']))
+    print(qoc_channel_ids)
+    qoc_channels_strings: list[str] = [] 
+    for id in qoc_channel_ids:
+        channel = bot.get_channel(int(id))
+        if channel:
+            qoc_channels_strings.append(channel.jump_url)
+    print(qoc_channels_strings)
+
+    result += '\n\n__**Legend:**__'
+    result += '\n**<argument>**: Required argument'
+    result += '\n**[argument]**: Optional argument'
+    result += f'\n{qoc_emote}: Command only accessible in QoC channels:'
+    result += f'\n{" ".join(qoc_channels_strings)}'
+    result += f'\n\n*To learn more about a command, use `!help <command>`*'
 
     await send_embed(result, command_context.channel, EmbedDesc())
 
@@ -230,7 +265,7 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
 @command(
     command_type=CommandType.ROUNDUP,
     aliases = ['down_taunt', 'qoc', 'qocparty', 'roudnup', 'links', 'list', 'ls'],
-    brief="show all Qoc rips",
+    brief="Show all Qoc rips",
 )
 async def roundup(args: list[str], command_context: CommandContext):
     roundup_desc = RoundupDesc()
@@ -239,7 +274,7 @@ async def roundup(args: list[str], command_context: CommandContext):
 
 @command(
     command_type=CommandType.ROUNDUP,
-    brief="show QoC rips you've pinned :pushpin:",
+    brief="Show QoC rips you've pinned :pushpin:",
 )
 async def mypins(args: list[str], command_context: CommandContext):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.MYPINS,
@@ -249,7 +284,7 @@ async def mypins(args: list[str], command_context: CommandContext):
 
 @command(
     command_type=CommandType.ROUNDUP,
-    brief="show QoC rips you've wrenched :fix: :alert:",
+    brief="Show QoC rips you've wrenched :fix: :alert:",
 )
 async def myfixes(args: list[str], command_context: CommandContext):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.MYFIXES, \
@@ -259,7 +294,7 @@ async def myfixes(args: list[str], command_context: CommandContext):
 
 @command(
     command_type=CommandType.ROUNDUP,
-    brief="show QoC rips you've not reviewed",
+    brief="Show QoC rips you've not reviewed",
 )
 async def myfresh(args: list[str], command_context: CommandContext):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.MYFRESH, \
@@ -270,7 +305,7 @@ async def myfresh(args: list[str], command_context: CommandContext):
 @command(
     command_type=CommandType.ROUNDUP,
     aliases = ['blank', 'bald', 'clean', 'noreacts'],
-    brief="show QoC rips no one has reviewed",
+    brief="Show QoC rips nobody's reviewed",
 )
 async def fresh(args: list[str], command_context: CommandContext):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.FRESH, \
@@ -280,7 +315,7 @@ async def fresh(args: list[str], command_context: CommandContext):
 
 @command(
     command_type=CommandType.ROUNDUP,
-    brief="show QoC rips with at least one :check: and one :reject:",
+    brief="Show QoC rips with at least one :check: and one :reject:",
 )
 async def spicy(args: list[str], command_context: CommandContext):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.SPICY, \
@@ -291,7 +326,7 @@ async def spicy(args: list[str], command_context: CommandContext):
 @command(
     command_type=CommandType.ROUNDUP,
     format="<search text>",
-    brief="search for QoC rips with searched text in title",
+    brief="Search QoC rips titles",
     desc="Does not need quotes.",
     examples=["Deltarune", "PAL", "Mother 3"]
 )
@@ -311,7 +346,7 @@ async def search(args: list[str], command_context: CommandContext):
 
 @command(
     command_type=CommandType.ROUNDUP,
-    brief="show QoC email rips",
+    brief="Show QoC email rips",
     aliases=["email"]
 )
 async def emails(args: list[str], command_context: CommandContext):
@@ -324,7 +359,7 @@ async def emails(args: list[str], command_context: CommandContext):
 @command(
     command_type=CommandType.ROUNDUP,
     format="<event name>",
-    brief="search for QoC event rips",
+    brief="Search QoC event rips",
     aliases=["event"],
     desc="This can also be used as a general purpose author line search tool. Does not need quotes.",
     examples=["christmas", "secret", "deez nuts day", "ahmayk"]
@@ -345,7 +380,7 @@ async def events(args: list[str], command_context: CommandContext):
 
 @command(
     command_type=CommandType.ROUNDUP,
-    brief="show QoC rips with :check:",
+    brief="Show QoC rips with :check:",
     desc="does not consider :goldcheck: or check number requirements such as :7check:",
 )
 async def checks(args: list[str], command_context: CommandContext):
@@ -355,7 +390,7 @@ async def checks(args: list[str], command_context: CommandContext):
 
 @command(
     command_type=CommandType.ROUNDUP,
-    brief="show QoC rips WITHOUT :check:",
+    brief="Show QoC rips without :check:",
     aliases=["nocheck"]
 )
 async def nochecks(args: list[str], command_context: CommandContext):
@@ -365,7 +400,7 @@ async def nochecks(args: list[str], command_context: CommandContext):
 
 @command(
     command_type=CommandType.ROUNDUP,
-    brief="show QoC rips with :reject:",
+    brief="Show QoC rips with :reject:",
 )
 async def rejects(args: list[str], command_context: CommandContext):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.HASREACT, \
@@ -374,7 +409,7 @@ async def rejects(args: list[str], command_context: CommandContext):
 
 @command(
     command_type=CommandType.ROUNDUP,
-    brief="show QoC rips WITHOUT :reject:",
+    brief="Show QoC rips without :reject:",
     aliases=["noreject"]
 )
 async def norejects(args: list[str], command_context: CommandContext):
@@ -384,7 +419,7 @@ async def norejects(args: list[str], command_context: CommandContext):
 
 @command(
     command_type=CommandType.ROUNDUP,
-    brief="show QoC rips with :fix:",
+    brief="Show QoC rips with :fix:",
     aliases=['wrenches', 'fix', 'wrench']
 )
 async def fixes(args: list[str], command_context: CommandContext):
@@ -394,7 +429,7 @@ async def fixes(args: list[str], command_context: CommandContext):
 
 @command(
     command_type=CommandType.ROUNDUP,
-    brief="show QoC rips WITHOUT :fix:",
+    brief="Show QoC rips without :fix:",
     aliases=["nowrenches", "nofix", "nowrench"]
 )
 async def nofixes(args: list[str], command_context: CommandContext):
@@ -404,7 +439,7 @@ async def nofixes(args: list[str], command_context: CommandContext):
 
 @command(
     command_type=CommandType.ROUNDUP,
-    brief="show QoC rips with :stop:",
+    brief="Show QoC rips with :stop:",
 )
 async def stops(args: list[str], command_context: CommandContext):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.HASREACT, \
@@ -413,7 +448,7 @@ async def stops(args: list[str], command_context: CommandContext):
 
 @command(
     command_type=CommandType.ROUNDUP,
-    brief=f'show QoC rips pinned for over %overdue_days% days'
+    brief=f'Show QoC rips pinned over %overdue_days% days'
 )
 async def overdue(args: list[str], command_context: CommandContext):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.OVERDUE, not_found_message="No overdue rips.")
@@ -424,7 +459,7 @@ async def overdue(args: list[str], command_context: CommandContext):
 @command(
     command_type=CommandType.STATS,
     public=True,
-    brief='Counts all pinned QoC rips',
+    brief='Count pinned QoC rips for channel',
     desc='Only counts pinned messages with valid rips.'
 )
 async def count(args: list[str], command_context: CommandContext):
@@ -455,7 +490,7 @@ async def count(args: list[str], command_context: CommandContext):
 @command(
     command_type=CommandType.STATS,
     public=True,
-    brief='Reports proximity to the set pinlimit for the channel',
+    brief='Report proximity to pinlimit for channel',
     desc='Only counts pinned messages with valid rips.',
     aliases=['pinlimit'],
 )
@@ -481,7 +516,7 @@ async def limitcheck(args: list[str], command_context: CommandContext):
     command_type=CommandType.STATS,
     public=True,
     format="[channel link]",
-    brief='Counts number of submissions',
+    brief='Count # of subs',
     desc=\
     """
     Counts the number of messages in the default submission channel.
@@ -548,12 +583,7 @@ async def send_suborqueue_rips(desc: SendSubOrQueueDesc, command_context: Comman
     count = 0
 
     prefix = desc.search_key.lower()
-
-    qoc_emote = DEFAULT_QOC
-    if command_context.channel.guild:
-        for e in command_context.channel.guild.emojis:
-            if e.name.lower() == "qoc":
-                qoc_emote = str(e)
+    qoc_emote = get_qoc_emoji(command_context.channel.guild)
 
     for channel_id in channel_ids:
         channel = bot.get_channel(channel_id)
@@ -603,10 +633,10 @@ async def send_suborqueue_rips(desc: SendSubOrQueueDesc, command_context: Comman
 
 
 @command(
-    command_type=CommandType.SUB,
+    command_type=CommandType.SUBS,
     public=True,
     format="<search text>",
-    brief='searches for submissions with searched text in title',
+    brief='Search submission rip titles',
     desc="Does not need quotes.",
     aliases=['search_sub'],
 )
@@ -625,10 +655,10 @@ async def search_subs(args: list[str], command_context: CommandContext):
 
 
 @command(
-    command_type=CommandType.SUB,
+    command_type=CommandType.SUBS,
     public=True,
     format="<event text>",
-    brief='searches for submissions event rips',
+    brief='Search for submission event rips',
     desc="This can also be used as a general purpose author line search tool. Does not need quotes.",
     aliases=['event_sub'],
 )
@@ -649,7 +679,7 @@ async def event_subs(args: list[str], command_context: CommandContext):
 @command(
     command_type=CommandType.QUEUE,
     public=True,
-    brief='show approved rips with "thumbnail needed" reacts :thumbnail:',
+    brief='Show queued rips with a "thumbnail needed" react :thumbnail:',
     aliases=['thumbnails'],
 )
 async def frames(args: list[str], command_context: CommandContext):
@@ -662,7 +692,7 @@ async def frames(args: list[str], command_context: CommandContext):
 @command(
     command_type=CommandType.QUEUE,
     public=True,
-    brief='show approved rips with alert reacts :alert:',
+    brief='Show queued rips with an alert react :alert:',
 )
 async def alerts(args: list[str], command_context: CommandContext):
     desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.HASREACT, \
@@ -674,7 +704,7 @@ async def alerts(args: list[str], command_context: CommandContext):
 @command(
     command_type=CommandType.QUEUE,
     public=True,
-    brief='show approved rips with metadata reacts :metadata:',
+    brief='Show queued rips with a metadata react :metadata:',
 )
 async def metadata(args: list[str], command_context: CommandContext):
     desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.HASREACT, \
@@ -686,7 +716,7 @@ async def metadata(args: list[str], command_context: CommandContext):
 @command(
     command_type=CommandType.QUEUE,
     public=True,
-    brief='show approved email rips with no emailsent reacts :emailsent:',
+    brief='Show queued email rips with no emailsent react :emailsent:',
 )
 async def unsent(args: list[str], command_context: CommandContext):
     desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.UNSENT, \
@@ -698,7 +728,7 @@ async def unsent(args: list[str], command_context: CommandContext):
     command_type=CommandType.QUEUE,
     public=True,
     format="<prefix>",
-    brief='find approved rips that starts with a prefix',
+    brief='Search queued rips startting with prefix',
     desc='The prefix can contain spaces.',
     examples=['e', 'Level', 'deez nuts']
 )
@@ -720,7 +750,7 @@ async def scout(args: list[str], command_context: CommandContext):
     command_type=CommandType.QUEUE,
     public=True,
     format="[channel_link]",
-    brief='tally approved rips via its first letter',
+    brief='Tally queued rips via first letter in title',
     desc='Optionally takes a channel link as an argument to tally only that queue channel.',
 )
 async def scout_stats(args: list[str], command_context: CommandContext):
@@ -771,8 +801,8 @@ async def scout_stats(args: list[str], command_context: CommandContext):
 ##TODO: (Ahmayk) vet command UX needs to be refactored it's confusing as hell 
 
 @command(
-    command_type=CommandType.ANALYZE,
-    brief='scan pinned messages for bitrate and clipping issues',
+    command_type=CommandType.STATS,
+    brief='Vet all QoC rips for bitrate and clipping issues',
 )
 async def vet(args: list[str], command_context: CommandContext):
     if len(args):
@@ -785,9 +815,9 @@ async def vet(args: list[str], command_context: CommandContext):
 
 
 @command(
-    command_type=CommandType.ANALYZE,
+    command_type=CommandType.STATS,
     format='[message link]',
-    brief='vet rips in a queue starting from message link',
+    brief='Vet rips in a queue starting from message link',
     desc='Find rips in pinned messages with bitrate/clipping issues and show their details, only counting messages not older than linked message'
 )
 async def vet_from(args: list[str], command_context: CommandContext):
@@ -830,8 +860,8 @@ async def vet_from(args: list[str], command_context: CommandContext):
             await send("Finished QoC-ing. Please note that these are only automated detections - you should verify the issues in Audacity and react manually.", command_context.channel)
 
 @command(
-    command_type=CommandType.ANALYZE,
-    brief='vet all QoC rips at once with summary',
+    command_type=CommandType.STATS,
+    brief='Vet all QoC rips at once with summary',
 )
 async def vet_all(args: list[str], command_context: CommandContext):
 
@@ -844,9 +874,9 @@ async def vet_all(args: list[str], command_context: CommandContext):
 
 
 @command(
-    command_type=CommandType.ANALYZE,
+    command_type=CommandType.STATS,
     format='<message link>',
-    brief='vet a message link',
+    brief='Vet rip in message link',
     desc='The first non-YouTube link found in the message is treated as the rip URL.'
 )
 async def vet_msg(args: list[str], command_context: CommandContext):
@@ -866,9 +896,9 @@ async def vet_msg(args: list[str], command_context: CommandContext):
 
 
 @command(
-    command_type=CommandType.ANALYZE,
+    command_type=CommandType.STATS,
     format='<url to rip>',
-    brief='vet a single url',
+    brief='Vet rip in audio url',
 )
 async def vet_url(args: list[str], command_context: CommandContext):
 
@@ -887,9 +917,9 @@ async def vet_url(args: list[str], command_context: CommandContext):
 
 
 @command(
-    command_type=CommandType.ANALYZE,
+    command_type=CommandType.STATS,
     format='<message url>',
-    brief='count number of dupes on YouTube and in rip queues',
+    brief='Count # of dupes on YouTube and rip queues',
 )
 async def count_dupe(args: list[str], command_context: CommandContext):
 
@@ -1007,9 +1037,9 @@ async def scan(ctx: Context, channel_link: str = None, start_index: int = None, 
 
 
 @command(
-    command_type=CommandType.ANALYZE,
+    command_type=CommandType.STATS,
     format='<message url>',
-    brief='show rip file metadata from message url',
+    brief='Get rip audio metadata from message url',
     desc='The first non-YouTube link found in the message is treated as the rip URL.'
 )
 async def peek_msg(args: list[str], command_context: CommandContext):
@@ -1049,9 +1079,9 @@ async def peek_msg(args: list[str], command_context: CommandContext):
 
 
 @command(
-    command_type=CommandType.ANALYZE,
+    command_type=CommandType.STATS,
     format='<message url>',
-    brief='show rip file metadata from rip url',
+    brief='Get rip audio metadata from rip url',
     desc='The first non-YouTube link found in the message is treated as the rip URL.'
 )
 async def peek_url(args: list[str], command_context: CommandContext):
@@ -1087,7 +1117,7 @@ async def peek_url(args: list[str], command_context: CommandContext):
 
 @command(
     command_type=CommandType.MANAGEMENT,
-    brief='makes sure all rips are in rip cache',
+    brief='Check that all rips are in bot\'s cache',
 )
 async def validate_cache(args: list[str], command_context: CommandContext):
     await send("Validating cache of rips in all channels...", command_context.channel)
@@ -1097,7 +1127,7 @@ async def validate_cache(args: list[str], command_context: CommandContext):
 @command(
     command_type=CommandType.MANAGEMENT,
     format='<channel link>',
-    brief='force reset rip cache for a channel',
+    brief='Refetches all rip data from discord for a channel',
 )
 async def reset_cache(args: list[str], command_context: CommandContext):
 
@@ -1140,6 +1170,7 @@ async def reset_cache(args: list[str], command_context: CommandContext):
 
 @command(
     command_type=CommandType.MANAGEMENT,
+    brief="Enable advanced metadata checking"
 )
 async def enable_metadata(args: list[str], command_context: CommandContext):
     set_config('metadata', True)
@@ -1147,6 +1178,7 @@ async def enable_metadata(args: list[str], command_context: CommandContext):
 
 @command(
     command_type=CommandType.MANAGEMENT,
+    brief="Disable advanced metadata checking"
 )
 async def disable_metadata(args: list[str], command_context: CommandContext):
     set_config('metadata', False)
@@ -1154,6 +1186,7 @@ async def disable_metadata(args: list[str], command_context: CommandContext):
 
 @command(
     command_type=CommandType.MANAGEMENT,
+    brief="Unpin pinned rips when over pinlimit"
 )
 async def enable_pinlimit_must_die(args: list[str], command_context: CommandContext):
     set_channel_pinlimit_mode(command_context.channel.id, True)
@@ -1161,6 +1194,7 @@ async def enable_pinlimit_must_die(args: list[str], command_context: CommandCont
 
 @command(
     command_type=CommandType.MANAGEMENT,
+    brief="Disable pinlimit must die"
 )
 async def disable_pinlimit_must_die(args: list[str], command_context: CommandContext):
     set_channel_pinlimit_mode(command_context.channel.id, False)
@@ -1206,7 +1240,7 @@ async def help_old():
 @command(
     command_type=CommandType.MANAGEMENT,
     public=True,
-    brief="show channels info"
+    brief="Show info on channels"
 )
 async def channel_list(args: list[str], command_context: CommandContext):
     async with command_context.channel.typing():
@@ -1237,7 +1271,7 @@ async def channel_list(args: list[str], command_context: CommandContext):
     command_type=CommandType.MANAGEMENT,
     format='[search limit]',
     public=True,
-    brief="remove bot's old embed messages",
+    brief="Remove bot's old embed messages",
     desc=\
     """
     By default searches the channel for messages with embeds up to 200 messages.
@@ -1307,7 +1341,7 @@ async def get_suborqueue_rip_stats_string(channel_id: int, typing_channel: TextC
     command_type=CommandType.STATS,
     public=True,
     format="[all]",
-    brief="show number of rips in QoC and submission channels",
+    brief="Show # of rips in channels",
     desc="include `all` to show rips in all queue channels as well",
 )
 async def stats(args: list[str], command_context: CommandContext):

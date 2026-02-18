@@ -482,19 +482,37 @@ def reaction_name_to_emoji_string(name: str, guild: discord.Guild) -> str:
             break
     return result
 
+def get_qoc_emoji(guild: discord.Guild) -> str:
+    qoc_emote = DEFAULT_QOC
+    if guild:
+        for e in guild.emojis:
+            if e.name.lower() == "qoc":
+                qoc_emote = str(e)
+                break
+    return qoc_emote
+
 #===============================================#
 #                   COMMANDS 
 #===============================================#
 
 class CommandType(Enum):
     NULL = auto()
-    MANAGEMENT = auto()
     ROUNDUP = auto()
-    STATS = auto()
-    SUB = auto()
+    SUBS = auto()
     QUEUE = auto()
-    ANALYZE = auto()
+    STATS = auto()
     SECRET = auto()
+    MANAGEMENT = auto()
+
+class CommandTypeData(NamedTuple):
+    desc: str
+
+COMMAND_TYPE_DATA = {}
+COMMAND_TYPE_DATA[CommandType.ROUNDUP] = CommandTypeData('get info on pinned rips in a QoC channel')
+COMMAND_TYPE_DATA[CommandType.SUBS] = CommandTypeData('get info on rips in submission channels')
+COMMAND_TYPE_DATA[CommandType.QUEUE] = CommandTypeData('get info on rips in approved queues')
+COMMAND_TYPE_DATA[CommandType.STATS] = CommandTypeData('get info on rip count, metadata, or audio')
+COMMAND_TYPE_DATA[CommandType.MANAGEMENT] = CommandTypeData('manage or learn about the bot')
 
 class CommandContext(NamedTuple):
     channel: TextChannel | Thread 
