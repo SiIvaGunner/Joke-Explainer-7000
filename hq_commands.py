@@ -1223,40 +1223,6 @@ async def disable_pinlimit_must_die(args: list[str], command_context: CommandCon
 
 # ============ Helper/test commands ============== #
 
-async def help_old():    
-    result = "_**YOU ARE NOW QoCING:**_\n`!roundup [embed_minutes: float]`" + roundup.brief \
-        + "\n_**Special lists:**_\n`!mypins` " + mypins.brief \
-        + "\n`!myfixes <user_id: str>` " + myfixes.brief \
-        + "\n`!myfresh <user_id: str>` " + myfresh.brief\
-        + "\n`!fresh` " + fresh.brief\
-        + "\n`!spicy` " + spicy.brief\
-        + "\n`!search <arg1: str|arg2: str|...>` " + search.brief \
-        + "\n`!emails` " + emails.brief + "\n`!events <arg1: str|arg2: str|...>` " + events.brief \
-        + "\n`!checks`, `!rejects`, `!wrenches`, `!stops`" \
-        + "\n`!nochecks`, `!norejects`, `!nofixes`, `!nostops" \
-        + "\n`!overdue` " + overdue.brief.replace('X', str(get_config('overdue_days'))) \
-        + "\n_**Misc. tools:**_\n`!count` " + count.brief \
-        + "\n`!limitcheck` " + limitcheck.brief \
-        + "\n`!count_subs [sub_channel: link]` " + count_subs.brief \
-        + "\n`!search_subs <arg1: str|arg2: str|...> [sub_channel: link]` " + search_subs.brief \
-        + "\n`!event_subs <arg1: str|arg2: str|...> [sub_channel: link]` " + event_subs.brief \
-        + "\n`!stats [show_queues: any]` " + stats.brief \
-        + "\n`!channel_list` " + channel_list.brief \
-        + "\n`!cleanup [search_limit: int]` " + cleanup.brief \
-        + "\n`!frames, !alerts, !metadata, !unsent [queue_channel: link]` " \
-        + "\n`!scout <prefix: str> [queue_channel: link]` " + scout.brief \
-        + "\n`!scout_stats [queue_channel: link]` " + scout_stats.brief \
-        + "\n_**Auto QoC tools:**_\n`!vet` " + vet.brief + "\n`!vet_all` " + vet_all.brief \
-        + "\n`!vet_msg <message: link>` " + vet_msg.brief + "\n`!vet_url <URL: link>` " + vet_url.brief \
-        + "\n`!peek_msg <message: link> [ffprobe: any]` " + peek_msg.brief + "\n`!peek_url <URL: link> [ffprobe: any]` " + peek_url.brief \
-        + "\n`!count_dupe <message: link> [count_queues: any]` " + count_dupe.brief \
-        + "\n_**Experimental tools:**_\n`!scan <queue_channel: link> [start_index: int] [end_index: int]` " + scan.brief \
-        + "\n_**Config:**_\n`![enable/disable]_metadata` enables/disables advanced metadata checking (currently {})".format("enabled" if get_config('metadata') else "disabled") \
-        + "\n=====================================" \
-        + "\n_**Legend:**_\n`<argument: type>` Mandatory argument\n`[argument: type]` Optional argument" \
-        + "\n_**Tips:**_\nUse quotes for string arguments with spaces, e.g. \"Main Theme\"\nAll embed commands accept the [embed_minutes] optional argument"
-
-
 @command(
     command_type=CommandType.MANAGEMENT,
     public=True,
