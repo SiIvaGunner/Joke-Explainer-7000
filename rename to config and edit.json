@@ -9,7 +9,6 @@
     "overdue_days": 7,
     "pin_limit": 250,
     "soft_pin_limit": 50,
-    "qoc_contains_pinned_rule": true,
     "channels": [
         {
             "name": "qoc",
