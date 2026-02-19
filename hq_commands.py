@@ -1460,7 +1460,8 @@ async def modify_config(args: list[str], command_context: CommandContext):
         try:
             new_val = int(value)
         except ValueError:
-            return await send(f'Error: Invalid value type: {value}', command_context.channel)
+            # for configs of type str. set_config will throw error if there is type mismatch.
+            pass
     
     set_config(conf, new_val)
     await send(f"Modified config {conf} from {cur_val} to {new_val}.", command_context.channel)
