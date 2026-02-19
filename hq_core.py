@@ -658,10 +658,11 @@ def parse_emojis_in_string(string: str, guild: discord.Guild):
 
 class CommandType(Enum):
     NULL = auto()
-    ROUNDUP = auto()
+    QOC = auto()
     SUBS = auto()
     QUEUE = auto()
     STATS = auto()
+    ANALYZE = auto()
     SECRET = auto()
     MANAGEMENT = auto()
 
@@ -669,10 +670,11 @@ class CommandTypeData(NamedTuple):
     desc: str
 
 COMMAND_TYPE_DATA = {}
-COMMAND_TYPE_DATA[CommandType.ROUNDUP] = CommandTypeData('get info on pinned rips in a QoC channel')
+COMMAND_TYPE_DATA[CommandType.QOC] = CommandTypeData('get info on pinned rips in a QoC channel')
 COMMAND_TYPE_DATA[CommandType.SUBS] = CommandTypeData('get info on rips in submission channels')
 COMMAND_TYPE_DATA[CommandType.QUEUE] = CommandTypeData('get info on rips in approved queues')
-COMMAND_TYPE_DATA[CommandType.STATS] = CommandTypeData('get info on rip count, metadata, or audio')
+COMMAND_TYPE_DATA[CommandType.STATS] = CommandTypeData('get miscellaneous info on all rips')
+COMMAND_TYPE_DATA[CommandType.ANALYZE] = CommandTypeData('analyze rip metadata or audio for common issues')
 COMMAND_TYPE_DATA[CommandType.MANAGEMENT] = CommandTypeData('manage or learn about the bot')
 
 class CommandContext(NamedTuple):

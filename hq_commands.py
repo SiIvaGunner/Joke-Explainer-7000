@@ -41,7 +41,8 @@ async def help(args: list[str], command_context: CommandContext):
             return await send(f'No command named `{prefix}{search_input}`', command_context.channel)
 
         if command_info.command_type == CommandType.SECRET:
-            return await send(f'What?', command_context.channel)
+            text = random.choice(["What?", "Hm?", "Excuse me?", "Um?", "Huh?", "...what?", "Uh...", "Uh", "Ehh?"]) 
+            return await send(text, command_context.channel)
 
         title = f'{prefix}{command_info.name} {command_info.format}'
 
@@ -295,7 +296,7 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
 
 
 @command(
-    command_type=CommandType.ROUNDUP,
+    command_type=CommandType.QOC,
     aliases = ['down_taunt', 'qoc', 'qocparty', 'roudnup', 'links', 'list', 'ls'],
     brief="Show all Qoc rips",
 )
@@ -305,7 +306,7 @@ async def roundup(args: list[str], command_context: CommandContext):
 
 
 @command(
-    command_type=CommandType.ROUNDUP,
+    command_type=CommandType.QOC,
     brief="Show QoC rips you've pinned :pushpin:",
 )
 async def mypins(args: list[str], command_context: CommandContext):
@@ -315,7 +316,7 @@ async def mypins(args: list[str], command_context: CommandContext):
 
 
 @command(
-    command_type=CommandType.ROUNDUP,
+    command_type=CommandType.QOC,
     brief="Show QoC rips you've wrenched :fix: :alert:",
     aliases=['mywrenches'],
 )
@@ -326,7 +327,7 @@ async def myfixes(args: list[str], command_context: CommandContext):
 
 
 @command(
-    command_type=CommandType.ROUNDUP,
+    command_type=CommandType.QOC,
     brief="Show QoC rips you've not reviewed",
 )
 async def myfresh(args: list[str], command_context: CommandContext):
@@ -336,7 +337,7 @@ async def myfresh(args: list[str], command_context: CommandContext):
 
 
 @command(
-    command_type=CommandType.ROUNDUP,
+    command_type=CommandType.QOC,
     aliases = ['blank', 'bald', 'clean', 'noreacts'],
     brief="Show QoC rips nobody's reviewed",
 )
@@ -347,7 +348,7 @@ async def fresh(args: list[str], command_context: CommandContext):
 
 
 @command(
-    command_type=CommandType.ROUNDUP,
+    command_type=CommandType.QOC,
     brief="Show QoC rips with at least one :check: and one :reject:",
 )
 async def spicy(args: list[str], command_context: CommandContext):
@@ -357,7 +358,7 @@ async def spicy(args: list[str], command_context: CommandContext):
 
 
 @command(
-    command_type=CommandType.ROUNDUP,
+    command_type=CommandType.QOC,
     format="<search text>",
     brief="Search QoC rips titles",
     desc="Does not need quotes.",
@@ -378,7 +379,7 @@ async def search(args: list[str], command_context: CommandContext):
 
 
 @command(
-    command_type=CommandType.ROUNDUP,
+    command_type=CommandType.QOC,
     brief="Show QoC email rips",
     aliases=["email"]
 )
@@ -390,7 +391,7 @@ async def emails(args: list[str], command_context: CommandContext):
 
 
 @command(
-    command_type=CommandType.ROUNDUP,
+    command_type=CommandType.QOC,
     format="<event name>",
     brief="Search QoC event rips",
     aliases=["event"],
@@ -412,7 +413,7 @@ async def events(args: list[str], command_context: CommandContext):
 
 
 @command(
-    command_type=CommandType.ROUNDUP,
+    command_type=CommandType.QOC,
     brief="Show QoC rips with :check:",
     desc="does not consider :goldcheck: or check number requirements such as :7check:",
 )
@@ -422,7 +423,7 @@ async def checks(args: list[str], command_context: CommandContext):
     await send_roundup(roundup_desc, command_context)
 
 @command(
-    command_type=CommandType.ROUNDUP,
+    command_type=CommandType.QOC,
     brief="Show QoC rips without :check:",
     aliases=["nocheck"]
 )
@@ -432,7 +433,7 @@ async def nochecks(args: list[str], command_context: CommandContext):
     await send_roundup(roundup_desc, command_context)
 
 @command(
-    command_type=CommandType.ROUNDUP,
+    command_type=CommandType.QOC,
     brief="Show QoC rips with :reject:",
 )
 async def rejects(args: list[str], command_context: CommandContext):
@@ -441,7 +442,7 @@ async def rejects(args: list[str], command_context: CommandContext):
     await send_roundup(roundup_desc, command_context)
 
 @command(
-    command_type=CommandType.ROUNDUP,
+    command_type=CommandType.QOC,
     brief="Show QoC rips without :reject:",
     aliases=["noreject"]
 )
@@ -451,7 +452,7 @@ async def norejects(args: list[str], command_context: CommandContext):
     await send_roundup(roundup_desc, command_context)
 
 @command(
-    command_type=CommandType.ROUNDUP,
+    command_type=CommandType.QOC,
     brief="Show QoC rips with :fix:",
     aliases=['wrenches', 'fix', 'wrench', 'fixes']
 )
@@ -461,7 +462,7 @@ async def fixes(args: list[str], command_context: CommandContext):
     await send_roundup(roundup_desc, command_context)
 
 @command(
-    command_type=CommandType.ROUNDUP,
+    command_type=CommandType.QOC,
     brief="Show QoC rips without :fix:",
     aliases=["nowrenches", "nofix", "nowrench"]
 )
@@ -471,7 +472,7 @@ async def nofixes(args: list[str], command_context: CommandContext):
     await send_roundup(roundup_desc, command_context)
 
 @command(
-    command_type=CommandType.ROUNDUP,
+    command_type=CommandType.QOC,
     brief="Show QoC rips with :stop:",
 )
 async def stops(args: list[str], command_context: CommandContext):
@@ -480,7 +481,7 @@ async def stops(args: list[str], command_context: CommandContext):
     await send_roundup(roundup_desc, command_context)
 
 @command(
-    command_type=CommandType.ROUNDUP,
+    command_type=CommandType.QOC,
     brief=f'Show QoC rips pinned over %overdue_days% days'
 )
 async def overdue(args: list[str], command_context: CommandContext):
@@ -488,7 +489,7 @@ async def overdue(args: list[str], command_context: CommandContext):
     await send_roundup(roundup_desc, command_context)
 
 @command(
-    command_type=CommandType.ROUNDUP,
+    command_type=CommandType.QOC,
     brief=f'Show a random QoC rip',
     aliases=['random', 'lucky', 'letsgogambling!']
 )
@@ -496,10 +497,9 @@ async def randompull(args: list[str], command_context: CommandContext):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.RANDOM, not_found_message="No gambling today, sorry!")
     await send_roundup(roundup_desc, command_context)
 
-# ============ Counting Commands ============== #
 
 @command(
-    command_type=CommandType.STATS,
+    command_type=CommandType.QOC,
     public=True,
     brief='Count pinned QoC rips for channel',
     desc='Only counts pinned messages with valid rips.'
@@ -530,7 +530,7 @@ async def count(args: list[str], command_context: CommandContext):
 
 
 @command(
-    command_type=CommandType.STATS,
+    command_type=CommandType.QOC,
     public=True,
     brief='Report proximity to pinlimit for channel',
     desc='Only counts pinned messages with valid rips.',
@@ -555,7 +555,7 @@ async def limitcheck(args: list[str], command_context: CommandContext):
         await send(result, command_context.channel)
 
 @command(
-    command_type=CommandType.STATS,
+    command_type=CommandType.SUBS,
     public=True,
     format="[channel link]",
     brief='Count # of subs',
@@ -843,7 +843,7 @@ async def scout_stats(args: list[str], command_context: CommandContext):
 ##TODO: (Ahmayk) vet command UX needs to be refactored it's confusing as hell 
 
 @command(
-    command_type=CommandType.STATS,
+    command_type=CommandType.ANALYZE,
     brief='Vet all QoC rips for bitrate and clipping issues',
 )
 async def vet(args: list[str], command_context: CommandContext):
@@ -858,7 +858,7 @@ async def vet(args: list[str], command_context: CommandContext):
 
 
 @command(
-    command_type=CommandType.STATS,
+    command_type=CommandType.ANALYZE,
     format='[message link]',
     brief='Vet rips in a queue starting from message link',
     desc='Find rips in pinned messages with bitrate/clipping issues and show their details, only counting messages not older than linked message'
@@ -903,7 +903,7 @@ async def vet_from(args: list[str], command_context: CommandContext):
             await send("Finished QoC-ing. Please note that these are only automated detections - you should verify the issues in Audacity and react manually.", command_context.channel)
 
 @command(
-    command_type=CommandType.STATS,
+    command_type=CommandType.ANALYZE,
     brief='Vet all QoC rips at once with summary',
 )
 async def vet_all(args: list[str], command_context: CommandContext):
@@ -917,7 +917,7 @@ async def vet_all(args: list[str], command_context: CommandContext):
 
 
 @command(
-    command_type=CommandType.STATS,
+    command_type=CommandType.ANALYZE,
     format='<message link>',
     brief='Vet rip in message link',
     desc='The first non-YouTube link found in the message is treated as the rip URL.'
@@ -939,7 +939,7 @@ async def vet_msg(args: list[str], command_context: CommandContext):
 
 
 @command(
-    command_type=CommandType.STATS,
+    command_type=CommandType.ANALYZE,
     format='<url to rip>',
     brief='Vet rip in audio url',
 )
@@ -960,7 +960,7 @@ async def vet_url(args: list[str], command_context: CommandContext):
 
 
 @command(
-    command_type=CommandType.STATS,
+    command_type=CommandType.ANALYZE,
     format='<message url>',
     brief='Count # of dupes on YouTube and rip queues',
 )
@@ -1080,7 +1080,7 @@ async def scan(ctx: Context, channel_link: str = None, start_index: int = None, 
 
 
 @command(
-    command_type=CommandType.STATS,
+    command_type=CommandType.ANALYZE,
     format='<message url>',
     brief='Get rip audio metadata from message url',
     desc='The first non-YouTube link found in the message is treated as the rip URL.'
@@ -1120,7 +1120,7 @@ async def peek_msg(args: list[str], command_context: CommandContext):
 
 
 @command(
-    command_type=CommandType.STATS,
+    command_type=CommandType.ANALYZE,
     format='<message url>',
     brief='Get rip audio metadata from rip url',
     desc='The first non-YouTube link found in the message is treated as the rip URL.'
