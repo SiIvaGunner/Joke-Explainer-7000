@@ -24,7 +24,7 @@ from discord.abc import GuildChannel
 
 from hq_config import *
 
-COMMAND_PREFIX = '$'
+COMMAND_PREFIX = '!'
 
 bot = discord.Client(
     intents = discord.Intents.all() # This was a change necessitated by an update to discord.py :/
@@ -1115,22 +1115,22 @@ async def on_ready():
 
     await write_log("Good morning! Caching rips...")
 
-    channel_ids = get_channel_ids_of_types(['QUEUE'])
-    for channel_id in channel_ids:
+    queue_channel_ids = get_channel_ids_of_types(['QUEUE'])
+    for channel_id in queue_channel_ids:
         channel = bot.get_channel(channel_id)
         if channel:
             suborqueue_rips = await get_suborqueue_rips(channel, GetRipsDesc())
             await write_log(f'Cached {len(suborqueue_rips)} queued rips in {channel.jump_url}.')
 
-    channel_ids = get_channel_ids_of_types(['SUBS', 'SUBS_THREAD', 'SUBS_PIN'])
-    for channel_id in channel_ids:
+    sub_channel_ids = get_channel_ids_of_types(['SUBS', 'SUBS_THREAD', 'SUBS_PIN'])
+    for channel_id in sub_channel_ids:
         channel = bot.get_channel(channel_id)
         if channel:
             suborqueue_rips = await get_suborqueue_rips(channel, GetRipsDesc())
             await write_log(f'Cached {len(suborqueue_rips)} subbed rips in {channel.jump_url}.')
 
-    channel_ids = get_channel_ids_of_types(['QOC'])
-    for channel_id in channel_ids:
+    qoc_channel_ids = get_channel_ids_of_types(['QOC'])
+    for channel_id in qoc_channel_ids:
         channel = bot.get_channel(channel_id)
         if channel:
             qoc_rips = await get_qoc_rips(channel, GetRipsDesc())
@@ -1142,6 +1142,34 @@ async def on_ready():
     await write_log(validate_result)
 
     validate_cache_regularly.start()
+
+    # remove embeds from qoc channels that were not removed after bot restart
+    for channel_id in qoc_channel_ids:
+        channel = bot.get_channel(channel_id)
+        if channel:
+            count = 0
+            async for message in channel.history(limit = 200):
+                if message.author == bot.user and message.embeds and (datetime.now(timezone.utc) - message.created_at) > timedelta(seconds=get_config('embed_seconds')):
+                    await message.delete()
+                    count += 1
+            
+            if count > 0:
+                await send(f"Good morning! Removed {count} embed messages sent more than {get_config('embed_seconds') // 60} minutes ago. " + \
+                       f"If there are older or newer embeds that should be removed, run {COMMAND_PREFIX}cleanup manually.", channel)
+    
+    proxy_channel_ids = get_channel_ids_of_types(['PROXY_QOC'])
+    for channel_id in proxy_channel_ids:
+        channel = bot.get_channel(channel_id)
+        if channel:
+            count = 0
+            async for message in channel.history(limit = 200):
+                if message.author == bot.user and message.embeds and (datetime.now(timezone.utc) - message.created_at) > timedelta(seconds=get_config('proxy_embed_seconds')):
+                    await message.delete()
+                    count += 1
+            
+            if count > 0:
+                await send(f"Good morning! Removed {count} embed messages sent more than {get_config('proxy_embed_seconds') // 60} minutes ago. " + \
+                       f"If there are older or newer embeds that should be removed, run {COMMAND_PREFIX}cleanup manually.", channel)
 
 import traceback
 @bot.event
