@@ -38,7 +38,10 @@ async def help(args: list[str], command_context: CommandContext):
 
         command_info = find_command_info(search_input)
         if not command_info:
-            return await send(f'No command named {search_input}', command_context.channel)
+            return await send(f'No command named `{prefix}{search_input}`', command_context.channel)
+
+        if command_info.command_type == CommandType.SECRET:
+            return await send(f'What?', command_context.channel)
 
         title = f'{prefix}{command_info.name} {command_info.format}'
 
