@@ -18,6 +18,7 @@ from enum import Enum, auto
 from contextlib import asynccontextmanager
 import asyncio
 import re
+import math
 
 import discord
 from discord.abc import GuildChannel
@@ -741,7 +742,7 @@ async def get_qoc_channel(channel: TextChannel | Thread):
     return channel
 
 
-def split_long_message(a_message: str, character_limit: int) -> list[str]:  # avoid Discord's character limit
+def split_long_message(a_message: str, character_limit) -> list[str]:  # avoid Discord's character limit
     """
     Split a long message to fit Discord's character limit.
     Aug 6 2025: apparently embeds have a higher character limit?
@@ -762,7 +763,8 @@ def split_long_message(a_message: str, character_limit: int) -> list[str]:  # av
     return result
 
 async def send(text: str, channel: TextChannel | Thread):
-    split_message = split_long_message(text, 2000)
+    limit = get_config("character_limit")
+    split_message = split_long_message(text, limit)
     for line in split_message:
         await channel.send(line)
 
@@ -772,9 +774,7 @@ class EmbedDesc(NamedTuple):
     title: str = ""
     footer: str = ""
 
-##TODO: (Ahmayk) smarter embed packaging 
 async def send_embed(text: str, channel: TextChannel | Thread, desc: EmbedDesc):
-    split_message = split_long_message(text, 4028)
     color = get_config('embed_color')
     delete_after_seconds = None
     if desc.expires:
@@ -782,17 +782,89 @@ async def send_embed(text: str, channel: TextChannel | Thread, desc: EmbedDesc):
             delete_after_seconds = get_config('proxy_embed_seconds')
         else: get_config('embed_seconds')
 
-    for i, line in enumerate(split_message):
+    embed_character_limit_title = get_config("embed_character_limit_title")
+    title = desc.title
+    if len(title) > embed_character_limit_title:
+        title = title[:embed_character_limit_title]
 
-        if i == 0: 
-            embed = discord.Embed(description=line, color=color, title=desc.title)
+    embed_character_limit_footer = get_config("embed_character_limit_footer")
+    footer = desc.footer
+    if len(footer) > embed_character_limit_footer:
+        footer = footer[:embed_character_limit_footer]
+
+    ##NOTE: (Ahmayk) we want to send the least amount of messages for speed
+    ##since sending each message in sequence takes time
+    ##As of writing, embed descs can hold 4096 characters
+    ##however messages in total can only hold 6000 characters
+    ##so in order to send the least amount of messages possible,
+    ##we send the most characters we can in each message
+    ##while also staying under the embed desc limit per embed 
+
+    embed_character_limit_total = get_config("embed_character_limit_total")
+
+    split_messages: List[str] = []
+    all_lines = text.splitlines()
+    wall_of_text = ""
+    total_len_added = 0
+    for line in all_lines:
+        line = line.replace('@', '')  # no more pings lol
+        next_length = len(wall_of_text) + len(line)
+
+        desc_limit = embed_character_limit_total 
+        if not len(split_messages):
+            desc_limit -= len(title) 
+        elif len(text) - total_len_added < embed_character_limit_total:
+            desc_limit -= len(footer) 
+
+        if next_length > desc_limit:
+            new_desc = wall_of_text[:-1]
+            split_messages.append(new_desc)
+            total_len_added = len(new_desc)
+            wall_of_text = line + '\n'
         else:
-            embed = discord.Embed(description=line, color=color)
-            
-        if i == len(split_message) - 1: 
-            embed.set_footer(text=desc.footer)
+            wall_of_text += line + '\n'
 
-        await channel.send(embed=embed, delete_after=delete_after_seconds)
+    split_messages.append(wall_of_text[:-1])
+
+    embed_character_limit_desc = get_config("embed_character_limit_desc")
+
+    embed_groups: List[List[discord.Embed]] = []
+    for i, text_part in enumerate(split_messages):
+
+        split_subgroups: List[str] = [] 
+        if len(text_part) <= embed_character_limit_desc:
+            split_subgroups.append(text_part)
+        else:
+            #NOTE: (Ahmayk) split in half, assuming that half of the  
+            #max message character length (6000)
+            #will fit inside the max embed desc length (4096)
+            embed_desc_1 = "" 
+            embed_desc_2 = "" 
+            lines = text_part.splitlines()
+            for line_i, line in enumerate(lines):
+                if line_i < math.ceil(len(lines) / 2):
+                    embed_desc_1 += line + '\n'
+                else:
+                    embed_desc_2 += line + '\n'
+            split_subgroups.append(embed_desc_1)
+            split_subgroups.append(embed_desc_2)
+
+        embed_list: List[discord.Embed] = []
+        for k, subgroup in enumerate(split_subgroups):
+            embed = None
+            if i == 0 and k == 0: 
+                embed = discord.Embed(description=subgroup, color=color, title=title)
+            else:
+                embed = discord.Embed(description=subgroup, color=color)
+            
+            if i == len(split_messages) - 1 and k == len(split_subgroups) - 1: 
+                embed.set_footer(text=desc.footer)
+            embed_list.append(embed)
+        
+        embed_groups.append(embed_list)
+
+    for embed_group in embed_groups:
+        await channel.send(embeds=embed_group, delete_after=delete_after_seconds)
 
 
 async def write_log(msg: str = "Placeholder message", embed: bool = False):

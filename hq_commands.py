@@ -1112,9 +1112,7 @@ async def peek_msg(args: list[str], command_context: CommandContext):
         if code == -1:
             await send("Error reading message:\n{}".format('\n'.join(errs)), command_context.channel)
         else:
-            long_message = split_long_message("**Rip**: **{}**\n**File metadata**:\n{}".format(rip_title, msg), get_config('character_limit'))
-            for line in long_message:
-                await send(line, command_context.channel)
+            await send("**Rip**: **{}**\n**File metadata**:\n{}".format(rip_title, msg), command_context.channel)
 
 
 @command(
