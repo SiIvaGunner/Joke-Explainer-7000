@@ -841,6 +841,7 @@ class EmbedDesc(NamedTuple):
     expires: bool = False
     title: str = ""
     footer: str = ""
+    seperator: str = "\n"
 
 async def send_embed(text: str, channel: TextChannel | Thread, desc: EmbedDesc):
     color = get_config('embed_color')
@@ -871,7 +872,7 @@ async def send_embed(text: str, channel: TextChannel | Thread, desc: EmbedDesc):
     embed_character_limit_total = get_config("embed_character_limit_total")
 
     split_messages: List[str] = []
-    all_lines = text.splitlines()
+    all_lines = text.split(desc.seperator)
     wall_of_text = ""
     total_len_added = 0
     for line in all_lines:
@@ -885,14 +886,14 @@ async def send_embed(text: str, channel: TextChannel | Thread, desc: EmbedDesc):
             desc_limit -= len(footer) 
 
         if next_length > desc_limit:
-            new_desc = wall_of_text[:-1]
+            new_desc = wall_of_text[:-len(desc.seperator)]
             split_messages.append(new_desc)
             total_len_added = len(new_desc)
-            wall_of_text = line + '\n'
+            wall_of_text = line + desc.seperator 
         else:
-            wall_of_text += line + '\n'
+            wall_of_text += line + desc.seperator
 
-    split_messages.append(wall_of_text[:-1])
+    split_messages.append(wall_of_text[:-len(desc.seperator)])
 
     embed_character_limit_desc = get_config("embed_character_limit_desc")
 
@@ -908,12 +909,17 @@ async def send_embed(text: str, channel: TextChannel | Thread, desc: EmbedDesc):
             #will fit inside the max embed desc length (4096)
             embed_desc_1 = "" 
             embed_desc_2 = "" 
-            lines = text_part.splitlines()
+            lines = text_part.split(desc.seperator)
             for line_i, line in enumerate(lines):
+
+                to_add = line
+                if line_i != (len(lines) - 1):
+                    to_add += desc.seperator
+
                 if line_i < math.ceil(len(lines) / 2):
-                    embed_desc_1 += line + '\n'
+                    embed_desc_1 += to_add 
                 else:
-                    embed_desc_2 += line + '\n'
+                    embed_desc_2 += to_add 
             split_subgroups.append(embed_desc_1)
             split_subgroups.append(embed_desc_2)
 

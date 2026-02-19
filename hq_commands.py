@@ -115,7 +115,7 @@ async def help(args: list[str], command_context: CommandContext):
         result += f'\n{" ".join(qoc_channels_strings)}'
         result += f'\n\n*To learn more about a command, use `{prefix}help <command>`*'
 
-        await send_embed(result, command_context.channel, EmbedDesc())
+        await send_embed(result, command_context.channel, EmbedDesc(seperator='\n\n'))
 
 # ============ Roundup commands ============== #
 
@@ -174,6 +174,8 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
     selected_index = 0
     if roundup_desc.roundup_filter_type == RoundupFilterType.RANDOM:
         selected_index = random.randint(0, len(qoc_rips) - 1)
+
+    readability_line = "━━━━━━━━━━━━━━━━━━\n"
 
     result = ""
 
@@ -279,14 +281,14 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
             if len(indicator) > 0:
                 base_message = f'{indicator} **[{rip_title}]({link})** {indicator}\n{author}'
             result += base_message + f' | {reacts}\n'
-            result += "━━━━━━━━━━━━━━━━━━\n" # a line for readability!
+            result += readability_line 
 
     if result != "":
 
         if roundup_desc.roundup_filter_type == RoundupFilterType.VET_ALL:
             result += f"```\nLEGEND:\n{QOC_DEFAULT_LINKERR}: Link cannot be parsed\n{DEFAULT_CHECK}: Rip is OK\n{DEFAULT_FIX}: Rip has potential issues, see below\n{QOC_DEFAULT_BITRATE}: Bitrate is not 320kbps\n{QOC_DEFAULT_CLIPPING}: Clipping```"
 
-        await send_embed(result, command_context.channel, EmbedDesc(expires=True))
+        await send_embed(result, command_context.channel, EmbedDesc(expires=True, seperator=readability_line))
     else:
 
         not_found_message = "No rips."
