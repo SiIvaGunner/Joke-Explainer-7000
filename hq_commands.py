@@ -314,6 +314,7 @@ async def mypins(args: list[str], command_context: CommandContext):
 @command(
     command_type=CommandType.ROUNDUP,
     brief="Show QoC rips you've wrenched :fix: :alert:",
+    aliases=['mywrenches'],
 )
 async def myfixes(args: list[str], command_context: CommandContext):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.MYFIXES, \
@@ -449,7 +450,7 @@ async def norejects(args: list[str], command_context: CommandContext):
 @command(
     command_type=CommandType.ROUNDUP,
     brief="Show QoC rips with :fix:",
-    aliases=['wrenches', 'fix', 'wrench']
+    aliases=['wrenches', 'fix', 'wrench', 'fixes']
 )
 async def fixes(args: list[str], command_context: CommandContext):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.HASREACT, \
