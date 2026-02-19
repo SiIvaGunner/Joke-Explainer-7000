@@ -1194,12 +1194,10 @@ async def reset_cache(args: list[str], command_context: CommandContext):
 
     await send("Rebuilding cache...", command_context.channel)
 
-    suborqueue_count_old = 0 
-    async with CACHE_LOCK_SUBORQUEUE[channel.id]:
-        suborqueue_count_old = len(RIP_CACHE_SUBORQUEUE[channel.id])
-    qoc_count_old = 0
-    async with CACHE_LOCK_QOC[channel.id]:
-        qoc_count_old = len(RIP_CACHE_QOC[channel.id])
+    await lock_channel(channel.id)
+    suborqueue_count_old = len(RIP_CACHE_SUBORQUEUE[channel.id])
+    qoc_count_old = len(RIP_CACHE_QOC[channel.id])
+    await unlock_channel(channel.id)
 
     return_message = f'Cache rebuilt!'
 

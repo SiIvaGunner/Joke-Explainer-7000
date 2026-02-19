@@ -93,18 +93,51 @@ class SubOrQueueRip(NamedTuple):
 RIP_CACHE_QOC: dict[int, dict[int, QocRip]] = {}
 RIP_CACHE_SUBORQUEUE: dict[int, dict[int, SubOrQueueRip]] = {}
 
-CACHE_LOCK_QOC: dict[int, asyncio.Lock] = {}
-CACHE_LOCK_SUBORQUEUE: dict[int, asyncio.Lock] = {}
-
 def init_channel_cache(channel_id: int):
-    if channel_id not in RIP_CACHE_SUBORQUEUE:
-        RIP_CACHE_SUBORQUEUE[channel_id]: dict[int, SubOrQueueRip] = {}
     if channel_id not in RIP_CACHE_QOC:
-        RIP_CACHE_QOC[channel_id]: dict[int, SubOrQueueRip] = {}
-    if channel_id not in CACHE_LOCK_SUBORQUEUE:
-        CACHE_LOCK_SUBORQUEUE[channel_id] = asyncio.Lock()
-    if channel_id not in CACHE_LOCK_QOC:
-        CACHE_LOCK_QOC[channel_id] = asyncio.Lock()
+        RIP_CACHE_QOC[channel_id] = {}
+    if channel_id not in RIP_CACHE_SUBORQUEUE:
+        RIP_CACHE_SUBORQUEUE[channel_id] = {}
+
+
+#NOTE: (Ahmayk) Dummy async context that we can call instead in the case where 
+#we do not input a channel for channel.typing()
+@asynccontextmanager
+async def empty_async_context():
+    yield
+
+#NOTE: (Ahmayk) Locking on either a channel or message cache allows us to manage congruent process and commands
+## without one reading from or writing into the cache with outdated info
+async def _lock(id: int, lock_dict: dict[int, asyncio.Lock], typing_channel: TextChannel | Thread | None):
+    if id not in lock_dict:
+        lock_dict[id] = asyncio.Lock()
+    async with typing_channel.typing() if typing_channel is not None else empty_async_context():
+        await lock_dict[id].acquire()
+
+def _unlock(id: int, lock_dict: dict[int, asyncio.Lock]):
+    if id not in lock_dict:
+        lock_dict[id] = asyncio.Lock()
+    else:
+        lock_dict[id].release()
+
+CACHE_LOCK_MESSAGE: dict[int, asyncio.Lock] = {}
+async def lock_channel(channel_id: int, typing_channel: TextChannel | Thread | None):
+    print(f'---------------Locking channel <#{channel_id}>')
+    await _lock(channel_id, CACHE_LOCK_CHANNEL, typing_channel)
+
+def unlock_channel(channel_id: int):
+    print(f'------------------unlocking channel <#{channel_id}>')
+    _unlock(channel_id, CACHE_LOCK_CHANNEL)
+
+CACHE_LOCK_CHANNEL: dict[int, asyncio.Lock] = {}
+async def lock_message(message_id: int, typing_channel: TextChannel | Thread | None):
+    print(f'Locking message <#{message_id}>')
+    await _lock(message_id, CACHE_LOCK_MESSAGE, typing_channel)
+
+def unlock_message(message_id: int):
+    print(f'unlocking message <#{message_id}>')
+    _unlock(message_id, CACHE_LOCK_MESSAGE)
+
 
 class RipFetchType(Enum):
     PINS = auto()
@@ -115,7 +148,7 @@ class ChannelInfo(NamedTuple):
     rip_fetch_type: RipFetchType
     is_cache_qoc: bool
 
-def get_channel_info(channel: TextChannel) -> ChannelInfo:
+def get_channel_info(channel: TextChannel | Thread) -> ChannelInfo:
 
     rip_fetch_type = RipFetchType.PINS
 
@@ -154,34 +187,23 @@ def init_qoc_rip(message, react_and_users) -> QocRip:
 
 async def cache_qoc_rip(message: Message) -> QocRip:
 
-    init_channel_cache(message.channel.id)
-
     react_and_users: List[ReactAndUser] = []
     for reaction in message.reactions:
         react_and_users.extend(await get_react_and_users_of_reaction(reaction))
 
     qoc_rip = init_qoc_rip(message, react_and_users)
+
+    init_channel_cache(message.channel.id)
     RIP_CACHE_QOC[message.channel.id][message.id] = qoc_rip
 
     return qoc_rip
 
-#NOTE: (Ahmayk) Dummy async context that we can call instead in the case where 
-#we do not input a channel for channel.typing()
-@asynccontextmanager
-async def empty_async_context():
-    yield
-
-async def wait_with_typing_if_locked(lock: asyncio.Lock, typing_channel: TextChannel | Thread):
-    if lock.locked():
-        async with typing_channel.typing() if typing_channel is not None else empty_async_context():
-            async with lock:
-                pass
 
 class GetRipsDesc(NamedTuple):
     typing_channel: TextChannel | Thread | None = None
     rebuild_cache: bool = False
 
-async def get_qoc_rips(channel: typing.Union[GuildChannel, Thread], desc: GetRipsDesc) -> List[QocRip]:
+async def get_qoc_rips(channel: TextChannel | Thread, desc: GetRipsDesc) -> List[QocRip]:
     """
     Gets all qoc rips from a channel. Makes a cache for the channel if it doesn't already exist. 
 
@@ -190,35 +212,38 @@ async def get_qoc_rips(channel: typing.Union[GuildChannel, Thread], desc: GetRip
     """
 
     init_channel_cache(channel.id)
-
     channel_info = get_channel_info(channel)
 
     ##NOTE: (Ahmayk) If we hit either of these asserts, then we are calling get_qoc_rips() incorrectly!
     assert channel_info.rip_fetch_type == RipFetchType.PINS
     assert channel_info.is_cache_qoc 
 
-    await wait_with_typing_if_locked(CACHE_LOCK_QOC[channel.id], desc.typing_channel)
-
     ##NOTE: (Ahmayk) We need to prevent other processes from accessing the cache 
     ## in the case where we are updating the cache. If we allow access to the cache while
     ## it is being updated, it would likely be incomplete or wrong! 
-    async with CACHE_LOCK_QOC[channel.id]:
-        if not len(RIP_CACHE_QOC[channel.id]) or desc.rebuild_cache:
+    await lock_channel(channel.id, None)
 
-            async with desc.typing_channel.typing() if desc.typing_channel is not None else empty_async_context():
-                RIP_CACHE_QOC[channel.id]: dict[int, QocRip] = {}
+    if not len(RIP_CACHE_QOC[channel.id]) or desc.rebuild_cache:
 
-                async for message in channel.pins(limit=None):
+        async with desc.typing_channel.typing() if desc.typing_channel is not None else empty_async_context():
+            RIP_CACHE_QOC[channel.id] = {}
 
-                    if is_message_rip(message):
-                        # NOTE: (Ahmayk) channel.pins does not return reaction data,
-                        # so we have to fetch it manually. This is slow! But neccessary.
-                        fetched_message = await channel.fetch_message(message.id)
-                        await cache_qoc_rip(fetched_message)
+            async for message in channel.pins(limit=None):
+                if is_message_rip(message):
+                    await lock_message(message.id, None)
 
-                        # NOTE: (Ahmayk) always cache suborqueue versions
-                        # so that the data is easily accessible via get_suborqueue_rips_fast()
-                        cache_suborqueue_rip(fetched_message)
+                    # NOTE: (Ahmayk) channel.pins does not return reaction data,
+                    # so we have to fetch it manually. This is slow! But neccessary.
+                    fetched_message = await channel.fetch_message(message.id)
+                    await cache_qoc_rip(fetched_message)
+
+                    # NOTE: (Ahmayk) always cache suborqueue versions
+                    # so that the data is easily accessible via get_suborqueue_rips_fast()
+                    cache_suborqueue_rip(fetched_message)
+
+                    unlock_message(message.id)
+
+    unlock_channel(channel.id)
 
     result = list(RIP_CACHE_QOC[channel.id].values())
     ##NOTE: (Ahmayk) show rips in expected order, newest at top
@@ -231,8 +256,6 @@ def init_suborqueue_rip(message: Message, react_names: List[str]) -> SubOrQueueR
 
 def cache_suborqueue_rip(message) -> SubOrQueueRip:
 
-    init_channel_cache(message.channel.id)
-
     react_names = []
     for reaction in message.reactions:
         name = get_reaction_emoji_name(reaction) 
@@ -241,7 +264,9 @@ def cache_suborqueue_rip(message) -> SubOrQueueRip:
 
     suborqueue_rip = init_suborqueue_rip(message, react_names)
 
+    init_channel_cache(message.channel.id)
     RIP_CACHE_SUBORQUEUE[message.channel.id][message.id] = suborqueue_rip
+
     return suborqueue_rip
 
 async def get_suborqueue_rips(channel: typing.Union[GuildChannel, Thread], desc: GetRipsDesc) -> List[SubOrQueueRip]:
@@ -262,44 +287,53 @@ async def get_suborqueue_rips(channel: typing.Union[GuildChannel, Thread], desc:
     init_channel_cache(channel.id)
     channel_info = get_channel_info(channel)
 
-    await wait_with_typing_if_locked(CACHE_LOCK_SUBORQUEUE[channel.id], desc.typing_channel)
-
     ##NOTE: (Ahmayk) We need to prevent other processes from accessing the cache 
     ## in the case where we are updating the cache. If we allow access to the cache while
     ## it is being updated, it would likely be incomplete or wrong! 
-    async with CACHE_LOCK_SUBORQUEUE[channel.id]:
+    await lock_channel(channel.id, None)
 
-        if not len(RIP_CACHE_SUBORQUEUE[channel.id]) or desc.rebuild_cache:
+    if not len(RIP_CACHE_SUBORQUEUE[channel.id]) or desc.rebuild_cache:
 
-            async with desc.typing_channel.typing() if desc.typing_channel is not None else empty_async_context():
+        async with desc.typing_channel.typing() if desc.typing_channel is not None else empty_async_context():
 
-                match channel_info.rip_fetch_type: 
-                    case RipFetchType.ALL_MESSAGES_NO_THREADS:
-                        async for message in channel.history(limit = None):
-                            if is_message_rip(message):
-                                cache_suborqueue_rip(message)
+            match channel_info.rip_fetch_type: 
+                case RipFetchType.ALL_MESSAGES_NO_THREADS:
+                    async for message in channel.history(limit = None):
+                        if is_message_rip(message):
+                            await lock_message(message.id, None)
+                            cache_suborqueue_rip(message)
+                            unlock_message(message.id)
 
-                    case RipFetchType.ALL_MESSAGES_AND_THREADS:
-                        async for message in channel.history(limit = None):
-                            if message.thread is not None:
-                                thread_suborqueue_rips = await get_suborqueue_rips(message.thread, GetRipsDesc(rebuild_cache=desc.rebuild_cache))
-                                #NOTE: (Ahmayk) we insert thread rips also in its parent channel dict so that
-                                #we get all rips in theads when we get the parent channel's rips 
-                                for thread_suborqueue_rip in thread_suborqueue_rips:
-                                    RIP_CACHE_SUBORQUEUE[channel.id][thread_suborqueue_rip.message_id] = thread_suborqueue_rip 
-                            if is_message_rip(message):
-                                cache_suborqueue_rip(message)
+                case RipFetchType.ALL_MESSAGES_AND_THREADS:
+                    async for message in channel.history(limit = None):
+                        if message.thread is not None:
+                            thread_suborqueue_rips = await get_suborqueue_rips(message.thread, GetRipsDesc(rebuild_cache=desc.rebuild_cache))
+                            #NOTE: (Ahmayk) we insert thread rips also in its parent channel dict so that
+                            #we get all rips in theads when we get the parent channel's rips 
+                            for thread_suborqueue_rip in thread_suborqueue_rips:
+                                await lock_message(thread_suborqueue_rip.message_id, None)
+                                RIP_CACHE_SUBORQUEUE[channel.id][thread_suborqueue_rip.message_id] = thread_suborqueue_rip 
+                                unlock_message(thread_suborqueue_rip.message_id)
 
-                    case RipFetchType.PINS:
-                        async for message in channel.pins(limit = None):
-                            if is_message_rip(message):
-                                # NOTE: (Ahmayk) channel.pins does not return reaction data,
-                                # so we have to fetch it manually. This is slow! But neccessary.
-                                fetched_message = await channel.fetch_message(message.id)
-                                cache_suborqueue_rip(fetched_message)
+                        if is_message_rip(message):
+                            await lock_message(message.id, None)
+                            cache_suborqueue_rip(message)
+                            unlock_message(message.id)
 
-                    case _:
-                        assert "Unimplemented RipFetchType"
+                case RipFetchType.PINS:
+                    async for message in channel.pins(limit = None):
+                        if is_message_rip(message):
+                            # NOTE: (Ahmayk) channel.pins does not return reaction data,
+                            # so we have to fetch it manually. This is slow! But neccessary.
+                            await lock_message(message.id, None)
+                            fetched_message = await channel.fetch_message(message.id)
+                            cache_suborqueue_rip(fetched_message)
+                            unlock_message(message.id)
+
+                case _:
+                    assert "Unimplemented RipFetchType"
+
+    unlock_channel(channel.id)
 
     result = list(RIP_CACHE_SUBORQUEUE[channel.id].values())
     ##NOTE: (Ahmayk) show rips in expected order, newest at top
@@ -328,7 +362,7 @@ async def get_suborqueue_rips_fast(channel: typing.Union[GuildChannel, Thread], 
         result = await get_suborqueue_rips(channel, desc)
 
     else:
-        if not CACHE_LOCK_SUBORQUEUE[channel.id].locked() and len(RIP_CACHE_SUBORQUEUE[channel.id]):
+        if channel.id in CACHE_LOCK_CHANNEL and not CACHE_LOCK_CHANNEL[channel.id].locked() and len(RIP_CACHE_SUBORQUEUE[channel.id]):
             result = await get_suborqueue_rips(channel, desc)
         else:
             async with desc.typing_channel.typing() if desc.typing_channel is not None else empty_async_context():
@@ -353,61 +387,60 @@ def qoc_react_error_string(text: str, react_and_user: ReactAndUser, message: Mes
 async def validate_rip_message(message: Message, channel_info: ChannelInfo) -> str:
     result = ""
 
-    if is_message_rip(message):
-        needs_suborqueue_recache = False
-        if message.id in RIP_CACHE_SUBORQUEUE[message.channel.id]:
-            suborqueue_rip = RIP_CACHE_SUBORQUEUE[message.channel.id][message.id]
+    needs_suborqueue_recache = False
+    if message.id in RIP_CACHE_SUBORQUEUE[message.channel.id]:
+        suborqueue_rip = RIP_CACHE_SUBORQUEUE[message.channel.id][message.id]
 
-            if suborqueue_rip.text != message.content:
-                needs_suborqueue_recache = True
-                result += f'\nText outdated in SubOrQueue cache in {get_rip_title(message.content)}! {message.jump_url}'
-
-            for reaction in message.reactions:
-                name = get_reaction_emoji_name(reaction)
-                cached_reaction_count = 0
-                for cached_name in suborqueue_rip.react_names:
-                    if cached_name == name:
-                        cached_reaction_count += 1
-                if cached_reaction_count != reaction.count:
-                    needs_suborqueue_recache = True
-                    emoji_string = reaction_name_to_emoji_string(name, message.guild)
-                    result += f'\nReaction mismatch in SubOrQueue cache for {get_rip_title(message.content)} '+\
-                        f'{message.jump_url}{emoji_string}: ~~{cached_reaction_count}~~ {reaction.count}'
-        else:
-            result += f'\nRip missing from SubOrQueue cache: ${message.jump_url}'
+        if suborqueue_rip.text != message.content:
             needs_suborqueue_recache = True
+            result += f'\nText outdated in SubOrQueue cache in {get_rip_title(message.content)}! {message.jump_url}'
 
-        if needs_suborqueue_recache:
-            cache_suborqueue_rip(message)
+        for reaction in message.reactions:
+            name = get_reaction_emoji_name(reaction)
+            cached_reaction_count = 0
+            for cached_name in suborqueue_rip.react_names:
+                if cached_name == name:
+                    cached_reaction_count += 1
+            if cached_reaction_count != reaction.count:
+                needs_suborqueue_recache = True
+                emoji_string = reaction_name_to_emoji_string(name, message.guild)
+                result += f'\nReaction mismatch in SubOrQueue cache for {get_rip_title(message.content)} '+\
+                    f'{message.jump_url}{emoji_string}: ~~{cached_reaction_count}~~ {reaction.count}'
+    else:
+        result += f'\nRip missing from SubOrQueue cache: {get_rip_title(message.content)} {message.jump_url}'
+        needs_suborqueue_recache = True
 
-        if channel_info.is_cache_qoc:
-            if message.id in RIP_CACHE_QOC[message.channel.id]:
-                needs_qoc_recache = False
-                qoc_rip = RIP_CACHE_QOC[message.channel.id][message.id]
+    if needs_suborqueue_recache:
+        cache_suborqueue_rip(message)
 
-                if qoc_rip.text != message.content:
-                    needs_qoc_recache = True
-                    result += f'\nText outdated in QoC cache for {get_rip_title(message.content)}! {message.jump_url}'
+    if channel_info.is_cache_qoc:
+        if message.id in RIP_CACHE_QOC[message.channel.id]:
+            needs_qoc_recache = False
+            qoc_rip = RIP_CACHE_QOC[message.channel.id][message.id]
 
-                react_and_users = [] 
-                for reaction in message.reactions:
-                    fetched_react_and_users = await get_react_and_users_of_reaction(reaction)
+            if qoc_rip.text != message.content:
+                needs_qoc_recache = True
+                result += f'\nText outdated in QoC cache for {get_rip_title(message.content)}! {message.jump_url}'
 
-                    for fetched_react_and_user in fetched_react_and_users:
-                        if fetched_react_and_user not in qoc_rip.react_and_users:
-                            needs_qoc_recache = True
-                            result += qoc_react_error_string(f'Fetched reaction not found in QoC cache for', fetched_react_and_user, message)
-                    react_and_users.extend(fetched_react_and_users)
+            react_and_users = [] 
+            for reaction in message.reactions:
+                fetched_react_and_users = await get_react_and_users_of_reaction(reaction)
 
-                for cached_react_and_user in qoc_rip.react_and_users:
-                    if cached_react_and_user not in react_and_users:
+                for fetched_react_and_user in fetched_react_and_users:
+                    if fetched_react_and_user not in qoc_rip.react_and_users:
                         needs_qoc_recache = True
-                        result += qoc_react_error_string(f'Cached QoC reaction outdated for', cached_react_and_user, message)
+                        result += qoc_react_error_string(f'Fetched reaction not found in QoC cache for', fetched_react_and_user, message)
+                react_and_users.extend(fetched_react_and_users)
 
-                if needs_qoc_recache:
-                    RIP_CACHE_QOC[message.channel.id][message.id] = init_qoc_rip(message, react_and_users) 
-            else:
-                await cache_qoc_rip(message)
+            for cached_react_and_user in qoc_rip.react_and_users:
+                if cached_react_and_user not in react_and_users:
+                    needs_qoc_recache = True
+                    result += qoc_react_error_string(f'Cached QoC reaction outdated for', cached_react_and_user, message)
+
+            if needs_qoc_recache:
+                RIP_CACHE_QOC[message.channel.id][message.id] = init_qoc_rip(message, react_and_users) 
+        else:
+            await cache_qoc_rip(message)
 
     return result
 
@@ -424,28 +457,39 @@ async def validate_cache_all() -> str:
 
             channel_info = get_channel_info(channel)
 
-            async with CACHE_LOCK_QOC[channel.id]:
-                async with CACHE_LOCK_SUBORQUEUE[channel.id]:
+            match channel_info.rip_fetch_type:
+                case RipFetchType.ALL_MESSAGES_NO_THREADS:
+                    async for message in channel.history(limit = None):
+                        if is_message_rip(message):
+                            await lock_message(message.id, None)
+                            result += await validate_rip_message(message, channel_info)
+                            unlock_message(message.id)
 
-                    match channel_info.rip_fetch_type:
-                        case RipFetchType.ALL_MESSAGES_NO_THREADS:
-                            async for message in channel.history(limit = None):
-                                result += await validate_rip_message(message, channel_info)
 
+                case RipFetchType.ALL_MESSAGES_AND_THREADS:
+                    async for message in channel.history(limit = None):
+                        if message.thread is not None:
+                            async for thread_message in message.thread.history(limit = None):
+                                if is_message_rip(thread_message):
+                                    await lock_message(thread_message.id, None)
+                                    result += await validate_rip_message(thread_message, channel_info)
+                                    unlock_message(thread_message.id)
 
-                        case RipFetchType.ALL_MESSAGES_AND_THREADS:
-                            async for message in channel.history(limit = None):
-                                if message.thread is not None:
-                                    async for thread_message in message.thread.history(limit = None):
-                                        result += await validate_rip_message(thread_message, channel_info)
+                        if is_message_rip(message):
+                            await lock_message(message.id, None)
+                            result += await validate_rip_message(message, channel_info)
+                            unlock_message(message.id)
 
-                        case RipFetchType.PINS:
-                            async for message in channel.pins(limit = None):
-                                fetched_message = await channel.fetch_message(message.id)
-                                result += await validate_rip_message(fetched_message, channel_info)
+                case RipFetchType.PINS:
+                    async for message in channel.pins(limit = None):
+                        if is_message_rip(message):
+                            await lock_message(message.id, None)
+                            fetched_message = await channel.fetch_message(message.id)
+                            result += await validate_rip_message(fetched_message, channel_info)
+                            unlock_message(message.id)
 
-                        case _:
-                            assert "Unimplemented RipFetchType"
+                case _:
+                    assert "Unimplemented RipFetchType"
         else:
             result += f'\nFailed to find channel of id {channel_id}'
                 
