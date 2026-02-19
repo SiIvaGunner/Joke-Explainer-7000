@@ -1105,6 +1105,22 @@ async def check_qoc_and_metadata(text: str, message_id: int, message_author_name
 #                    EVENTS                     #
 #===============================================#
 
+async def remove_embeds_from_channel_startup(channel_ids: List[int], expire_time: float):
+    prefix = get_config("prefix")
+    for channel_id in channel_ids:
+        channel = bot.get_channel(channel_id)
+        if channel:
+            count = 0
+            async for message in channel.history(limit = 200):
+                if message.author == bot.user and message.embeds and (datetime.now(timezone.utc) - message.created_at) > timedelta(seconds=expire_time):
+                    await message.delete()
+                    count += 1
+            
+            if count > 0:
+                await send(f"Good morning! Removed {count} embed messages sent more than {expire_time // 60} minutes ago. " + \
+                       f"If there are older or newer embeds that should be removed, run {prefix}cleanup manually.", channel)
+    
+
 @bot.event
 async def on_ready():
     # this should ensure a check for config.json on start up. if the file doesnt exist, the bot should close with error.
@@ -1143,33 +1159,10 @@ async def on_ready():
 
     validate_cache_regularly.start()
 
-    # remove embeds from qoc channels that were not removed after bot restart
-    for channel_id in qoc_channel_ids:
-        channel = bot.get_channel(channel_id)
-        if channel:
-            count = 0
-            async for message in channel.history(limit = 200):
-                if message.author == bot.user and message.embeds and (datetime.now(timezone.utc) - message.created_at) > timedelta(seconds=get_config('embed_seconds')):
-                    await message.delete()
-                    count += 1
-            
-            if count > 0:
-                await send(f"Good morning! Removed {count} embed messages sent more than {get_config('embed_seconds') // 60} minutes ago. " + \
-                       f"If there are older or newer embeds that should be removed, run {prefix}cleanup manually.", channel)
-    
+    await remove_embeds_from_channel_startup(qoc_channel_ids, get_config('embed_seconds'))
+
     proxy_channel_ids = get_channel_ids_of_types(['PROXY_QOC'])
-    for channel_id in proxy_channel_ids:
-        channel = bot.get_channel(channel_id)
-        if channel:
-            count = 0
-            async for message in channel.history(limit = 200):
-                if message.author == bot.user and message.embeds and (datetime.now(timezone.utc) - message.created_at) > timedelta(seconds=get_config('proxy_embed_seconds')):
-                    await message.delete()
-                    count += 1
-            
-            if count > 0:
-                await send(f"Good morning! Removed {count} embed messages sent more than {get_config('proxy_embed_seconds') // 60} minutes ago. " + \
-                       f"If there are older or newer embeds that should be removed, run {prefix}cleanup manually.", channel)
+    await remove_embeds_from_channel_startup(proxy_channel_ids, get_config('proxy_embed_seconds'))
 
 import traceback
 @bot.event

@@ -27,6 +27,7 @@ def get_channel_ids_of_types(types: List[str]) -> List[str]:
         for type in types:
             if type in channel["types"]: 
                 result.append(channel["id"])
+                break
     return result
 
 def get_channel_config(id: int):
