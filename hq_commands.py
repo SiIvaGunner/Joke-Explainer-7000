@@ -29,6 +29,7 @@ async def help(args: list[str], command_context: CommandContext):
 
     result = "" 
 
+    prefix = get_config("prefix")
     qoc_emote = get_qoc_emoji(command_context.channel.guild)
 
     if len(args):
@@ -39,7 +40,7 @@ async def help(args: list[str], command_context: CommandContext):
         if not command_info:
             return await send(f'No command named {search_input}', command_context.channel)
 
-        title = f'!{command_info.name} {command_info.format}'
+        title = f'{prefix}{command_info.name} {command_info.format}'
 
         brief = parse_emojis_in_string(command_info.brief, command_context.channel.guild)
         desc = f':small_blue_diamond: __**Description**__: {brief}' 
@@ -58,12 +59,12 @@ async def help(args: list[str], command_context: CommandContext):
         if len(command_info.aliases):
             desc += '\n__*Aliases:*__ '
         for alias in command_info.aliases:
-            desc += f'`!{alias}` ' 
+            desc += f'`{prefix}{alias}` ' 
 
         if len(command_info.examples):
             desc += '\n__*Examples:*__: '
         for example in command_info.examples:
-            desc += f'\n- `!{command_info.name} {example}` ' 
+            desc += f'\n- `{prefix}{command_info.name} {example}` ' 
 
         return await send_embed(desc, command_context.channel, EmbedDesc(title=title))
         
@@ -87,7 +88,7 @@ async def help(args: list[str], command_context: CommandContext):
                     if not info.public:
                         result += f'{qoc_emote} '
 
-                    result += f'**!{name}**'
+                    result += f'**{prefix}{name}**'
 
                     if len(info.format):
                         result += f' **{info.format}**'
@@ -108,7 +109,7 @@ async def help(args: list[str], command_context: CommandContext):
         result += '\n**[argument]**: Optional argument'
         result += f'\n{qoc_emote}: Command only accessible in QoC channels:'
         result += f'\n{" ".join(qoc_channels_strings)}'
-        result += f'\n\n*To learn more about a command, use `!help <command>`*'
+        result += f'\n\n*To learn more about a command, use `{prefix}help <command>`*'
 
         await send_embed(result, command_context.channel, EmbedDesc())
 
@@ -842,11 +843,12 @@ async def scout_stats(args: list[str], command_context: CommandContext):
     brief='Vet all QoC rips for bitrate and clipping issues',
 )
 async def vet(args: list[str], command_context: CommandContext):
+    prefix = get_config("prefix")
     if len(args):
-        return await send("WARNING: ``!vet`` takes no argument. Did you mean to use ``!vet_msg`` or ``!vet_url``?", command_context.channel)
+        return await send(f"WARNING: ``{prefix}vet`` takes no argument. Did you mean to use ``{prefix}vet_msg`` or ``{prefix}vet_url``?", command_context.channel)
     
     if command_context.message_reference:
-        return await send("WARNING: ``!vet`` takes no argument (nor replies). Did you mean to use ``!vet_msg`` or ``!vet_url``?", command_context.channel)
+        return await send(f"WARNING: ``{prefix}vet`` takes no argument (nor replies). Did you mean to use ``{prefix}vet_msg`` or ``{prefix}vet_url``?", command_context.channel)
     
     await vet_from(args, command_context)
 
@@ -1442,8 +1444,9 @@ async def current_config(args: list[str], command_context: CommandContext):
     aliases=['set_config'],
 )
 async def modify_config(args: list[str], command_context: CommandContext):
+    prefix = get_config("prefix")
     if len(args) < 2:
-        return await send("Invalid syntax. Usage: !modify_config [config] [new value]", command_context.channel)
+        return await send(f"Invalid syntax. Usage: {prefix}modify_config [config] [new value]", command_context.channel)
     
     conf = args[0]
     value = args[1]

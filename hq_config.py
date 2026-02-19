@@ -104,12 +104,10 @@ def set_config(config: str, value):
 # hey i should probably use locks on these
 
 def _read_config_file():
-    if os.path.exists('config.json'):
-        with open('config.json', 'r', encoding='utf-8') as file:
-            configs = json.load(file)
-            return configs
-    else:
-        raise FileNotFoundError("config.json not found. Please contact bot owner to create the file.")
+    assert os.path.exists('config.json'), "config.json not found. Please contact bot owner to create the file."
+    with open('config.json', 'r', encoding='utf-8') as file:
+        configs = json.load(file)
+        return configs
 
 def _write_config_file(configs):
     with open('config.json', 'w', encoding='utf-8') as file:

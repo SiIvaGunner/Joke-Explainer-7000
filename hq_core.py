@@ -24,8 +24,6 @@ from discord.abc import GuildChannel
 
 from hq_config import *
 
-COMMAND_PREFIX = '!'
-
 bot = discord.Client(
     intents = discord.Intents.all() # This was a change necessitated by an update to discord.py :/
     # https://stackoverflow.com/questions/71950432/how-to-resolve-the-following-error-in-discord-py-typeerror-init-missing
@@ -1109,6 +1107,8 @@ async def check_qoc_and_metadata(text: str, message_id: int, message_author_name
 
 @bot.event
 async def on_ready():
+    # this should ensure a check for config.json on start up. if the file doesnt exist, the bot should close with error.
+    prefix = get_config("prefix")
 
     print(f'Logged in as {bot.user.name}')
     print('#################################')
@@ -1155,7 +1155,7 @@ async def on_ready():
             
             if count > 0:
                 await send(f"Good morning! Removed {count} embed messages sent more than {get_config('embed_seconds') // 60} minutes ago. " + \
-                       f"If there are older or newer embeds that should be removed, run {COMMAND_PREFIX}cleanup manually.", channel)
+                       f"If there are older or newer embeds that should be removed, run {prefix}cleanup manually.", channel)
     
     proxy_channel_ids = get_channel_ids_of_types(['PROXY_QOC'])
     for channel_id in proxy_channel_ids:
@@ -1169,7 +1169,7 @@ async def on_ready():
             
             if count > 0:
                 await send(f"Good morning! Removed {count} embed messages sent more than {get_config('proxy_embed_seconds') // 60} minutes ago. " + \
-                       f"If there are older or newer embeds that should be removed, run {COMMAND_PREFIX}cleanup manually.", channel)
+                       f"If there are older or newer embeds that should be removed, run {prefix}cleanup manually.", channel)
 
 import traceback
 @bot.event
@@ -1350,7 +1350,7 @@ async def on_message(message: Message):
 
     process_suborqueue_rip_caching(message)
 
-    if not message.content.startswith(COMMAND_PREFIX):
+    if not message.content.startswith(get_config("prefix")):
         return
 
     args = message.content.split(' ')
