@@ -16,6 +16,7 @@ from typing import NamedTuple, List
 from enum import Enum, auto
 import json
 import os
+import random
 
 @command(
     command_type=CommandType.MANAGEMENT,
@@ -127,6 +128,7 @@ class RoundupFilterType(Enum):
     NOTHASREACT = auto()
     OVERDUE = auto()
     VET_ALL = auto()
+    RANDOM = auto()
 
 class RoundupDesc(NamedTuple):
     roundup_filter_type: RoundupFilterType = RoundupFilterType.NULL
@@ -164,9 +166,13 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
                 if search_author:
                     await command_context.channel.send(f"Searching for rips {roundup_desc.conditional_string} by {search_author.name}")
 
+    selected_index = 0
+    if roundup_desc.roundup_filter_type == RoundupFilterType.RANDOM:
+        selected_index = random.randint(0, len(qoc_rips) - 1)
+
     result = ""
 
-    for qoc_rip in qoc_rips:
+    for i, qoc_rip in enumerate(qoc_rips):
 
         reacts = ""
         num_checks = 0
@@ -259,6 +265,8 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
                 vet_reacts, msg = await vet_message(qoc_rip.text) 
                 reacts = vet_reacts
                 is_valid = True 
+            case RoundupFilterType.RANDOM:
+                is_valid = (i == selected_index)
 
         if is_valid:
             link = format_message_link(channel.guild.id, channel.id, qoc_rip.message_id)
@@ -472,6 +480,15 @@ async def stops(args: list[str], command_context: CommandContext):
 )
 async def overdue(args: list[str], command_context: CommandContext):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.OVERDUE, not_found_message="No overdue rips.")
+    await send_roundup(roundup_desc, command_context)
+
+@command(
+    command_type=CommandType.ROUNDUP,
+    brief=f'Show a random QoC rip',
+    aliases=['random', 'lucky', 'letsgogambling!']
+)
+async def randompull(args: list[str], command_context: CommandContext):
+    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.RANDOM, not_found_message="No gambling today, sorry!")
     await send_roundup(roundup_desc, command_context)
 
 # ============ Counting Commands ============== #
