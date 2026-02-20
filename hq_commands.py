@@ -95,11 +95,13 @@ async def help(args: list[str], command_context: CommandContext):
                     result += f'**{prefix}{name}**'
 
                     if len(info.format):
-                        result += f' **{info.format}**'
+                        result += f' `{info.format}`:'
+                    else:
+                        result += f':'
 
                     if len(info.brief):
                         brief = parse_emojis_in_string(info.brief, command_context.channel.guild)
-                        result += f': {brief}'
+                        result += f' {brief}'
 
         qoc_channel_ids = get_channel_ids_of_types(['QOC', 'PROXY_QOC'])
         qoc_channels_strings: list[str] = [] 
@@ -109,8 +111,8 @@ async def help(args: list[str], command_context: CommandContext):
                 qoc_channels_strings.append(channel.jump_url)
 
         result += '\n\n__**Legend:**__'
-        result += '\n**<argument>**: Required argument'
-        result += '\n**[argument]**: Optional argument'
+        result += '\n`<argument>`: Required argument'
+        result += '\n`[argument]`: Optional argument'
         result += f'\n{qoc_emote}: Command only accessible in QoC channels:'
         result += f'\n{" ".join(qoc_channels_strings)}'
         result += f'\n\n*To learn more about a command, use `{prefix}help <command>`*'
