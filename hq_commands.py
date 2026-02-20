@@ -1481,7 +1481,7 @@ async def channel_list(args: list[str], command_context: CommandContext):
             message.append(
                 f"<#{channel_config.id}>: " \
                 + ", ".join(channel_config.types) \
-                + " [pinlimit must die mode {}]".format("enabled" if channel_config.pinlimit_must_die_mode else "disabled") if 'QOC' in channel_config.types else ""
+                + (" [pinlimit must die mode {}]".format("enabled" if channel_config.pinlimit_must_die_mode else "disabled") if 'QOC' in channel_config.types else "")
             )
         result = "\n".join(message)
         
