@@ -874,7 +874,7 @@ async def send_embed(text: str, channel: TextChannel | Thread, desc: EmbedDesc):
     wall_of_text = ""
     total_len_added = 0
     for line in all_lines:
-        line = line.replace('@', '')  # no more pings lol
+        # line = line.replace('@', '')  # pings are fine specifically in embed
         next_length = len(wall_of_text) + len(line)
 
         desc_limit = embed_character_limit_total 
