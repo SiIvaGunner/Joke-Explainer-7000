@@ -771,6 +771,50 @@ async def unsent(args: list[str], command_context: CommandContext):
 @command(
     command_type=CommandType.QUEUE,
     public=True,
+    format="<search text>",
+    brief='Search queued rip titles',
+    desc="Does not need quotes.",
+    aliases=['search_queue', 'search_queues', 'search_qs'],
+)
+async def search_q(args: list[str], command_context: CommandContext):
+
+    if not len(args):
+        return await send("Error: Inclue what you want to search for! I'll search for it in the titles of accepted queued rips.", \
+                           command_context.channel)
+
+    input_text = "".join([str(s) for s in args])
+    desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.SEARCH_TITLE, \
+                              channel_types = ['QUEUE'], \
+                              search_key = input_text, \
+                              not_found_message = f'No submissions containing `{input_text}` in title found.')
+    await send_suborqueue_rips(desc, command_context)
+
+
+@command(
+    command_type=CommandType.QUEUE,
+    public=True,
+    format="<event text>",
+    brief='Search for queued event rips',
+    desc="This can also be used as a general purpose author line search tool. Does not need quotes.",
+    aliases=['event_queue', 'event_queues', "event_qs"],
+)
+async def event_q(args: list[str], command_context: CommandContext):
+
+    if not len(args):
+        return await send("Error: Please include the event name tagged in queued rips.", \
+                           command_context.channel)
+
+    input_text = "".join([str(s) for s in args])
+    desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.SEARCH_AUTHOR, \
+                              channel_types = ['QUEUE'], \
+                              search_key = input_text, \
+                              not_found_message = f'No submissions containing `{input_text}` in author line found.')
+    await send_suborqueue_rips(desc, command_context)
+
+
+@command(
+    command_type=CommandType.QUEUE,
+    public=True,
     format="<prefix>",
     brief='Search queued rips startting with prefix',
     desc='The prefix can contain spaces.',
