@@ -604,6 +604,7 @@ class SubOrQueueRipFilterType(Enum):
     SEARCH_TITLE = auto()
     SEARCH_AUTHOR = auto()
     SCOUT = auto()
+    ALL = auto()
 
 class SendSubOrQueueDesc(NamedTuple):
     suborqueue_rip_filter_type: SubOrQueueRipFilterType = SubOrQueueRipFilterType.NULL 
@@ -657,6 +658,8 @@ async def send_suborqueue_rips(desc: SendSubOrQueueDesc, command_context: Comman
                     is_valid = line_contains_substring(rip_author, desc.search_key)
                 case SubOrQueueRipFilterType.SCOUT:
                     is_valid = rip_title.lower().startswith(prefix)
+                case SubOrQueueRipFilterType.ALL:
+                    is_valid = True
                 case _:
                     assert "Unimplemented SubOrQueueRipFilterType"
 
@@ -982,8 +985,29 @@ async def vibecheck_subs(args: list[str], command_context: CommandContext):
 
     await send_vibes(subbed_rips, max, command_context)
 
+@command(
+    command_type=CommandType.SUBS,
+    brief='Show all subbed rips',
+    desc="Warning: Long!",
+    aliases=['all_subs', 'sub_all', 'gubmeup'],
+)
+async def subs_all(args: list[str], command_context: CommandContext):
+    desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.ALL, \
+                              channel_types = ['SUBS', 'SUBS_PIN', 'SUBS_THREAD'])
+    await send_suborqueue_rips(desc, command_context)
 
-##TODO: (Ahmayk) subs_all [channel_link]
+
+@command(
+    command_type=CommandType.QUEUE,
+    brief='Show all queued rips',
+    desc="Warning: Long! You're welcome minindo.",
+    aliases=['all_queues', 'all_rips', 'q_all', 'fuckyou'],
+)
+async def queue_all(args: list[str], command_context: CommandContext):
+    desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.ALL, \
+                              channel_types = ['QUEUE'])
+    await send_suborqueue_rips(desc, command_context)
+
 
 # ============ Basic QoC commands ============== #
 
@@ -1320,7 +1344,7 @@ async def validate_cache(args: list[str], command_context: CommandContext):
 @command(
     command_type=CommandType.MANAGEMENT,
     format='<channel link>',
-    brief='Refetches all rip data from discord for a channel',
+    brief='Refetches rip data from discord for channel',
 )
 async def reset_cache(args: list[str], command_context: CommandContext):
 
