@@ -495,7 +495,7 @@ async def overdue(args: list[str], command_context: CommandContext):
 @command(
     command_type=CommandType.QOC,
     brief=f'Show a random QoC rip',
-    aliases=['random', 'lucky', 'letsgogambling!']
+    aliases=['random', 'randomqoc', 'random_qoc', 'lucky', 'letsgogambling!']
 )
 async def randompull(args: list[str], command_context: CommandContext):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.RANDOM, not_found_message="No gambling today, sorry!")
@@ -605,6 +605,7 @@ class SubOrQueueRipFilterType(Enum):
     SEARCH_AUTHOR = auto()
     SCOUT = auto()
     ALL = auto()
+    RANDOM = auto()
 
 class SendSubOrQueueDesc(NamedTuple):
     suborqueue_rip_filter_type: SubOrQueueRipFilterType = SubOrQueueRipFilterType.NULL 
@@ -631,6 +632,17 @@ async def send_suborqueue_rips(desc: SendSubOrQueueDesc, command_context: Comman
 
     prefix = desc.search_key.lower()
     qoc_emote = get_qoc_emoji(command_context.channel.guild)
+
+    selected_message_id = 0
+    if desc.suborqueue_rip_filter_type == SubOrQueueRipFilterType.RANDOM: 
+        message_ids: List[int] = []
+        for channel_id in channel_ids:
+            await lock_channel(channel_id, command_context.channel)
+            if channel_id in RIP_CACHE_SUBORQUEUE:
+                for k in RIP_CACHE_SUBORQUEUE[channel_id].keys():
+                    message_ids.append(k)
+                unlock_channel(channel_id)
+        selected_message_id = random.choice(message_ids)
 
     for channel_id in channel_ids:
         channel = bot.get_channel(channel_id)
@@ -660,6 +672,8 @@ async def send_suborqueue_rips(desc: SendSubOrQueueDesc, command_context: Comman
                     is_valid = rip_title.lower().startswith(prefix)
                 case SubOrQueueRipFilterType.ALL:
                     is_valid = True
+                case SubOrQueueRipFilterType.RANDOM:
+                    is_valid = suborqueue_rip.message_id == selected_message_id
                 case _:
                     assert "Unimplemented SubOrQueueRipFilterType"
 
@@ -723,6 +737,19 @@ async def event_subs(args: list[str], command_context: CommandContext):
                               search_key = input_text, \
                               not_found_message = f'No submissions containing `{input_text}` in author line found.')
     await send_suborqueue_rips(desc, command_context)
+
+
+@command(
+    command_type=CommandType.SUBS,
+    public=True,
+    brief=f'Show a random submitted rip',
+    aliases=['randomsub', 'randomqoc', 'luckysub', 'letsgogambling!sub!']
+)
+async def random_sub(args: list[str], command_context: CommandContext):
+    desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.RANDOM, \
+                              channel_types = ['SUBS', 'SUBS_PIN', 'SUBS_THREAD'])
+    await send_suborqueue_rips(desc, command_context)
+
 
 
 @command(
@@ -994,6 +1021,18 @@ async def vibecheck_subs(args: list[str], command_context: CommandContext):
 async def subs_all(args: list[str], command_context: CommandContext):
     desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.ALL, \
                               channel_types = ['SUBS', 'SUBS_PIN', 'SUBS_THREAD'])
+    await send_suborqueue_rips(desc, command_context)
+
+
+@command(
+    command_type=CommandType.QUEUE,
+    public=True,
+    brief=f'Show a random submitted rip',
+    aliases=['randomq', 'randomqueue', 'randomaccepted', 'luckyqueue', 'letsgogambling!queue!']
+)
+async def random_q(args: list[str], command_context: CommandContext):
+    desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.RANDOM, \
+                              channel_types = ['QUEUE'])
     await send_suborqueue_rips(desc, command_context)
 
 
