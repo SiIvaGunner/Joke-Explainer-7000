@@ -111,13 +111,15 @@ async def empty_async_context():
 async def _lock(id: int, lock_dict: dict[int, asyncio.Lock], typing_channel: TextChannel | Thread | None):
     if id not in lock_dict:
         lock_dict[id] = asyncio.Lock()
-    async with typing_channel.typing() if typing_channel is not None else empty_async_context():
-        await lock_dict[id].acquire()
+
+    if lock_dict[id].locked():
+        print(f'LOCKED ON id: ${id}. Typing channel: {typing_channel}')
+        async with typing_channel.typing() if typing_channel is not None else empty_async_context():
+            pass
+    await lock_dict[id].acquire()
 
 def _unlock(id: int, lock_dict: dict[int, asyncio.Lock]):
-    if id not in lock_dict:
-        lock_dict[id] = asyncio.Lock()
-    else:
+    if id in lock_dict and lock_dict[id].locked():
         lock_dict[id].release()
 
 CACHE_LOCK_MESSAGE: dict[int, asyncio.Lock] = {}
@@ -137,10 +139,6 @@ async def lock_message_if_init(message_id: int, typing_channel: TextChannel | Th
 
 def unlock_message(message_id: int):
     _unlock(message_id, CACHE_LOCK_MESSAGE)
-
-def unlock_message_if_init(message_id: int):
-    if message_id in CACHE_LOCK_MESSAGE:
-        _unlock(message_id, CACHE_LOCK_MESSAGE) 
 
 class RipFetchType(Enum):
     PINS = auto()
@@ -227,7 +225,7 @@ async def get_qoc_rips(channel: TextChannel | Thread, desc: GetRipsDesc) -> List
     ##NOTE: (Ahmayk) We need to prevent other processes from accessing the cache 
     ## in the case where we are updating the cache. If we allow access to the cache while
     ## it is being updated, it would likely be incomplete or wrong! 
-    await lock_channel(channel.id, None)
+    await lock_channel(channel.id, desc.typing_channel)
 
     if not len(RIP_CACHE_QOC[channel.id]) or desc.rebuild_cache:
 
@@ -300,7 +298,7 @@ async def get_suborqueue_rips(channel: typing.Union[GuildChannel, Thread], desc:
     ##NOTE: (Ahmayk) We need to prevent other processes from accessing the cache 
     ## in the case where we are updating the cache. If we allow access to the cache while
     ## it is being updated, it would likely be incomplete or wrong! 
-    await lock_channel(channel.id, None)
+    await lock_channel(channel.id, desc.typing_channel)
 
     if not len(RIP_CACHE_SUBORQUEUE[channel.id]) or desc.rebuild_cache:
 
@@ -1423,7 +1421,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                 ## since this doesn't require any more api calls 
                 cache_suborqueue_rip(message)
 
-    unlock_message_if_init(payload.message_id)
+    unlock_message(payload.message_id)
 
 
 async def process_suborqueue_rip_caching(message: Message):
@@ -1447,7 +1445,7 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
         suborqueue_rip = RIP_CACHE_SUBORQUEUE[payload.channel_id][payload.message_id]
         if payload.emoji.name in suborqueue_rip.react_names:
             suborqueue_rip.react_names.remove(payload.emoji.name)
-    unlock_message_if_init(payload.message_id)
+    unlock_message(payload.message_id)
 
 @bot.event
 async def on_raw_reaction_clear_emoji(payload: discord.RawReactionClearEmojiEvent):
@@ -1464,7 +1462,7 @@ async def on_raw_reaction_clear_emoji(payload: discord.RawReactionClearEmojiEven
             if cached_react_name == payload.emoji.name:
                 suborqueue_rip.react_names.remove(cached_react_name)
                 break
-    unlock_message_if_init(payload.message_id)
+    unlock_message(payload.message_id)
 
 @bot.event
 async def on_raw_reaction_clear(payload: discord.RawReactionClearEvent):
@@ -1475,7 +1473,7 @@ async def on_raw_reaction_clear(payload: discord.RawReactionClearEvent):
     if payload.channel_id in RIP_CACHE_SUBORQUEUE and payload.message_id in RIP_CACHE_SUBORQUEUE[payload.channel_id]: 
         suborqueue_rip = RIP_CACHE_SUBORQUEUE[payload.channel_id][payload.message_id]
         suborqueue_rip.react_names.clear()
-    unlock_message_if_init(payload.message_id)
+    unlock_message(payload.message_id)
 
 
 @bot.event
@@ -1494,7 +1492,7 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
         suborqueue_rip = RIP_CACHE_SUBORQUEUE[payload.channel_id][payload.message_id]
         suborqueue_rip = suborqueue_rip._replace(text = payload.message.content)
         RIP_CACHE_SUBORQUEUE[payload.channel_id][payload.message_id] = suborqueue_rip
-    unlock_message_if_init(payload.message_id)
+    unlock_message(payload.message_id)
 
 @bot.event
 async def on_message(message: Message):
