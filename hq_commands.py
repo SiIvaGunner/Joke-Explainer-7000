@@ -884,6 +884,105 @@ async def scout_stats(args: list[str], command_context: CommandContext):
     else:
         await send_embed(result, command_context.channel, EmbedDesc(expires=True))
 
+
+async def send_vibes(suborqueue_rips: List[SubOrQueueRip], max_emojis: int, command_context: CommandContext):
+    react_dict: dict[str, int] = {}
+
+    for suborqueue_rip in suborqueue_rips:
+        for name in suborqueue_rip.react_names:
+            if name not in react_dict:
+                react_dict[name] = 0
+            react_dict[name] += 1
+
+    min = 0
+    if max_emojis != 0:
+        while len(react_dict.keys()) > max_emojis:
+            min += 1
+            _temp_dict = {} 
+            for k, v in react_dict.items():
+                if v > min:
+                    _temp_dict[k] = v
+            react_dict = _temp_dict
+    
+    result = ""
+
+    if min > 0:
+        result += f'*Showing reactions with minimum **{min}** occurances.*\n\n'
+
+    maxCount = max(max(react_dict.values()), 20)
+    for k, v in sorted(react_dict.items(), key=lambda item: item[1], reverse=True):
+        emoji_stirng = reaction_name_to_emoji_string(k, command_context.channel.guild)
+        result += f"{emoji_stirng}: " + ("▮" * int(v / maxCount * 20)) + f" ({v})\n"
+
+    if len(suborqueue_rips) == 0:
+        await send("No rips found.", command_context.channel)
+    else:
+        await send_embed(result, command_context.channel, EmbedDesc(expires=True))
+
+@command(
+    command_type=CommandType.QOC,
+    brief='Tally the vibes of QOC rips',
+    format='[all]',
+    desc='Only shows 40 reactions at most. Include `all` or `a` to show everything.',
+    aliases=['vibes', 'reacts', 'stats_reacts', 'stats_react', 'react_stats', 'howbadisit', 'howgoodisit'],
+)
+async def vibecheck(args: list[str], command_context: CommandContext):
+
+    channel = await get_qoc_channel(command_context.channel)
+    if channel is None: return
+
+    suborqueue_rips = await get_suborqueue_rips(channel, GetRipsDesc(typing_channel=command_context.channel))
+
+    await send_vibes(suborqueue_rips, 0, command_context)
+
+
+@command(
+    command_type=CommandType.QUEUE,
+    public=True,
+    format='[all]',
+    brief='Tally the vibes of queued rips',
+    desc='Only shows 30 reactions at most. Include `all` or `a` to show everything.',
+    aliases=['vibes_q', 'reacts_q', 'stats_reacts_q', 'stats_react_q', 'react_stats_q', 'howbadisit_q', 'howgoodisit_q'],
+)
+async def vibecheck_q(args: list[str], command_context: CommandContext):
+
+    max = 30
+    if len(args) > 0:
+        max = 0 
+
+    queue_rips = []
+    for channel_id in get_channel_ids_of_types(['QUEUE']):
+        channel = bot.get_channel(channel_id)
+        if channel:
+            rips = await get_suborqueue_rips(channel, GetRipsDesc(typing_channel=command_context.channel))
+            queue_rips.extend(rips)
+
+    await send_vibes(queue_rips, max, command_context)
+
+
+@command(
+    command_type=CommandType.SUBS,
+    public=True,
+    brief='Tally the vibes of submitted rips',
+    desc='Only shows 30 reactions at most. Include `all` or `a` to show everything.',
+    aliases=['vibes_subs', 'reacts_subs', 'stats_reacts_subs', 'stats_react_subs', 'react_stats_subs', 'howbadisit_subs', 'howgoodisit_subs'],
+)
+async def vibecheck_subs(args: list[str], command_context: CommandContext):
+
+    max = 30
+    if len(args) > 0:
+        max = 0 
+
+    subbed_rips = []
+    for channel_id in get_channel_ids_of_types(['SUBS', 'SUBS_THREAD', 'SUBS_PIN']):
+        channel = bot.get_channel(channel_id)
+        if channel:
+            rips = await get_suborqueue_rips(channel, GetRipsDesc(typing_channel=command_context.channel))
+            subbed_rips.extend(rips)
+
+    await send_vibes(subbed_rips, max, command_context)
+
+
 ##TODO: (Ahmayk) subs_all [channel_link]
 
 # ============ Basic QoC commands ============== #
