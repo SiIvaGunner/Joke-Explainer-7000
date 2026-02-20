@@ -372,7 +372,7 @@ async def search(args: list[str], command_context: CommandContext):
         return await send("Error: Inclue what you want to search for! I'll search for it in the titles of QoC rips.", \
                            command_context.channel)
 
-    input_text = "".join([str(s) for s in args])
+    input_text = " ".join([str(s) for s in args])
 
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.SEARCH_TITLE, \
             search_key=input_text,\
@@ -406,7 +406,7 @@ async def events(args: list[str], command_context: CommandContext):
         return await send("Error: Please include the event name tagged in rips.", \
                            command_context.channel)
 
-    input_text = "".join([str(s) for s in args])
+    input_text = " ".join([str(s) for s in args])
 
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.SEARCH_AUTHOR, \
             search_key= input_text,\
@@ -690,7 +690,7 @@ async def search_subs(args: list[str], command_context: CommandContext):
         return await send("Error: Inclue what you want to search for! I'll search for it in the titles of submitted rips.", \
                            command_context.channel)
 
-    input_text = "".join([str(s) for s in args])
+    input_text = " ".join([str(s) for s in args])
     desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.SEARCH_TITLE, \
                               channel_types = ['SUBS', 'SUBS_PIN', 'SUBS_THREAD'], \
                               search_key = input_text, \
@@ -712,7 +712,7 @@ async def event_subs(args: list[str], command_context: CommandContext):
         return await send("Error: Please include the event name tagged in submitted rips.", \
                            command_context.channel)
 
-    input_text = "".join([str(s) for s in args])
+    input_text = " ".join([str(s) for s in args])
     desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.SEARCH_AUTHOR, \
                               channel_types = ['SUBS', 'SUBS_PIN', 'SUBS_THREAD'], \
                               search_key = input_text, \
@@ -782,7 +782,7 @@ async def search_q(args: list[str], command_context: CommandContext):
         return await send("Error: Inclue what you want to search for! I'll search for it in the titles of accepted queued rips.", \
                            command_context.channel)
 
-    input_text = "".join([str(s) for s in args])
+    input_text = " ".join([str(s) for s in args])
     desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.SEARCH_TITLE, \
                               channel_types = ['QUEUE'], \
                               search_key = input_text, \
@@ -804,7 +804,7 @@ async def event_q(args: list[str], command_context: CommandContext):
         return await send("Error: Please include the event name tagged in queued rips.", \
                            command_context.channel)
 
-    input_text = "".join([str(s) for s in args])
+    input_text = " ".join([str(s) for s in args])
     desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.SEARCH_AUTHOR, \
                               channel_types = ['QUEUE'], \
                               search_key = input_text, \
@@ -826,7 +826,7 @@ async def scout(args: list[str], command_context: CommandContext):
         return await send("Error: Please provide a prefix. I'll find approved rips that start with it.", \
                            command_context.channel)
 
-    input_text = "".join([str(s) for s in args])
+    input_text = " ".join([str(s) for s in args])
 
     desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.SCOUT, \
                               channel_types = ['QUEUE'], \
