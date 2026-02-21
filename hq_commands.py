@@ -302,7 +302,7 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
 @command(
     command_type=CommandType.QOC,
     aliases = ['down_taunt', 'qoc', 'qocparty', 'roudnup', 'links', 'list', 'ls'],
-    brief="Show all Qoc rips",
+    brief="Show all QoC rips",
 )
 async def roundup(args: list[str], command_context: CommandContext):
     roundup_desc = RoundupDesc()
@@ -951,7 +951,7 @@ async def send_vibes(suborqueue_rips: List[SubOrQueueRip], max_emojis: int, comm
 
 @command(
     command_type=CommandType.QOC,
-    brief='Tally the vibes of QOC rips',
+    brief='Tally the vibes of QoC rips',
     format='[all]',
     desc='Only shows 40 reactions at most. Include `all` or `a` to show everything.',
     aliases=['vibes', 'reacts', 'stats_reacts', 'stats_react', 'react_stats', 'howbadisit', 'howgoodisit'],

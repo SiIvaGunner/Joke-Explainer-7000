@@ -1496,13 +1496,13 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
 
 @bot.event
 async def on_message(message: Message):
-
     if message.author == bot.user:
         return
 
+    prefix = get_config("prefix")
     await process_suborqueue_rip_caching(message)
 
-    if not message.content.startswith(get_config("prefix")):
+    if not message.content.startswith(prefix):
         return
 
     args = message.content.split(' ')
@@ -1539,7 +1539,7 @@ async def on_message(message: Message):
         description = f":boom: Intriguing! I have encountered an unexpected error! ```{error_string}```"
         await send(description, message.channel)
 
-        header = f'ERROR on command ${command_name}: {error_string}'
+        header = f'ERROR on command {prefix}{command_name}: {error_string}'
         log_channel = bot.get_channel(get_log_channel())
         if log_channel is not None:
             split_texts = split_long_message(error_data, 2000 - len(header))
