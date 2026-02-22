@@ -1426,29 +1426,31 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
             message = await channel.fetch_message(payload.message_id)
 
-            if is_qoc_channel and message.pinned:
+            if is_message_rip(message):
 
-                if payload.channel_id in RIP_CACHE_QOC and \
-                    payload.message_id in RIP_CACHE_QOC[channel.id]:
-
-                    qoc_rip = RIP_CACHE_QOC[payload.channel_id][payload.message_id]
-                    inserted = False
-                    react_and_user = ReactAndUser(payload.emoji.id or 0, payload.emoji.name, payload.user_id)
-                    for i, cached_react_and_user in enumerate(qoc_rip.react_and_users):
-                        if cached_react_and_user == react_and_user:
-                            qoc_rip.react_and_users.insert(i, react_and_user)
-                            inserted = True
-                            break
-                    if not inserted:
-                        qoc_rip.react_and_users.append(react_and_user)
-                else:
-                    ##NOTE: (Ahmayk) can happen if reaction happens before message is added to cache
-                    qoc_rip = await cache_qoc_rip(message)
-
-            if is_suborqueue_channel and '```' in message.content and extract_rip_link(message.content):
-                ##NOTE: (Ahmayk) since we have to fetch the message anyway just recache the whole thing
-                ## since this doesn't require any more api calls 
+                #NOTE: (Ahmayk) we cache all rips in the suborqueue cache
+                ##so we can be guarenteed to get them quickly in any generic number of ways
+                ##that don't require knowing who reacted to what
                 cache_suborqueue_rip(message)
+
+                if is_qoc_channel and message.pinned:
+
+                    if payload.channel_id in RIP_CACHE_QOC and \
+                        payload.message_id in RIP_CACHE_QOC[channel.id]:
+
+                        qoc_rip = RIP_CACHE_QOC[payload.channel_id][payload.message_id]
+                        inserted = False
+                        react_and_user = ReactAndUser(payload.emoji.id or 0, payload.emoji.name, payload.user_id)
+                        for i, cached_react_and_user in enumerate(qoc_rip.react_and_users):
+                            if cached_react_and_user == react_and_user:
+                                qoc_rip.react_and_users.insert(i, react_and_user)
+                                inserted = True
+                                break
+                        if not inserted:
+                            qoc_rip.react_and_users.append(react_and_user)
+                    else:
+                        ##NOTE: (Ahmayk) can happen if reaction happens before message is added to cache
+                        qoc_rip = await cache_qoc_rip(message)
 
     unlock_message(payload.message_id)
 
