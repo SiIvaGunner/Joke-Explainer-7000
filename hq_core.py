@@ -58,6 +58,7 @@ QOC_DEFAULT_CLIPPING = '📢'
 #===============================================#
 
 class ReactAndUser(NamedTuple):
+    id: int
     name: str
     user_id: int
 
@@ -74,6 +75,10 @@ class QocRip(NamedTuple):
     react_and_users: List[ReactAndUser]
     created_at: datetime
 
+class React(NamedTuple):
+    id: int
+    name: str
+
 """
 SubOrQueue Rips are rips posted in a submission channel, or rips posted in an accepted rips queue.
 They can be in channels or threads depending on the channel type. 
@@ -87,7 +92,7 @@ class SubOrQueueRip(NamedTuple):
     channel_id: int
     message_author_id: int
     message_author_name: str
-    react_names: List[str]
+    reacts: List[React]
     created_at: datetime
 
 RIP_CACHE_QOC: dict[int, dict[int, QocRip]] = {}
@@ -163,22 +168,26 @@ def get_channel_info(channel: TextChannel | Thread) -> ChannelInfo:
     
     return ChannelInfo(rip_fetch_type, is_cache_qoc)
 
-def get_reaction_emoji_name(reaction: discord.Reaction) -> str:
+
+def init_react(reaction: discord.Reaction) -> React:
     name = ""
+    id = 0 
     if isinstance(reaction.emoji, str):
         name = reaction.emoji
-    elif hasattr(reaction.emoji, "name"):
+    elif type(reaction.emoji) == discord.Emoji:
         name = reaction.emoji.name
-    return name
+        if reaction.emoji.id:
+            id = reaction.emoji.id
+    return React(id, name) 
 
 async def get_react_and_users_of_reaction(reaction: discord.Reaction) -> List[ReactAndUser]:
     react_and_users = []
-    name = get_reaction_emoji_name(reaction)
+    react = init_react(reaction)
     # NOTE: (Ahmayk) this is slow! We have to do an api call for each user.
     # But is also neccessary
     user_ids = [user.id async for user in reaction.users()]
     for user_id in user_ids:
-        react_and_users.append(ReactAndUser(name, user_id))
+        react_and_users.append(ReactAndUser(react.id, react.name, user_id))
     return react_and_users
 
 def init_qoc_rip(message, react_and_users) -> QocRip:
@@ -254,19 +263,19 @@ async def get_qoc_rips(channel: TextChannel | Thread, desc: GetRipsDesc) -> List
     result.sort(key = lambda rip: rip.created_at, reverse=True)
     return result
 
-def init_suborqueue_rip(message: Message, react_names: List[str]) -> SubOrQueueRip:
+def init_suborqueue_rip(message: Message, reacts: List[React]) -> SubOrQueueRip:
     return SubOrQueueRip(message.content, message.id, message.channel.id, \
-                         message.author.id, str(message.author), react_names, message.created_at)
+                         message.author.id, str(message.author), reacts, message.created_at)
 
 def cache_suborqueue_rip(message) -> SubOrQueueRip:
 
-    react_names = []
+    reacts = []
     for reaction in message.reactions:
-        name = get_reaction_emoji_name(reaction) 
+        react = init_react(reaction)
         for i in range(0, reaction.count):
-            react_names.append(name)
+            reacts.append(react)
 
-    suborqueue_rip = init_suborqueue_rip(message, react_names)
+    suborqueue_rip = init_suborqueue_rip(message, reacts)
 
     init_channel_cache(message.channel.id)
 
@@ -404,14 +413,14 @@ async def validate_rip_message(message: Message, channel_info: ChannelInfo) -> s
             result += f'\nText outdated in SubOrQueue cache in {get_rip_title(message.content)}! {message.jump_url}'
 
         for reaction in message.reactions:
-            name = get_reaction_emoji_name(reaction)
+            react = init_react(reaction)
             cached_reaction_count = 0
-            for cached_name in suborqueue_rip.react_names:
-                if cached_name == name:
+            for cached_react in suborqueue_rip.reacts:
+                if cached_react == react: 
                     cached_reaction_count += 1
             if cached_reaction_count != reaction.count:
                 needs_suborqueue_recache = True
-                emoji_string = reaction_name_to_emoji_string(name, message.guild)
+                emoji_string = reaction_name_to_emoji_string(react.name, message.guild)
                 result += f'\nReaction mismatch in SubOrQueue cache for {get_rip_title(message.content)} '+\
                     f'{message.jump_url}{emoji_string}: ~~{cached_reaction_count}~~ {reaction.count}'
     else:
@@ -588,8 +597,8 @@ def react_is_one(reaction_type_list: List[ReactionType], name: str) -> bool:
     return False
 
 def suborqueue_rip_has_reaction(reaction_type: ReactionType, suborqueue_rip: SubOrQueueRip) -> bool:
-    for name in suborqueue_rip.react_names:
-        if react_is(reaction_type, name):
+    for react in suborqueue_rip.reacts:
+        if react_is(reaction_type, react.name):
             return True
     return False
 
@@ -1405,9 +1414,9 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
                     qoc_rip = RIP_CACHE_QOC[payload.channel_id][payload.message_id]
                     inserted = False
-                    react_and_user = ReactAndUser(payload.emoji.name, payload.user_id)
+                    react_and_user = ReactAndUser(payload.emoji.id or 0, payload.emoji.name, payload.user_id)
                     for i, cached_react_and_user in enumerate(qoc_rip.react_and_users):
-                        if cached_react_and_user.name == payload.emoji.name:
+                        if cached_react_and_user == react_and_user:
                             qoc_rip.react_and_users.insert(i, react_and_user)
                             inserted = True
                             break
@@ -1433,37 +1442,35 @@ async def process_suborqueue_rip_caching(message: Message):
         unlock_message(message.id)
 
 
+async def remove_reaction_from_cache(channel_id: int, message_id: int, emoji: discord.PartialEmoji, user_id: int | None, remove_all: bool):
+    await lock_message_if_init(message_id, None)
+    react = React(emoji.id or 0, emoji.name)
+    if channel_id in RIP_CACHE_QOC and message_id in RIP_CACHE_QOC[channel_id]: 
+        qoc_rip = RIP_CACHE_QOC[channel_id][message_id]
+        for cached_react_and_user in qoc_rip.react_and_users:
+            is_match = cached_react_and_user.id == react.id and cached_react_and_user.name == react.name
+            if user_id:
+                is_match = cached_react_and_user == ReactAndUser(react.id, react.name, user_id)
+            if is_match:
+                qoc_rip.react_and_users.remove(cached_react_and_user)
+                if not remove_all:
+                    break
+    if channel_id in RIP_CACHE_SUBORQUEUE and message_id in RIP_CACHE_SUBORQUEUE[channel_id]: 
+        suborqueue_rip = RIP_CACHE_SUBORQUEUE[channel_id][message_id]
+        for cached_react in suborqueue_rip.reacts:
+            if cached_react.id == react:
+                suborqueue_rip.reacts.remove(cached_react)
+                if not remove_all:
+                    break
+    unlock_message(message_id)
+
 @bot.event
 async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
-    await lock_message_if_init(payload.message_id, None)
-    if payload.channel_id in RIP_CACHE_QOC and payload.message_id in RIP_CACHE_QOC[payload.channel_id]: 
-        qoc_rip = RIP_CACHE_QOC[payload.channel_id][payload.message_id]
-        for cached_react_and_user in qoc_rip.react_and_users:
-            if cached_react_and_user == ReactAndUser(payload.emoji.name, payload.user_id):
-                qoc_rip.react_and_users.remove(cached_react_and_user)
-                break
-    if payload.channel_id in RIP_CACHE_SUBORQUEUE and payload.message_id in RIP_CACHE_SUBORQUEUE[payload.channel_id]: 
-        suborqueue_rip = RIP_CACHE_SUBORQUEUE[payload.channel_id][payload.message_id]
-        if payload.emoji.name in suborqueue_rip.react_names:
-            suborqueue_rip.react_names.remove(payload.emoji.name)
-    unlock_message(payload.message_id)
+    await remove_reaction_from_cache(payload.channel_id, payload.message_id, payload.emoji, payload.user_id, False)
 
 @bot.event
 async def on_raw_reaction_clear_emoji(payload: discord.RawReactionClearEmojiEvent):
-    await lock_message_if_init(payload.message_id, None)
-    if payload.channel_id in RIP_CACHE_QOC and payload.message_id in RIP_CACHE_QOC[payload.channel_id]: 
-        qoc_rip = RIP_CACHE_QOC[payload.channel_id][payload.message_id]
-        for cached_react_and_user in qoc_rip.react_and_users:
-            if cached_react_and_user.name == payload.emoji.name:
-                qoc_rip.react_and_users.remove(cached_react_and_user)
-                break
-    if payload.channel_id in RIP_CACHE_SUBORQUEUE and payload.message_id in RIP_CACHE_SUBORQUEUE[payload.channel_id]: 
-        suborqueue_rip = RIP_CACHE_SUBORQUEUE[payload.channel_id][payload.message_id]
-        for cached_react_name in suborqueue_rip.react_names:
-            if cached_react_name == payload.emoji.name:
-                suborqueue_rip.react_names.remove(cached_react_name)
-                break
-    unlock_message(payload.message_id)
+    await remove_reaction_from_cache(payload.channel_id, payload.message_id, payload.emoji, None, True)
 
 @bot.event
 async def on_raw_reaction_clear(payload: discord.RawReactionClearEvent):
@@ -1473,7 +1480,7 @@ async def on_raw_reaction_clear(payload: discord.RawReactionClearEvent):
         qoc_rip.react_and_users.clear()
     if payload.channel_id in RIP_CACHE_SUBORQUEUE and payload.message_id in RIP_CACHE_SUBORQUEUE[payload.channel_id]: 
         suborqueue_rip = RIP_CACHE_SUBORQUEUE[payload.channel_id][payload.message_id]
-        suborqueue_rip.react_names.clear()
+        suborqueue_rip.reacts.clear()
     unlock_message(payload.message_id)
 
 
