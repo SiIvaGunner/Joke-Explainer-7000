@@ -538,6 +538,8 @@ async def validate_cache_regularly():
     result = await validate_cache_all()
     if len(result):
         await write_log(f'**Cache validation had issues:**\n{result}')
+    else:
+        print("Cache revalidated. No issues found.")
 
 
 async def remove_rip_from_cache(message_id: int, channel_id: int):
