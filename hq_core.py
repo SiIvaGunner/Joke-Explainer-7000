@@ -265,11 +265,7 @@ async def get_qoc_rips(channel: TextChannel | Thread, desc: GetRipsDesc) -> List
     result.sort(key = lambda rip: rip.created_at, reverse=True)
     return result
 
-def init_suborqueue_rip(message: Message, reacts: List[React]) -> SubOrQueueRip:
-    return SubOrQueueRip(message.content, message.id, message.channel.id, \
-                         message.author.id, str(message.author), reacts, message.created_at)
-
-def cache_suborqueue_rip(message) -> SubOrQueueRip:
+def init_suborqueue_rip(message: Message) -> SubOrQueueRip:
 
     reacts = []
     for reaction in message.reactions:
@@ -277,7 +273,12 @@ def cache_suborqueue_rip(message) -> SubOrQueueRip:
         for i in range(0, reaction.count):
             reacts.append(react)
 
-    suborqueue_rip = init_suborqueue_rip(message, reacts)
+    return SubOrQueueRip(message.content, message.id, message.channel.id, \
+                         message.author.id, str(message.author), reacts, message.created_at)
+
+def cache_suborqueue_rip(message) -> SubOrQueueRip:
+
+    suborqueue_rip = init_suborqueue_rip(message)
 
     init_channel_cache(message.channel.id)
 
@@ -388,7 +389,7 @@ async def get_suborqueue_rips_fast(channel: typing.Union[GuildChannel, Thread], 
                 async for message in channel.pins(limit = None):
                     if is_message_rip(message):
                         ##NOTE: (Ahmayk) No fetching message for reactions for speed!
-                        suborqueue_rip = init_suborqueue_rip(message, [])
+                        suborqueue_rip = init_suborqueue_rip(message)
                         result.append(suborqueue_rip)
                 result.sort(key = lambda rip: rip.created_at, reverse=True)
 
@@ -403,28 +404,42 @@ def qoc_react_error_string(text: str, react_and_user: ReactAndUser, message: Mes
     result = f'\n{text} {get_rip_title(message.content)}: {message.jump_url} {emoji_string} ({user_string})'
     return result
 
+def get_react_counts(suborqueue_rip: SubOrQueueRip) -> dict[React, int]:
+    count_dict: dict[React, int] = {}
+    for react in suborqueue_rip.reacts:
+        if react not in count_dict:
+            count_dict[react] = 0
+        count_dict[react] += 1
+    return count_dict
+
 async def validate_rip_message(message: Message, channel_info: ChannelInfo) -> str:
     result = ""
 
     needs_suborqueue_recache = False
     if message.id in RIP_CACHE_SUBORQUEUE[message.channel.id]:
-        suborqueue_rip = RIP_CACHE_SUBORQUEUE[message.channel.id][message.id]
+        cached_suborqueue_rip = RIP_CACHE_SUBORQUEUE[message.channel.id][message.id]
+        refetched_suborqueue_rip = init_suborqueue_rip(message)
 
-        if suborqueue_rip.text != message.content:
+        if cached_suborqueue_rip.text != refetched_suborqueue_rip.text:
             needs_suborqueue_recache = True
-            result += f'\nText outdated in SubOrQueue cache in {get_rip_title(message.content)}! {message.jump_url}'
+            result += f'\nText outdated in SubOrQueue cache in {get_rip_title(refetched_suborqueue_rip.text)}! {message.jump_url}'
 
-        for reaction in message.reactions:
-            react = init_react(reaction)
-            cached_reaction_count = 0
-            for cached_react in suborqueue_rip.reacts:
-                if cached_react == react: 
-                    cached_reaction_count += 1
-            if cached_reaction_count != reaction.count:
+        count_dict_cached = get_react_counts(cached_suborqueue_rip)
+        count_dict_refetched = get_react_counts(refetched_suborqueue_rip)
+
+        for react in count_dict_refetched.keys():
+
+            if react not in count_dict_cached:
                 needs_suborqueue_recache = True
                 emoji_string = reaction_name_to_emoji_string(react.name, message.guild)
-                result += f'\nReaction mismatch in SubOrQueue cache for {get_rip_title(message.content)} '+\
-                    f'{message.jump_url}{emoji_string}: ~~{cached_reaction_count}~~ {reaction.count}'
+                result += f'\nReaction missing in SubOrQueue cache for {get_rip_title(message.content)} '+\
+                    f'{message.jump_url}{emoji_string}: x{count_dict_refetched[react]}'
+            elif count_dict_refetched[react] != count_dict_cached[react]:
+                needs_suborqueue_recache = True
+                emoji_string = reaction_name_to_emoji_string(react.name, message.guild)
+                result += f'\nReaction missing in SubOrQueue cache for {get_rip_title(message.content)} '+\
+                    f'{message.jump_url}{emoji_string}: ~~x{count_dict_cached[react]}~~ x{count_dict_refetched[react]}'
+
     else:
         result += f'\nRip missing from SubOrQueue cache: {get_rip_title(message.content)} {message.jump_url}'
         needs_suborqueue_recache = True

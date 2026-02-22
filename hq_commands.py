@@ -919,10 +919,12 @@ async def send_vibes(suborqueue_rips: List[SubOrQueueRip], max_emojis: int, comm
     react_dict: dict[str, int] = {}
 
     for suborqueue_rip in suborqueue_rips:
-        for react in suborqueue_rip.reacts:
-            if react.name not in react_dict:
-                react_dict[react.name] = 0
-            react_dict[react.name] += 1
+        react_counts = get_react_counts(suborqueue_rip)
+        for react in react_counts.keys():
+            if react.name and len(react.name):
+                if react.name not in react_dict:
+                    react_dict[react.name] = 0
+                react_dict[react.name] += react_counts[react] 
 
     min = 0
     if max_emojis != 0:
