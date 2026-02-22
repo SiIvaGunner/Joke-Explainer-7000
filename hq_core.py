@@ -118,10 +118,12 @@ async def _lock(id: int, lock_dict: dict[int, asyncio.Lock], typing_channel: Tex
         lock_dict[id] = asyncio.Lock()
 
     if lock_dict[id].locked():
-        print(f'LOCKED ON id: ${id}. Typing channel: {typing_channel}')
+        print(f'LOCKED ON id: {id}. Typing channel: {typing_channel}')
         async with typing_channel.typing() if typing_channel is not None else empty_async_context():
-            pass
-    await lock_dict[id].acquire()
+            await lock_dict[id].acquire()
+            print(f'LOCK AQUIRED ON id: {id}')
+    else:
+        await lock_dict[id].acquire()
 
 def _unlock(id: int, lock_dict: dict[int, asyncio.Lock]):
     if id in lock_dict and lock_dict[id].locked():
