@@ -847,7 +847,8 @@ async def send_embed(text: str, channel: TextChannel | Thread, desc: EmbedDesc):
     if desc.expires:
         if channel_is_types(channel, ['PROXY_QOC']):
             delete_after_seconds = get_config('proxy_embed_seconds')
-        else: get_config('embed_seconds')
+        else: 
+            delete_after_seconds = get_config('embed_seconds')
 
     embed_character_limit_title = get_config("embed_character_limit_title")
     title = desc.title
