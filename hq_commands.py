@@ -1437,7 +1437,7 @@ async def reset_cache(args: list[str], command_context: CommandContext):
     await lock_channel(channel.id, command_context.channel)
     suborqueue_count_old = len(RIP_CACHE_SUBORQUEUE[channel.id])
     qoc_count_old = len(RIP_CACHE_QOC[channel.id])
-    await unlock_channel(channel.id)
+    unlock_channel(channel.id)
 
     return_message = f'Cache rebuilt!'
 
