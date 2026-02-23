@@ -1112,11 +1112,10 @@ def line_contains_substring(line: str, substring: str) -> bool:
 
 def is_message_rip(message: Message) -> bool:
     result = False
-    is_valid_message = message.channel is Thread or not (message.channel is Thread)
     has_quotes = '```' in message.content
-    if is_valid_message and has_quotes:
+    if has_quotes:
         rip_links = extract_rip_link(message.content)
-        if len(rip_links) > 0:
+        if len(rip_links) > 0 or len(message.attachments):
             result = True
     return result
 
