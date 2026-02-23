@@ -1396,9 +1396,7 @@ async def reset_cache(args: list[str], command_context: CommandContext):
 
     channel_id, msg = parse_channel_link(channel_link, ['SUBS', 'SUBS_PIN', 'SUBS_THREAD', 'QUEUE', 'QOC'], False)
     if len(msg) > 0:
-        await send(msg, command_context.channel)
-    if not channel_id:
-        return
+        return await send(msg, command_context.channel)
     
     channel = bot.get_channel(channel_id)
     init_channel_cache(channel.id)
@@ -1406,7 +1404,7 @@ async def reset_cache(args: list[str], command_context: CommandContext):
 
     await send("Rebuilding cache...", command_context.channel)
 
-    await lock_channel(channel.id)
+    await lock_channel(channel.id, command_context.channel)
     suborqueue_count_old = len(RIP_CACHE_SUBORQUEUE[channel.id])
     qoc_count_old = len(RIP_CACHE_QOC[channel.id])
     await unlock_channel(channel.id)
