@@ -131,6 +131,7 @@ class RoundupFilterType(Enum):
     SPICY = auto()
     SEARCH_TITLE = auto()
     SEARCH_AUTHOR = auto()
+    SEARCH_REACTION = auto()
     HASREACT = auto()
     NOTHASREACT = auto()
     OVERDUE = auto()
@@ -144,6 +145,7 @@ class RoundupDesc(NamedTuple):
     user_id: int = 0 
     conditional_string: str = ""
     search_key: str = ""
+    react_name: str = ""
     reaction_type: ReactionType = ReactionType.NULL 
     not_found_message: str = ""
 
@@ -267,6 +269,12 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
                 for react_and_user in qoc_rip.react_and_users:
                     if react_is(roundup_desc.reaction_type, react_and_user.name):
                         is_valid = False
+                        break
+            case RoundupFilterType.SEARCH_REACTION:
+                is_valid = False 
+                for react_and_user in qoc_rip.react_and_users:
+                    if roundup_desc.react_name == react_and_user.name:
+                        is_valid = True 
                         break
             case RoundupFilterType.OVERDUE:
                 is_valid = is_overdue
@@ -482,6 +490,27 @@ async def nofixes(args: list[str], command_context: CommandContext):
 async def stops(args: list[str], command_context: CommandContext):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.HASREACT, \
                                reaction_type=ReactionType.STOP, not_found_message="No octogons found.")
+    await send_roundup(roundup_desc, command_context)
+
+@command(
+    command_type=CommandType.QOC,
+    format="<emoji>",
+    brief="Show QoC rips with an inputted react",
+    examples=[":fire:", ":qoc:", ":sob:"],
+)
+async def hasreact(args: list[str], command_context: CommandContext):
+
+    if not len(args): 
+        return await send("Error: Please include an emoji to search for. I'll show rips reacted by that emoji", command_context.channel)
+
+    react_input = args[0] 
+    #NOTE: (Ahmayk) convert emoji to react_name
+    match = re.fullmatch(r'<a?:(\w+):\d+>', react_input)
+    if match:
+        react_input = match.group(1)
+
+    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.SEARCH_REACTION, \
+                               react_name=react_input, not_found_message=f'No rips with {args[0]} found.')
     await send_roundup(roundup_desc, command_context)
 
 @command(
@@ -1386,6 +1415,7 @@ async def validate_cache(args: list[str], command_context: CommandContext):
     command_type=CommandType.MANAGEMENT,
     format='<channel link>',
     brief='Refetches rip data from discord for channel',
+    aliases=['refresh_cache']
 )
 async def reset_cache(args: list[str], command_context: CommandContext):
 
