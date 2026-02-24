@@ -233,21 +233,18 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
         author = get_rip_author(rip.text, rip.message_author_name)
         author = author.replace('*', '').replace('_', '')
 
-        review_react_list = [ReactionType.CHECK, ReactionType.GOLDCHECK, ReactionType.FIX, ReactionType.ALERT, ReactionType.REJECT]
-        fix_react_list = [ReactionType.FIX, ReactionType.ALERT]
-
         is_valid = True
         match (roundup_desc.roundup_filter_type):
             case RoundupFilterType.MYPINS:
                 is_valid = rip.message_author_id == roundup_desc.message_author_id
             case RoundupFilterType.MYFIXES:
-                is_valid = await user_is_react(fix_react_list, user_id, rip, command_context.channel)
+                is_valid = await user_is_react(UserReactCheckType.FIX, user_id, rip, command_context.channel)
             case RoundupFilterType.NOFIXES:
-                is_valid = not rip_has_react(fix_react_list, rip)
+                is_valid = not rip_has_react(FIX_REACT_LIST, rip)
             case RoundupFilterType.MYFRESH:
-                is_valid = await user_is_react(review_react_list, user_id, rip, command_context.channel)
+                is_valid = not await user_is_react(UserReactCheckType.REVIEW, user_id, rip, command_context.channel)
             case RoundupFilterType.FRESH:
-                is_valid = not rip_has_react(review_react_list, rip)
+                is_valid = not rip_has_react(REVIEW_REACT_LIST, rip)
             case RoundupFilterType.SPICY:
                 is_valid = rip_has_react([ReactionType.CHECK], rip) and \
                             rip_has_react([ReactionType.REJECT], rip)
@@ -269,8 +266,8 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
                 is_valid = not rip_has_react([roundup_desc.reaction_type], rip)
             case RoundupFilterType.SEARCH_REACTION:
                 is_valid = False 
-                for react_and_user in rip:
-                    if roundup_desc.react_name == react_and_user.name:
+                for react in rip.reacts:
+                    if roundup_desc.react_name == react.name:
                         is_valid = True 
                         break
             case RoundupFilterType.OVERDUE:

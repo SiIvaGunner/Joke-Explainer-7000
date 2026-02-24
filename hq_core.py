@@ -676,6 +676,9 @@ class ReactionType(Enum):
     EMAILSENT = auto()
     NUMBER = auto()
 
+REVIEW_REACT_LIST = [ReactionType.CHECK, ReactionType.GOLDCHECK, ReactionType.FIX, ReactionType.ALERT, ReactionType.REJECT]
+FIX_REACT_LIST = [ReactionType.FIX, ReactionType.ALERT]
+
 def react_is(reaction_type: ReactionType, name: str) -> bool:
     result = False
     name_lower = name.lower()
@@ -748,15 +751,26 @@ def rip_has_react(reaction_type_list: List[ReactionType], rip: Rip):
 
 USER_REACT_CACHE: dict[int, dict[React, List[int]]] = {}
 
-async def user_is_react(react_list: List[ReactionType], user_id: int, rip: Rip, typing_channel: TextChannel | Thread) -> bool:
+#NOTE: (Ahmayk) This is an enum so we can iterate all possible user react checks on startup to cache the data 
+class UserReactCheckType(Enum):
+    REVIEW = auto()
+    FIX = auto()
 
+async def user_is_react(user_react_check_type: UserReactCheckType, user_id: int, rip: Rip,\
+                        typing_channel: TextChannel | Thread) -> bool:
     result = False
 
     if rip.message_id not in USER_REACT_CACHE:
         USER_REACT_CACHE[rip.message_id] = {} 
 
-    await lock_message(rip.message_id, typing_channel)
+    react_list = []
+    match(user_react_check_type):
+        case UserReactCheckType.REVIEW: 
+            react_list = REVIEW_REACT_LIST 
+        case UserReactCheckType.FIX:
+            react_list = FIX_REACT_LIST 
 
+    await lock_message(rip.message_id, typing_channel)
     fetch_user_ids = False 
     for react in rip.reacts:
         if react_is_one(react_list, react.name) and react not in USER_REACT_CACHE[rip.message_id]:
@@ -1453,34 +1467,38 @@ async def remove_embeds_from_channel_startup(channel_ids: List[int], expire_time
 @bot.event
 async def on_ready():
     # this should ensure a check for config.json on start up. if the file doesnt exist, the bot should close with error.
-    prefix = get_config("prefix")
+    get_config("prefix")
 
     print(f'Logged in as {bot.user.name}')
     print('#################################')
 
-    await write_log("Good morning! Not caching rips sorry, come back later.")
-    # await write_log("Good morning! Caching rips...")
+    await write_log("Good morning! Caching rips...")
 
-    # queue_channel_ids = get_channel_ids_of_types(['QUEUE'])
-    # for channel_id in queue_channel_ids:
-    #     channel = bot.get_channel(channel_id)
-    #     if channel:
-    #         suborqueue_rips = await get_suborqueue_rips(channel, GetRipsDesc())
-    #         await write_log(f'Cached {len(suborqueue_rips)} queued rips in {channel.jump_url}.')
+    queue_channel_ids = get_channel_ids_of_types(['QUEUE'])
+    for channel_id in queue_channel_ids:
+        channel = bot.get_channel(channel_id)
+        if channel:
+            rips = await get_rips(channel, GetRipsDesc())
+            await write_log(f'Cached {len(rips)} queued rips in {channel.jump_url}.')
 
-    # sub_channel_ids = get_channel_ids_of_types(['SUBS', 'SUBS_THREAD', 'SUBS_PIN'])
-    # for channel_id in sub_channel_ids:
-    #     channel = bot.get_channel(channel_id)
-    #     if channel:
-    #         suborqueue_rips = await get_suborqueue_rips(channel, GetRipsDesc())
-    #         await write_log(f'Cached {len(suborqueue_rips)} subbed rips in {channel.jump_url}.')
+    sub_channel_ids = get_channel_ids_of_types(['SUBS', 'SUBS_THREAD', 'SUBS_PIN'])
+    for channel_id in sub_channel_ids:
+        channel = bot.get_channel(channel_id)
+        if channel:
+            rips = await get_rips(channel, GetRipsDesc())
+            await write_log(f'Cached {len(rips)} subbed rips in {channel.jump_url}.')
 
-    # qoc_channel_ids = get_channel_ids_of_types(['QOC'])
-    # for channel_id in qoc_channel_ids:
-    #     channel = bot.get_channel(channel_id)
-    #     if channel:
-    #         qoc_rips = await get_qoc_rips(channel, GetRipsDesc())
-    #         await write_log(f'Cached {len(qoc_rips)} qoc rips in {channel.jump_url}.')
+    qoc_channel_ids = get_channel_ids_of_types(['QOC'])
+    for channel_id in qoc_channel_ids:
+        channel = bot.get_channel(channel_id)
+        if channel:
+            rips = await get_rips(channel, GetRipsDesc())
+            for enum in UserReactCheckType:
+                for rip in rips:
+                    await user_is_react(enum, 0, rip, None)
+
+            await write_log(f'Cached {len(rips)} qoc rips in {channel.jump_url}.')
+
 
     # await write_log('Validating cache...')
     # validate_result = await validate_cache_all()
