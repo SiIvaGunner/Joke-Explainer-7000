@@ -1373,11 +1373,11 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
                 current_message_ids.append(message.id)
 
             if channel.id in RIP_CACHE_QOC:
-                for message_id, rip in RIP_CACHE_QOC[channel.id].items():
+                for message_id, rip in RIP_CACHE_QOC[channel.id].copy().items():
                     if message_id not in current_message_ids:
                         await remove_rip_from_cache(message_id, channel.id)
             if channel.id in RIP_CACHE_SUBORQUEUE:
-                for message_id, rip in RIP_CACHE_SUBORQUEUE[channel.id].items():
+                for message_id, rip in RIP_CACHE_SUBORQUEUE[channel.id].copy().items():
                     if message_id not in current_message_ids:
                         await remove_rip_from_cache(message_id, channel.id)
 
