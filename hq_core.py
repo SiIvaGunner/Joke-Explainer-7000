@@ -1365,18 +1365,21 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
     if last_pin is None or last_pin <= latest_pin_time:
         # print("Seems to be a message being unpinned")
 
-        if channel.id in RIP_CACHE_QOC:
+        channel_info = get_channel_info(channel)
+
+        if channel_info.rip_fetch_type == RipFetchType.PINS: 
             current_message_ids: list[int] = []
             async for message in channel.pins(limit=None):
                 current_message_ids.append(message.id)
 
-            message_ids_to_remove: list[int] = []
-            for message_id, qoc_rip in RIP_CACHE_QOC[channel.id].items():
-                if message_id not in current_message_ids:
-                    message_ids_to_remove.append(message_id)
-
-            for message_id in message_ids_to_remove: 
-                await remove_rip_from_cache(message_id, channel.id)
+            if channel.id in RIP_CACHE_QOC:
+                for message_id, rip in RIP_CACHE_QOC[channel.id].items():
+                    if message_id not in current_message_ids:
+                        await remove_rip_from_cache(message_id, channel.id)
+            if channel.id in RIP_CACHE_SUBORQUEUE:
+                for message_id, rip in RIP_CACHE_SUBORQUEUE[channel.id].items():
+                    if message_id not in current_message_ids:
+                        await remove_rip_from_cache(message_id, channel.id)
 
     else:
 
