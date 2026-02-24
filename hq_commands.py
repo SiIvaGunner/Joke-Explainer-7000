@@ -544,7 +544,7 @@ async def count(args: list[str], command_context: CommandContext):
         qoc_channel = command_context.channel
 
     if qoc_channel:
-        rips = await get_suborqueue_rips_fast(qoc_channel, GetRipsDesc(typing_channel=command_context.channel))
+        rips = await get_rips_fast(qoc_channel, GetRipsDesc(typing_channel=command_context.channel))
         pincount = len(rips)
 
         if (pincount < 1):

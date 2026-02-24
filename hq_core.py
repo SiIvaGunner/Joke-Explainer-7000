@@ -274,6 +274,34 @@ async def get_rips(channel: TextChannel | Thread, desc: GetRipsDesc) -> List[Rip
     return result
 
 
+async def get_rips_fast(channel: TextChannel | Thread, desc: GetRipsDesc) -> List[Rip]:
+
+    init_channel_cache(channel.id)
+    channel_info = get_channel_info(channel)
+
+    result = []
+
+    if channel_info.rip_fetch_type == RipFetchType.ALL_MESSAGES_AND_THREADS or \
+       channel_info.rip_fetch_type == RipFetchType.ALL_MESSAGES_NO_THREADS:
+
+        #NOTE: (Ahmayk) The path to get rips normally is already as fast
+        #as we can get so just do that
+        result = await get_rips(channel, desc)
+
+    else:
+        if channel.id in CACHE_LOCK_CHANNEL and not CACHE_LOCK_CHANNEL[channel.id].locked() and len(RIP_CACHE[channel.id]):
+            result = await get_rips(channel, desc)
+        else:
+            async with desc.typing_channel.typing() if desc.typing_channel is not None else empty_async_context():
+                async for message in channel.pins(limit = None):
+                    if is_message_rip(message):
+                        ##NOTE: (Ahmayk) No fetching message for reactions for speed!
+                        rip = init_rip(message)
+                        result.append(rip)
+                result.sort(key = lambda rip: rip.created_at, reverse=True)
+
+    return result
+
 def init_react(reaction: discord.Reaction) -> React:
     name = ""
     id = 0 
@@ -647,10 +675,10 @@ async def remove_rip_from_cache(message_id: int, channel_id: int):
     ##NOTE: (Ahmayk) if something is processing on the message, we want to wait for that to finish
     ##so that we can then remove whatever was being processed
     await lock_message(message_id, None)
-    if channel_id in RIP_CACHE_QOC and message_id in RIP_CACHE_QOC[channel_id]: 
-        RIP_CACHE_QOC[channel_id].pop(message_id)
-    if channel_id in RIP_CACHE_SUBORQUEUE and message_id in RIP_CACHE_SUBORQUEUE[channel_id]: 
-        RIP_CACHE_SUBORQUEUE[channel_id].pop(message_id)
+    if channel_id in RIP_CACHE and message_id in RIP_CACHE[channel_id]: 
+        RIP_CACHE[channel_id].pop(message_id)
+    if message_id in USER_REACT_CACHE:
+        USER_REACT_CACHE.pop(message_id)
     unlock_message(message_id)
     if message_id in CACHE_LOCK_MESSAGE:
         CACHE_LOCK_MESSAGE.pop(message_id)
@@ -1548,14 +1576,14 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
             async for message in channel.pins(limit=None):
                 current_message_ids.append(message.id)
 
-            if channel.id in RIP_CACHE_QOC:
-                for message_id, rip in RIP_CACHE_QOC[channel.id].copy().items():
+            message_ids_to_remove = []
+            if channel.id in RIP_CACHE:
+                for message_id, rip in RIP_CACHE[channel.id].items():
                     if message_id not in current_message_ids:
-                        await remove_rip_from_cache(message_id, channel.id)
-            if channel.id in RIP_CACHE_SUBORQUEUE:
-                for message_id, rip in RIP_CACHE_SUBORQUEUE[channel.id].copy().items():
-                    if message_id not in current_message_ids:
-                        await remove_rip_from_cache(message_id, channel.id)
+                        message_ids_to_remove.append(message_id)
+            
+            for message_id in message_ids_to_remove:
+                await remove_rip_from_cache(message_id, channel.id)
 
     else:
 
@@ -1563,31 +1591,39 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
 
             ##NOTE: (Ahmayk) only shit we recognize as rips are treated as rips
 
+            await lock_message_if_init(message.id, None)
             if is_message_rip(message):
 
-                await lock_message(message.id, None)
                 latest_pin_time = last_pin
 
-                rips = await get_suborqueue_rips_fast(channel, GetRipsDesc())
+                rips = await get_rips_fast(channel, GetRipsDesc())
 
+                is_valid = True
                 SOFT_PIN_LIMIT = get_config('soft_pin_limit')
                 if len(rips) > SOFT_PIN_LIMIT:
                     if get_channel_config(channel.id).pinlimit_must_die_mode:
                         await message.unpin()
                         await channel.send(f"**Error**: More than {SOFT_PIN_LIMIT} rips in pins. Unpinned.")
+                        is_valid = False
                     else:
                         await channel.send(f"**Warning**: More than {SOFT_PIN_LIMIT} rips pinned - please handle them first :(")
-            
-                await cache_qoc_rip(message)
+
+                if is_valid:
+                    #NOTE: (Ahmayk) have to fetch message to get reaction data for cache
+                    fetched_message = await channel.fetch_message(message.id)
+                    cache_rip_in_message(fetched_message)
+
+                    unlock_message(message.id)
+
+                    verdict, msg = await check_qoc_and_metadata(message.content, message.id, str(message.author))
+
+                    # Send msg
+                    if len(verdict) > 0:
+                        rip_title = get_rip_title(message.content)
+                        link = format_message_link(channel.guild.id, channel.id, message.id)
+                        await channel.send("**Rip**: **[{}]({})**\n**Verdict**: {}\n{}-# React {} if this is resolved.".format(rip_title, link, verdict, msg, DEFAULT_CHECK))
+            else:
                 unlock_message(message.id)
-
-                verdict, msg = await check_qoc_and_metadata(message.content, message.id, str(message.author))
-
-                # Send msg
-                if len(verdict) > 0:
-                    rip_title = get_rip_title(message.content)
-                    link = format_message_link(channel.guild.id, channel.id, message.id)
-                    await channel.send("**Rip**: **[{}]({})**\n**Verdict**: {}\n{}-# React {} if this is resolved.".format(rip_title, link, verdict, msg, DEFAULT_CHECK))
 
 
 @bot.event
