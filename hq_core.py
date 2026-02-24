@@ -122,8 +122,7 @@ async def empty_async_context():
 #NOTE: (Ahmayk) Locking on either a channel or message cache allows us to manage congruent process and commands
 ## without one reading from or writing into the cache with outdated info
 async def _lock(id: int, lock_dict: dict[int, asyncio.Lock], typing_channel: TextChannel | Thread | None):
-    if id not in lock_dict:
-        lock_dict[id] = asyncio.Lock()
+    lock_dict[id] = asyncio.Lock()
 
     if lock_dict[id].locked():
         print(f'LOCKED ON id: {id}. Typing channel: {typing_channel}')
@@ -133,9 +132,11 @@ async def _lock(id: int, lock_dict: dict[int, asyncio.Lock], typing_channel: Tex
     else:
         await lock_dict[id].acquire()
 
+##NOTE: (Ahmayk) This will crash if the lock is not locked!
+##This is by design to ensure concurrency
 def _unlock(id: int, lock_dict: dict[int, asyncio.Lock]):
-    if id in lock_dict and lock_dict[id].locked():
-        lock_dict[id].release()
+    lock_dict[id].release()
+    lock_dict.pop(id)
 
 CACHE_LOCK_MESSAGE: dict[int, asyncio.Lock] = {}
 async def lock_channel(channel_id: int, typing_channel: TextChannel | Thread | None):
@@ -147,10 +148,6 @@ def unlock_channel(channel_id: int):
 CACHE_LOCK_CHANNEL: dict[int, asyncio.Lock] = {}
 async def lock_message(message_id: int, typing_channel: TextChannel | Thread | None):
     await _lock(message_id, CACHE_LOCK_MESSAGE, typing_channel)
-
-async def lock_message_if_init(message_id: int, typing_channel: TextChannel | Thread | None):
-    if message_id in CACHE_LOCK_MESSAGE:
-        await _lock(message_id, CACHE_LOCK_MESSAGE, typing_channel)
 
 def unlock_message(message_id: int):
     _unlock(message_id, CACHE_LOCK_MESSAGE)
@@ -229,15 +226,13 @@ async def get_rips(channel: TextChannel | Thread, desc: GetRipsDesc) -> List[Rip
             match channel_info.rip_fetch_type: 
                 case RipFetchType.ALL_MESSAGES_NO_THREADS:
                     async for message in channel.history(limit = None):
-                        await lock_message_if_init(message.id, desc.typing_channel)
+                        await lock_message(message.id, desc.typing_channel)
                         if is_message_rip(message):
                             cache_rip_in_message(message)
                         unlock_message(message.id)
 
                 case RipFetchType.ALL_MESSAGES_AND_THREADS:
                     async for message in channel.history(limit = None):
-
-                        await lock_message_if_init(message.id, desc.typing_channel)
 
                         if message.thread is not None:
                             thread_rips = await get_rips(message.thread, GetRipsDesc(rebuild_cache=desc.rebuild_cache))
@@ -248,14 +243,14 @@ async def get_rips(channel: TextChannel | Thread, desc: GetRipsDesc) -> List[Rip
                                 RIP_CACHE[channel.id][thread_rip.message_id] = thread_rip 
                                 unlock_message(thread_rip.message_id)
                         else:
+                            await lock_message(message.id, desc.typing_channel)
                             if is_message_rip(message):
                                 cache_rip_in_message(message)
-
-                        unlock_message(message.id)
+                            unlock_message(thread_rip.message_id)
 
                 case RipFetchType.PINS:
                     async for message in channel.pins(limit = None):
-                        await lock_message_if_init(message.id, desc.typing_channel)
+                        await lock_message(message.id, desc.typing_channel)
                         if is_message_rip(message):
                             # NOTE: (Ahmayk) channel.pins does not return reaction data,
                             # so we have to fetch it manually. This is slow! But neccessary.
@@ -373,8 +368,8 @@ async def get_qoc_rips(channel: TextChannel | Thread, desc: GetRipsDesc) -> List
             RIP_CACHE_QOC[channel.id] = {}
 
             async for message in channel.pins(limit=None):
+                await lock_message(message.id, None)
                 if is_message_rip(message):
-                    await lock_message(message.id, None)
 
                     # NOTE: (Ahmayk) channel.pins does not return reaction data,
                     # so we have to fetch it manually. This is slow! But neccessary.
@@ -385,7 +380,7 @@ async def get_qoc_rips(channel: TextChannel | Thread, desc: GetRipsDesc) -> List
                     # so that the data is easily accessible via get_suborqueue_rips_fast()
                     cache_suborqueue_rip(fetched_message)
 
-                    unlock_message(message.id)
+                unlock_message(message.id)
 
     unlock_channel(channel.id)
 
@@ -680,8 +675,6 @@ async def remove_rip_from_cache(message_id: int, channel_id: int):
     if message_id in USER_REACT_CACHE:
         USER_REACT_CACHE.pop(message_id)
     unlock_message(message_id)
-    if message_id in CACHE_LOCK_MESSAGE:
-        CACHE_LOCK_MESSAGE.pop(message_id)
 
 #===============================================#
 #                    REACTS
@@ -1588,10 +1581,10 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
     else:
 
         async for message in channel.pins(limit=1):
+            await lock_message(message.id, None)
 
             ##NOTE: (Ahmayk) only shit we recognize as rips are treated as rips
 
-            await lock_message_if_init(message.id, None)
             if is_message_rip(message):
 
                 latest_pin_time = last_pin
@@ -1612,7 +1605,6 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
                     #NOTE: (Ahmayk) have to fetch message to get reaction data for cache
                     fetched_message = await channel.fetch_message(message.id)
                     cache_rip_in_message(fetched_message)
-
                     unlock_message(message.id)
 
                     verdict, msg = await check_qoc_and_metadata(message.content, message.id, str(message.author))
@@ -1622,14 +1614,16 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
                         rip_title = get_rip_title(message.content)
                         link = format_message_link(channel.guild.id, channel.id, message.id)
                         await channel.send("**Rip**: **[{}]({})**\n**Verdict**: {}\n{}-# React {} if this is resolved.".format(rip_title, link, verdict, msg, DEFAULT_CHECK))
+                else:
+                    unlock_message(message.id)
+
             else:
                 unlock_message(message.id)
 
 
 @bot.event
 async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
-
-    await lock_message_if_init(payload.message_id, None)
+    await lock_message(payload.message_id, None)
 
     channel = bot.get_channel(payload.channel_id)
     if channel:
@@ -1642,61 +1636,51 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
             if is_message_rip(message):
 
-                #NOTE: (Ahmayk) we cache all rips in the suborqueue cache
-                ##so we can be guarenteed to get them quickly in any generic number of ways
-                ##that don't require knowing who reacted to what
-                cache_suborqueue_rip(message)
+                rip = cache_rip_in_message(message)
 
                 if is_qoc_channel and message.pinned:
 
-                    if payload.channel_id in RIP_CACHE_QOC and \
-                        payload.message_id in RIP_CACHE_QOC[channel.id]:
+                    if rip.message_id not in USER_REACT_CACHE: 
+                        USER_REACT_CACHE[rip.message_id] = {} 
 
-                        qoc_rip = RIP_CACHE_QOC[payload.channel_id][payload.message_id]
-                        inserted = False
-                        react_and_user = ReactAndUser(payload.emoji.id or 0, payload.emoji.name, payload.user_id)
-                        for i, cached_react_and_user in enumerate(qoc_rip.react_and_users):
-                            if cached_react_and_user == react_and_user:
-                                qoc_rip.react_and_users.insert(i, react_and_user)
-                                inserted = True
-                                break
-                        if not inserted:
-                            qoc_rip.react_and_users.append(react_and_user)
-                    else:
-                        ##NOTE: (Ahmayk) can happen if reaction happens before message is added to cache
-                        qoc_rip = await cache_qoc_rip(message)
+                    react = React(payload.emoji.id or 0, payload.emoji.name)
+                    if react not in USER_REACT_CACHE[rip.message_id]: 
+                        USER_REACT_CACHE[rip.message_id][react] = [] 
+
+                    USER_REACT_CACHE[rip.message_id][react].append(payload.user_id) 
 
     unlock_message(payload.message_id)
 
 
 async def process_suborqueue_rip_caching(message: Message):
+    await lock_message(message.id, None)
     is_suborqueue_channel = channel_is_types(message.channel, ['QUEUE', 'SUBS', 'SUBS_THREAD'])
     if is_suborqueue_channel and is_message_rip(message): 
-        await lock_message(message.id, None)
-        cache_suborqueue_rip(message)
-        unlock_message(message.id)
+        cache_rip_in_message(message)
+    unlock_message(message.id)
 
 
 async def remove_reaction_from_cache(channel_id: int, message_id: int, emoji: discord.PartialEmoji, user_id: int | None, remove_all: bool):
-    await lock_message_if_init(message_id, None)
+    await lock_message(message_id, None)
     react = React(emoji.id or 0, emoji.name)
-    if channel_id in RIP_CACHE_QOC and message_id in RIP_CACHE_QOC[channel_id]: 
-        qoc_rip = RIP_CACHE_QOC[channel_id][message_id]
-        for cached_react_and_user in qoc_rip.react_and_users:
-            is_match = cached_react_and_user.id == react.id and cached_react_and_user.name == react.name
-            if user_id:
-                is_match = cached_react_and_user == ReactAndUser(react.id, react.name, user_id)
-            if is_match:
-                qoc_rip.react_and_users.remove(cached_react_and_user)
+
+    if channel_id in RIP_CACHE and message_id in RIP_CACHE[channel_id]: 
+        rip = RIP_CACHE[channel_id][message_id]
+        for cached_react in rip.reacts:
+            if cached_react == react:
+                rip.reacts.remove(cached_react)
                 if not remove_all:
                     break
-    if channel_id in RIP_CACHE_SUBORQUEUE and message_id in RIP_CACHE_SUBORQUEUE[channel_id]: 
-        suborqueue_rip = RIP_CACHE_SUBORQUEUE[channel_id][message_id]
-        for cached_react in suborqueue_rip.reacts:
-            if cached_react.id == react:
-                suborqueue_rip.reacts.remove(cached_react)
-                if not remove_all:
-                    break
+
+    if message_id in USER_REACT_CACHE:
+        if user_id and \
+            react in USER_REACT_CACHE[message_id] and \
+            user_id in USER_REACT_CACHE[message_id][react]:
+            USER_REACT_CACHE[message_id][react].remove(user_id)
+        
+        if remove_all or not len(USER_REACT_CACHE[message_id]):
+            USER_REACT_CACHE.pop(message_id)
+
     unlock_message(message_id)
 
 @bot.event
@@ -1709,13 +1693,11 @@ async def on_raw_reaction_clear_emoji(payload: discord.RawReactionClearEmojiEven
 
 @bot.event
 async def on_raw_reaction_clear(payload: discord.RawReactionClearEvent):
-    await lock_message_if_init(payload.message_id, None)
-    if payload.channel_id in RIP_CACHE_QOC and payload.message_id in RIP_CACHE_QOC[payload.channel_id]: 
-        qoc_rip = RIP_CACHE_QOC[payload.channel_id][payload.message_id]
-        qoc_rip.react_and_users.clear()
-    if payload.channel_id in RIP_CACHE_SUBORQUEUE and payload.message_id in RIP_CACHE_SUBORQUEUE[payload.channel_id]: 
-        suborqueue_rip = RIP_CACHE_SUBORQUEUE[payload.channel_id][payload.message_id]
-        suborqueue_rip.reacts.clear()
+    await lock_message(payload.message_id, None)
+    if payload.channel_id in RIP_CACHE and payload.message_id in RIP_CACHE[payload.channel_id]: 
+        RIP_CACHE[payload.channel_id][payload.message_id].reacts.clear()
+    if payload.message_id in USER_REACT_CACHE:
+        USER_REACT_CACHE.pop(payload.message_id)
     unlock_message(payload.message_id)
 
 
@@ -1726,15 +1708,11 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
 
 @bot.event
 async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
-    await lock_message_if_init(payload.message_id, None)
-    if payload.channel_id in RIP_CACHE_QOC and payload.message_id in RIP_CACHE_QOC[payload.channel_id]: 
-        qoc_rip = RIP_CACHE_QOC[payload.channel_id][payload.message_id]
-        qoc_rip = qoc_rip._replace(text = payload.message.content)
-        RIP_CACHE_QOC[payload.channel_id][payload.message_id] = qoc_rip
-    if payload.channel_id in RIP_CACHE_SUBORQUEUE and payload.message_id in RIP_CACHE_SUBORQUEUE[payload.channel_id]: 
-        suborqueue_rip = RIP_CACHE_SUBORQUEUE[payload.channel_id][payload.message_id]
-        suborqueue_rip = suborqueue_rip._replace(text = payload.message.content)
-        RIP_CACHE_SUBORQUEUE[payload.channel_id][payload.message_id] = suborqueue_rip
+    await lock_message(payload.message_id, None)
+    if payload.channel_id in RIP_CACHE and payload.message_id in RIP_CACHE[payload.channel_id]: 
+        rip = RIP_CACHE[payload.channel_id][payload.message_id]
+        rip = rip._replace(text = payload.message.content)
+        RIP_CACHE[payload.channel_id][payload.message_id] = rip
     unlock_message(payload.message_id)
 
 @bot.event
