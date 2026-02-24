@@ -95,14 +95,25 @@ class SubOrQueueRip(NamedTuple):
     reacts: List[React]
     created_at: datetime
 
+class Rip(NamedTuple):
+    text: str
+    message_id: int
+    channel_id: int
+    message_author_id: int
+    message_author_name: str
+    created_at: datetime
+
 RIP_CACHE_QOC: dict[int, dict[int, QocRip]] = {}
 RIP_CACHE_SUBORQUEUE: dict[int, dict[int, SubOrQueueRip]] = {}
+RIP_CACHE: dict[int, dict[int, Rip]] = {}
 
 def init_channel_cache(channel_id: int):
     if channel_id not in RIP_CACHE_QOC:
         RIP_CACHE_QOC[channel_id] = {}
     if channel_id not in RIP_CACHE_SUBORQUEUE:
         RIP_CACHE_SUBORQUEUE[channel_id] = {}
+    if channel_id not in RIP_CACHE:
+        RIP_CACHE[channel_id] = {}
 
 
 #NOTE: (Ahmayk) Dummy async context that we can call instead in the case where 
@@ -170,6 +181,75 @@ def get_channel_info(channel: TextChannel | Thread) -> ChannelInfo:
     
     return ChannelInfo(rip_fetch_type, is_cache_qoc)
 
+def init_rip(message) -> Rip:
+    return Rip(message.content, message.id, message.channel.id, message.author.id, \
+            str(message.author), message.created_at)
+
+def cache_rip(message: Message) -> Rip:
+
+    rip = init_rip(message)
+
+    if message.id not in CACHE_LOCK_MESSAGE:
+        CACHE_LOCK_MESSAGE[message.id] = asyncio.Lock()
+
+    init_channel_cache(message.channel.id)
+    RIP_CACHE[message.channel.id][message.id] = rip
+
+    return rip
+
+async def cache_if_rip_with_lock(message, typing_channel: TextChannel | Thread | None):
+    if is_message_rip(message):
+        await lock_message(message.id, typing_channel)
+        cache_rip(message)
+        unlock_message(message.id)
+
+class GetRipsDesc(NamedTuple):
+    typing_channel: TextChannel | Thread | None = None
+    rebuild_cache: bool = False
+
+async def get_rips(channel: TextChannel | Thread, desc: GetRipsDesc) -> List[Rip]:
+    init_channel_cache(channel.id)
+    channel_info = get_channel_info(channel)
+
+    ##NOTE: (Ahmayk) We need to prevent other processes from accessing the cache 
+    ## in the case where we are updating the cache. If we allow access to the cache while
+    ## it is being updated, it would likely be incomplete or wrong! 
+    await lock_channel(channel.id, desc.typing_channel)
+
+    if not len(RIP_CACHE[channel.id]) or desc.rebuild_cache:
+
+        async with desc.typing_channel.typing() if desc.typing_channel is not None else empty_async_context():
+
+            match channel_info.rip_fetch_type: 
+                case RipFetchType.ALL_MESSAGES_NO_THREADS:
+                    async for message in channel.history(limit = None):
+                        await cache_if_rip_with_lock(message, desc.typing_channel)
+
+                case RipFetchType.ALL_MESSAGES_AND_THREADS:
+                    async for message in channel.history(limit = None):
+                        if message.thread is not None:
+                            thread_suborqueue_rips = await get_suborqueue_rips(message.thread, GetRipsDesc(rebuild_cache=desc.rebuild_cache))
+                            #NOTE: (Ahmayk) we insert thread rips also in its parent channel dict so that
+                            #we get all rips in theads when we get the parent channel's rips 
+                            for thread_rip in thread_suborqueue_rips:
+                                await cache_if_rip_with_lock(thread_rip, desc.typing_channel)
+
+                        await cache_if_rip_with_lock(message, desc.typing_channel)
+
+                case RipFetchType.PINS:
+                    async for message in channel.pins(limit = None):
+                        await cache_if_rip_with_lock(message, desc.typing_channel)
+
+                case _:
+                    assert "Unimplemented RipFetchType"
+
+    unlock_channel(channel.id)
+
+    result = list(RIP_CACHE[channel.id].values())
+    ##NOTE: (Ahmayk) show rips in expected order, newest at top
+    result.sort(key = lambda rip: rip.created_at, reverse=True)
+    return result
+
 
 def init_react(reaction: discord.Reaction) -> React:
     name = ""
@@ -181,6 +261,39 @@ def init_react(reaction: discord.Reaction) -> React:
         if reaction.emoji.id:
             id = reaction.emoji.id
     return React(id, name) 
+
+REACT_AND_USER_CACHE: dict[int, List[ReactAndUser]] = {}
+
+async def get_react_and_users(rip: Rip, desc: GetRipsDesc) -> List[ReactAndUser]:
+
+    await lock_message(rip.message_id, desc.typing_channel)
+
+    if rip.message_id not in REACT_AND_USER_CACHE or desc.rebuild_cache:
+
+        async with desc.typing_channel.typing() if desc.typing_channel is not None else empty_async_context():
+
+            channel = bot.get_channel(rip.channel_id)
+            if channel:
+                message = await channel.fetch_message(rip.message_id)
+
+                react_and_users: List[ReactAndUser] = []
+                for reaction in message.reactions:
+
+                    react = init_react(reaction)
+                    # NOTE: (Ahmayk) this is slow! We have to do an api call for each user.
+                    user_ids = [user.id async for user in reaction.users()]
+                    for user_id in user_ids:
+                        react_and_users.append(ReactAndUser(react.id, react.name, user_id))
+
+                REACT_AND_USER_CACHE[rip.message_id] = react_and_users
+
+    unlock_message(rip.message_id)
+
+    result = REACT_AND_USER_CACHE[rip.message_id]
+
+    return result
+
+
 
 async def get_react_and_users_of_reaction(reaction: discord.Reaction) -> List[ReactAndUser]:
     react_and_users = []
@@ -214,9 +327,6 @@ async def cache_qoc_rip(message: Message) -> QocRip:
     return qoc_rip
 
 
-class GetRipsDesc(NamedTuple):
-    typing_channel: TextChannel | Thread | None = None
-    rebuild_cache: bool = False
 
 async def get_qoc_rips(channel: TextChannel | Thread, desc: GetRipsDesc) -> List[QocRip]:
     """
@@ -638,6 +748,25 @@ def qoc_rip_has_reaction_one_from_user(reaction_type_list: List[ReactionType], u
         if react_and_user.user_id == user_id and react_is_one(reaction_type_list, react_and_user.name):
             return True
     return False
+
+def react_and_users_has_react(reaction_type: ReactionType, react_and_users: List[ReactAndUser]) -> bool:
+    for react_and_user in react_and_users:
+        if react_is(reaction_type, react_and_user.name):
+            return True
+    return False
+
+def react_and_users_has_react_one(reaction_type_list: List[ReactionType], react_and_users: List[ReactAndUser]):
+    for react_and_user in react_and_users:
+        if react_is_one(reaction_type_list, react_and_user.name):
+            return True
+    return False
+
+def react_and_users_has_react_one_from_user(reaction_type_list: List[ReactionType], user_id: int, react_and_users: List[ReactAndUser]):
+    for react_and_user in react_and_users:
+        if react_and_user.user_id == user_id and react_is_one(reaction_type_list, react_and_user.name):
+            return True
+    return False
+
 
 def reaction_name_to_emoji_string(name: str, guild: discord.Guild | None) -> str:
     result = f'{name}' 
@@ -1301,40 +1430,41 @@ async def on_ready():
     print(f'Logged in as {bot.user.name}')
     print('#################################')
 
-    await write_log("Good morning! Caching rips...")
+    await write_log("Good morning! Not caching rips sorry, come back later.")
+    # await write_log("Good morning! Caching rips...")
 
-    queue_channel_ids = get_channel_ids_of_types(['QUEUE'])
-    for channel_id in queue_channel_ids:
-        channel = bot.get_channel(channel_id)
-        if channel:
-            suborqueue_rips = await get_suborqueue_rips(channel, GetRipsDesc())
-            await write_log(f'Cached {len(suborqueue_rips)} queued rips in {channel.jump_url}.')
+    # queue_channel_ids = get_channel_ids_of_types(['QUEUE'])
+    # for channel_id in queue_channel_ids:
+    #     channel = bot.get_channel(channel_id)
+    #     if channel:
+    #         suborqueue_rips = await get_suborqueue_rips(channel, GetRipsDesc())
+    #         await write_log(f'Cached {len(suborqueue_rips)} queued rips in {channel.jump_url}.')
 
-    sub_channel_ids = get_channel_ids_of_types(['SUBS', 'SUBS_THREAD', 'SUBS_PIN'])
-    for channel_id in sub_channel_ids:
-        channel = bot.get_channel(channel_id)
-        if channel:
-            suborqueue_rips = await get_suborqueue_rips(channel, GetRipsDesc())
-            await write_log(f'Cached {len(suborqueue_rips)} subbed rips in {channel.jump_url}.')
+    # sub_channel_ids = get_channel_ids_of_types(['SUBS', 'SUBS_THREAD', 'SUBS_PIN'])
+    # for channel_id in sub_channel_ids:
+    #     channel = bot.get_channel(channel_id)
+    #     if channel:
+    #         suborqueue_rips = await get_suborqueue_rips(channel, GetRipsDesc())
+    #         await write_log(f'Cached {len(suborqueue_rips)} subbed rips in {channel.jump_url}.')
 
-    qoc_channel_ids = get_channel_ids_of_types(['QOC'])
-    for channel_id in qoc_channel_ids:
-        channel = bot.get_channel(channel_id)
-        if channel:
-            qoc_rips = await get_qoc_rips(channel, GetRipsDesc())
-            await write_log(f'Cached {len(qoc_rips)} qoc rips in {channel.jump_url}.')
+    # qoc_channel_ids = get_channel_ids_of_types(['QOC'])
+    # for channel_id in qoc_channel_ids:
+    #     channel = bot.get_channel(channel_id)
+    #     if channel:
+    #         qoc_rips = await get_qoc_rips(channel, GetRipsDesc())
+    #         await write_log(f'Cached {len(qoc_rips)} qoc rips in {channel.jump_url}.')
 
-    await write_log('Validating cache...')
-    validate_result = await validate_cache_all()
-    validate_result += '\n**Startup caching complete.**'
-    await write_log(validate_result)
+    # await write_log('Validating cache...')
+    # validate_result = await validate_cache_all()
+    # validate_result += '\n**Startup caching complete.**'
+    # await write_log(validate_result)
 
-    validate_cache_regularly.start()
+    # validate_cache_regularly.start()
 
-    await remove_embeds_from_channel_startup(qoc_channel_ids, get_config('embed_seconds'))
+    # await remove_embeds_from_channel_startup(qoc_channel_ids, get_config('embed_seconds'))
 
-    proxy_channel_ids = get_channel_ids_of_types(['PROXY_QOC'])
-    await remove_embeds_from_channel_startup(proxy_channel_ids, get_config('proxy_embed_seconds'))
+    # proxy_channel_ids = get_channel_ids_of_types(['PROXY_QOC'])
+    # await remove_embeds_from_channel_startup(proxy_channel_ids, get_config('proxy_embed_seconds'))
 
 import traceback
 @bot.event

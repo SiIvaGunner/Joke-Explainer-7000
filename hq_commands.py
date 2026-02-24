@@ -158,7 +158,8 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
     channel = await get_qoc_channel(command_context.channel)
     if channel is None: return
 
-    qoc_rips = await get_qoc_rips(channel, GetRipsDesc(typing_channel=command_context.channel))
+    get_rips_desc = GetRipsDesc(typing_channel=command_context.channel)
+    rips = await get_rips(channel, get_rips_desc)
 
     is_spec_overdue_days = get_config('spec_overdue_days')
     is_overdue_days = get_config('overdue_days')
@@ -177,13 +178,13 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
 
     selected_index = 0
     if roundup_desc.roundup_filter_type == RoundupFilterType.RANDOM:
-        selected_index = random.randint(0, len(qoc_rips) - 1)
+        selected_index = random.randint(0, len(rips) - 1)
 
     readability_line = "━━━━━━━━━━━━━━━━━━\n"
 
     result = ""
 
-    for i, qoc_rip in enumerate(qoc_rips):
+    for i, rip in enumerate(rips):
 
         reacts = ""
         num_checks = 0
@@ -194,7 +195,9 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
         specs_needed = False
         fix_or_alert = False
 
-        for react_and_user in qoc_rip.react_and_users:
+        react_and_users = await get_react_and_users(rip, get_rips_desc)
+
+        for react_and_user in react_and_users:
             if react_is(ReactionType.GOLDCHECK, react_and_user.name):
                 num_goldchecks += 1
             elif react_is(ReactionType.CHECKREQ, react_and_user.name):
@@ -219,8 +222,8 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
         indicator = ""
         check_passed = (num_checks - num_rejects >= checks_required) and not fix_or_alert
         specs_passed = (not specs_needed or num_goldchecks >= specs_required)
-        is_spec_overdue = (datetime.now(timezone.utc) - qoc_rip.created_at) > timedelta(days=is_spec_overdue_days)
-        is_overdue =      (datetime.now(timezone.utc) - qoc_rip.created_at) > timedelta(days=is_overdue_days)
+        is_spec_overdue = (datetime.now(timezone.utc) - rip.created_at) > timedelta(days=is_spec_overdue_days)
+        is_overdue =      (datetime.now(timezone.utc) - rip.created_at) > timedelta(days=is_overdue_days)
         if check_passed:
             indicator = APPROVED_INDICATOR if specs_passed else AWAITING_SPECIALIST_INDICATOR
         elif specs_needed and not specs_passed and is_spec_overdue:
@@ -228,8 +231,8 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
         elif is_overdue:
             indicator = OVERDUE_INDICATOR
 
-        rip_title = get_rip_title(qoc_rip.text)
-        author = get_rip_author(qoc_rip.text, qoc_rip.message_author_name)
+        rip_title = get_rip_title(rip.text)
+        author = get_rip_author(rip.text, rip.message_author_name)
         author = author.replace('*', '').replace('_', '')
 
         review_react_list = [ReactionType.CHECK, ReactionType.GOLDCHECK, ReactionType.FIX, ReactionType.ALERT, ReactionType.REJECT]
@@ -238,18 +241,18 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
         is_valid = True
         match (roundup_desc.roundup_filter_type):
             case RoundupFilterType.MYPINS:
-                is_valid = qoc_rip.message_author_id == roundup_desc.message_author_id
+                is_valid = rip.message_author_id == roundup_desc.message_author_id
             case RoundupFilterType.MYFIXES:
-                is_valid = qoc_rip_has_reaction_one_from_user(fix_react_list, user_id, qoc_rip)
+                is_valid = react_and_users_has_react_one_from_user(fix_react_list, user_id, react_and_users)
             case RoundupFilterType.NOFIXES:
-                is_valid = not qoc_rip_has_reaction_one(fix_react_list, qoc_rip)
+                is_valid = not react_and_users_has_react_one(fix_react_list, react_and_users)
             case RoundupFilterType.MYFRESH:
-                is_valid = not qoc_rip_has_reaction_one_from_user(review_react_list, user_id, qoc_rip)
+                is_valid = not react_and_users_has_react_one_from_user(review_react_list, user_id, react_and_users)
             case RoundupFilterType.FRESH:
-                is_valid = not qoc_rip_has_reaction_one(review_react_list, qoc_rip)
+                is_valid = not react_and_users_has_react_one(review_react_list, react_and_users)
             case RoundupFilterType.SPICY:
-                is_valid = qoc_rip_has_reaction(ReactionType.CHECK, qoc_rip) and \
-                            qoc_rip_has_reaction(ReactionType.REJECT, qoc_rip)
+                is_valid = react_and_users_has_react(ReactionType.CHECK, react_and_users) and \
+                            react_and_users_has_react(ReactionType.REJECT, react_and_users)
             case RoundupFilterType.SEARCH_TITLE:
                 is_valid = False
                 for key in search_keys:
@@ -263,30 +266,26 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
                         is_valid = True
                         break
             case RoundupFilterType.HASREACT:
-                is_valid = qoc_rip_has_reaction(roundup_desc.reaction_type, qoc_rip)
+                is_valid = react_and_users_has_react(roundup_desc.reaction_type, react_and_users)
             case RoundupFilterType.NOTHASREACT:
-                is_valid = True
-                for react_and_user in qoc_rip.react_and_users:
-                    if react_is(roundup_desc.reaction_type, react_and_user.name):
-                        is_valid = False
-                        break
+                is_valid = not react_and_users_has_react(roundup_desc.reaction_type, react_and_users)
             case RoundupFilterType.SEARCH_REACTION:
                 is_valid = False 
-                for react_and_user in qoc_rip.react_and_users:
+                for react_and_user in react_and_users:
                     if roundup_desc.react_name == react_and_user.name:
                         is_valid = True 
                         break
             case RoundupFilterType.OVERDUE:
                 is_valid = is_overdue
             case RoundupFilterType.VET_ALL:
-                vet_reacts, msg = await vet_message(qoc_rip.text) 
+                vet_reacts, msg = await vet_message(rip.text) 
                 reacts = vet_reacts
                 is_valid = True 
             case RoundupFilterType.RANDOM:
                 is_valid = (i == selected_index)
 
         if is_valid:
-            link = format_message_link(channel.guild.id, channel.id, qoc_rip.message_id)
+            link = format_message_link(channel.guild.id, channel.id, rip.message_id)
             base_message = f'**[{rip_title}]({link})**\n{author}'
             if len(indicator) > 0:
                 base_message = f'{indicator} **[{rip_title}]({link})** {indicator}\n{author}'
