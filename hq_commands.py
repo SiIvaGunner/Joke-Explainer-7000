@@ -195,9 +195,7 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
         specs_needed = False
         fix_or_alert = False
 
-        react_and_users = await get_react_and_users(rip, get_rips_desc)
-
-        for react_and_user in react_and_users:
+        for react_and_user in rip.reacts:
             if react_is(ReactionType.GOLDCHECK, react_and_user.name):
                 num_goldchecks += 1
             elif react_is(ReactionType.CHECKREQ, react_and_user.name):
@@ -243,16 +241,16 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
             case RoundupFilterType.MYPINS:
                 is_valid = rip.message_author_id == roundup_desc.message_author_id
             case RoundupFilterType.MYFIXES:
-                is_valid = react_and_users_has_react_one_from_user(fix_react_list, user_id, react_and_users)
+                is_valid = await user_is_react(fix_react_list, user_id, rip, command_context.channel)
             case RoundupFilterType.NOFIXES:
-                is_valid = not react_and_users_has_react_one(fix_react_list, react_and_users)
+                is_valid = not rip_has_react(fix_react_list, rip)
             case RoundupFilterType.MYFRESH:
-                is_valid = not react_and_users_has_react_one_from_user(review_react_list, user_id, react_and_users)
+                is_valid = await user_is_react(review_react_list, user_id, rip, command_context.channel)
             case RoundupFilterType.FRESH:
-                is_valid = not react_and_users_has_react_one(review_react_list, react_and_users)
+                is_valid = not rip_has_react(review_react_list, rip)
             case RoundupFilterType.SPICY:
-                is_valid = react_and_users_has_react(ReactionType.CHECK, react_and_users) and \
-                            react_and_users_has_react(ReactionType.REJECT, react_and_users)
+                is_valid = rip_has_react([ReactionType.CHECK], rip) and \
+                            rip_has_react([ReactionType.REJECT], rip)
             case RoundupFilterType.SEARCH_TITLE:
                 is_valid = False
                 for key in search_keys:
@@ -266,12 +264,12 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
                         is_valid = True
                         break
             case RoundupFilterType.HASREACT:
-                is_valid = react_and_users_has_react(roundup_desc.reaction_type, react_and_users)
+                is_valid = rip_has_react([roundup_desc.reaction_type], rip)
             case RoundupFilterType.NOTHASREACT:
-                is_valid = not react_and_users_has_react(roundup_desc.reaction_type, react_and_users)
+                is_valid = not rip_has_react([roundup_desc.reaction_type], rip)
             case RoundupFilterType.SEARCH_REACTION:
                 is_valid = False 
-                for react_and_user in react_and_users:
+                for react_and_user in rip:
                     if roundup_desc.react_name == react_and_user.name:
                         is_valid = True 
                         break
@@ -666,8 +664,8 @@ async def send_suborqueue_rips(desc: SendSubOrQueueDesc, command_context: Comman
         message_ids: List[int] = []
         for channel_id in channel_ids:
             await lock_channel(channel_id, command_context.channel)
-            if channel_id in RIP_CACHE_SUBORQUEUE:
-                for k in RIP_CACHE_SUBORQUEUE[channel_id].keys():
+            if channel_id in RIP_CACHE:
+                for k in RIP_CACHE[channel_id].keys():
                     message_ids.append(k)
                 unlock_channel(channel_id)
         selected_message_id = random.choice(message_ids)
@@ -676,22 +674,22 @@ async def send_suborqueue_rips(desc: SendSubOrQueueDesc, command_context: Comman
         channel = bot.get_channel(channel_id)
         if channel is None: continue
 
-        rips = await get_suborqueue_rips(channel, GetRipsDesc(typing_channel=command_context.channel))
+        rips = await get_rips(channel, GetRipsDesc(typing_channel=command_context.channel))
 
         result += f'<#{channel_id}>:\n'
 
-        for suborqueue_rip in rips:
+        for rip in rips:
 
-            rip_title = get_rip_title(suborqueue_rip.text)
-            rip_author = get_raw_rip_author(suborqueue_rip.text)
+            rip_title = get_rip_title(rip.text)
+            rip_author = get_raw_rip_author(rip.text)
 
             is_valid = False
             match(desc.suborqueue_rip_filter_type):
                 case SubOrQueueRipFilterType.HASREACT:
-                    is_valid = suborqueue_rip_has_reaction(desc.reaction_type, suborqueue_rip)
+                    is_valid = rip_has_react([desc.reaction_type], rip)
                 case SubOrQueueRipFilterType.UNSENT:
                     is_valid = line_contains_substring(rip_author, 'email') and \
-                            not suborqueue_rip_has_reaction(ReactionType.EMAILSENT, suborqueue_rip)
+                            not rip_has_react([ReactionType.EMAILSENT], rip)
                 case SubOrQueueRipFilterType.SEARCH_TITLE:
                     is_valid = line_contains_substring(rip_title, desc.search_key)
                 case SubOrQueueRipFilterType.SEARCH_AUTHOR:
@@ -701,14 +699,14 @@ async def send_suborqueue_rips(desc: SendSubOrQueueDesc, command_context: Comman
                 case SubOrQueueRipFilterType.ALL:
                     is_valid = True
                 case SubOrQueueRipFilterType.RANDOM:
-                    is_valid = suborqueue_rip.message_id == selected_message_id
+                    is_valid = rip.message_id == selected_message_id
                 case _:
                     assert "Unimplemented SubOrQueueRipFilterType"
 
             if is_valid:
-                if suborqueue_rip_has_reaction(ReactionType.QOC, suborqueue_rip):
+                if rip_has_react([ReactionType.QOC], rip):
                     result += f"{qoc_emote} "
-                rip_link = format_message_link(channel.guild.id, suborqueue_rip.channel_id, suborqueue_rip.message_id)
+                rip_link = format_message_link(channel.guild.id, rip.channel_id, rip.message_id)
                 result += f'**[{rip_title}]({rip_link})**\n'
                 count += 1
 

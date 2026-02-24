@@ -57,10 +57,9 @@ QOC_DEFAULT_CLIPPING = '📢'
 #                    CACHE                      #
 #===============================================#
 
-class ReactAndUser(NamedTuple):
+class React(NamedTuple):
     id: int
     name: str
-    user_id: int
 
 """
 QocRips are rips that are pinned in a channel and used in QoC. They have info on who reacted to what.
@@ -74,10 +73,6 @@ class QocRip(NamedTuple):
     message_author_name: str
     react_and_users: List[ReactAndUser]
     created_at: datetime
-
-class React(NamedTuple):
-    id: int
-    name: str
 
 """
 SubOrQueue Rips are rips posted in a submission channel, or rips posted in an accepted rips queue.
@@ -101,10 +96,12 @@ class Rip(NamedTuple):
     channel_id: int
     message_author_id: int
     message_author_name: str
+    reacts: List[React]
     created_at: datetime
 
 RIP_CACHE_QOC: dict[int, dict[int, QocRip]] = {}
 RIP_CACHE_SUBORQUEUE: dict[int, dict[int, SubOrQueueRip]] = {}
+
 RIP_CACHE: dict[int, dict[int, Rip]] = {}
 
 def init_channel_cache(channel_id: int):
@@ -182,10 +179,25 @@ def get_channel_info(channel: TextChannel | Thread) -> ChannelInfo:
     return ChannelInfo(rip_fetch_type, is_cache_qoc)
 
 def init_rip(message) -> Rip:
-    return Rip(message.content, message.id, message.channel.id, message.author.id, \
-            str(message.author), message.created_at)
 
-def cache_rip(message: Message) -> Rip:
+    reacts: List[React] = []
+
+    for reaction in message.reactions:
+        name = ""
+        id = 0 
+        if isinstance(reaction.emoji, str):
+            name = reaction.emoji
+        elif type(reaction.emoji) == discord.Emoji:
+            name = reaction.emoji.name
+            if reaction.emoji.id:
+                id = reaction.emoji.id
+        for i in range(0, reaction.count):
+            reacts.append(React(id, name))
+
+    return Rip(message.content, message.id, message.channel.id, message.author.id, \
+            str(message.author), reacts, message.created_at)
+
+def cache_rip_in_message(message: Message):
 
     rip = init_rip(message)
 
@@ -196,12 +208,6 @@ def cache_rip(message: Message) -> Rip:
     RIP_CACHE[message.channel.id][message.id] = rip
 
     return rip
-
-async def cache_if_rip_with_lock(message, typing_channel: TextChannel | Thread | None):
-    if is_message_rip(message):
-        await lock_message(message.id, typing_channel)
-        cache_rip(message)
-        unlock_message(message.id)
 
 class GetRipsDesc(NamedTuple):
     typing_channel: TextChannel | Thread | None = None
@@ -223,22 +229,39 @@ async def get_rips(channel: TextChannel | Thread, desc: GetRipsDesc) -> List[Rip
             match channel_info.rip_fetch_type: 
                 case RipFetchType.ALL_MESSAGES_NO_THREADS:
                     async for message in channel.history(limit = None):
-                        await cache_if_rip_with_lock(message, desc.typing_channel)
+                        await lock_message_if_init(message.id, desc.typing_channel)
+                        if is_message_rip(message):
+                            cache_rip_in_message(message)
+                        unlock_message(message.id)
 
                 case RipFetchType.ALL_MESSAGES_AND_THREADS:
                     async for message in channel.history(limit = None):
+
+                        await lock_message_if_init(message.id, desc.typing_channel)
+
                         if message.thread is not None:
-                            thread_suborqueue_rips = await get_suborqueue_rips(message.thread, GetRipsDesc(rebuild_cache=desc.rebuild_cache))
+                            thread_rips = await get_rips(message.thread, GetRipsDesc(rebuild_cache=desc.rebuild_cache))
                             #NOTE: (Ahmayk) we insert thread rips also in its parent channel dict so that
                             #we get all rips in theads when we get the parent channel's rips 
-                            for thread_rip in thread_suborqueue_rips:
-                                await cache_if_rip_with_lock(thread_rip, desc.typing_channel)
+                            for thread_rip in thread_rips:
+                                await lock_message(thread_rip.message_id, None)
+                                RIP_CACHE[channel.id][thread_rip.message_id] = thread_rip 
+                                unlock_message(thread_rip.message_id)
+                        else:
+                            if is_message_rip(message):
+                                cache_rip_in_message(message)
 
-                        await cache_if_rip_with_lock(message, desc.typing_channel)
+                        unlock_message(message.id)
 
                 case RipFetchType.PINS:
                     async for message in channel.pins(limit = None):
-                        await cache_if_rip_with_lock(message, desc.typing_channel)
+                        await lock_message_if_init(message.id, desc.typing_channel)
+                        if is_message_rip(message):
+                            # NOTE: (Ahmayk) channel.pins does not return reaction data,
+                            # so we have to fetch it manually. This is slow! But neccessary.
+                            fetched_message = await channel.fetch_message(message.id)
+                            cache_rip_in_message(fetched_message)
+                        unlock_message(message.id)
 
                 case _:
                     assert "Unimplemented RipFetchType"
@@ -261,38 +284,6 @@ def init_react(reaction: discord.Reaction) -> React:
         if reaction.emoji.id:
             id = reaction.emoji.id
     return React(id, name) 
-
-REACT_AND_USER_CACHE: dict[int, List[ReactAndUser]] = {}
-
-async def get_react_and_users(rip: Rip, desc: GetRipsDesc) -> List[ReactAndUser]:
-
-    await lock_message(rip.message_id, desc.typing_channel)
-
-    if rip.message_id not in REACT_AND_USER_CACHE or desc.rebuild_cache:
-
-        async with desc.typing_channel.typing() if desc.typing_channel is not None else empty_async_context():
-
-            channel = bot.get_channel(rip.channel_id)
-            if channel:
-                message = await channel.fetch_message(rip.message_id)
-
-                react_and_users: List[ReactAndUser] = []
-                for reaction in message.reactions:
-
-                    react = init_react(reaction)
-                    # NOTE: (Ahmayk) this is slow! We have to do an api call for each user.
-                    user_ids = [user.id async for user in reaction.users()]
-                    for user_id in user_ids:
-                        react_and_users.append(ReactAndUser(react.id, react.name, user_id))
-
-                REACT_AND_USER_CACHE[rip.message_id] = react_and_users
-
-    unlock_message(rip.message_id)
-
-    result = REACT_AND_USER_CACHE[rip.message_id]
-
-    return result
-
 
 
 async def get_react_and_users_of_reaction(reaction: discord.Reaction) -> List[ReactAndUser]:
@@ -749,23 +740,60 @@ def qoc_rip_has_reaction_one_from_user(reaction_type_list: List[ReactionType], u
             return True
     return False
 
-def react_and_users_has_react(reaction_type: ReactionType, react_and_users: List[ReactAndUser]) -> bool:
-    for react_and_user in react_and_users:
-        if react_is(reaction_type, react_and_user.name):
-            return True
-    return False
-
-def react_and_users_has_react_one(reaction_type_list: List[ReactionType], react_and_users: List[ReactAndUser]):
-    for react_and_user in react_and_users:
+def rip_has_react(reaction_type_list: List[ReactionType], rip: Rip):
+    for react_and_user in rip.reacts:
         if react_is_one(reaction_type_list, react_and_user.name):
             return True
     return False
 
-def react_and_users_has_react_one_from_user(reaction_type_list: List[ReactionType], user_id: int, react_and_users: List[ReactAndUser]):
-    for react_and_user in react_and_users:
-        if react_and_user.user_id == user_id and react_is_one(reaction_type_list, react_and_user.name):
-            return True
-    return False
+USER_REACT_CACHE: dict[int, dict[React, List[int]]] = {}
+
+async def user_is_react(react_list: List[ReactionType], user_id: int, rip: Rip, typing_channel: TextChannel | Thread) -> bool:
+
+    result = False
+
+    if rip.message_id not in USER_REACT_CACHE:
+        USER_REACT_CACHE[rip.message_id] = {} 
+
+    await lock_message(rip.message_id, typing_channel)
+
+    fetch_user_ids = False 
+    for react in rip.reacts:
+        if react_is_one(react_list, react.name) and react not in USER_REACT_CACHE[rip.message_id]:
+            fetch_user_ids = True
+            break
+
+    if fetch_user_ids: 
+        channel = bot.get_channel(rip.channel_id)
+        if channel:
+
+            # NOTE: (Ahmayk) this message fetch isn't actually neccessary, but we need the
+            # message react object to call reaction.users().
+            # An optimization here would be to figure out how to do this anyway,
+            # perhaps bypassing discord.py to make the direct api call we need
+            # In pratice we shouldn't be calling this too often anyway during regular usage
+            message = await channel.fetch_message(rip.message_id)
+
+            for reaction in message.reactions:
+                react = init_react(reaction)
+                if react_is_one(react_list, react.name):
+                    # NOTE: (Ahmayk) this is slow! We have to do an api call for each user.
+                    USER_REACT_CACHE[rip.message_id][react] = []
+                    fetched_user_ids = [user.id async for user in reaction.users()]
+                    for fetched_user_id in fetched_user_ids:
+                        USER_REACT_CACHE[rip.message_id][react].append(fetched_user_id) 
+
+    for react in rip.reacts:
+        if react_is_one(react_list, react.name):
+            # NOTE: (Ahmayk) if the react isn't in the cache then we programmed something wrong
+            assert react in USER_REACT_CACHE[rip.message_id]
+            if user_id in USER_REACT_CACHE[rip.message_id][react]:
+                result = True
+                break
+
+    unlock_message(rip.message_id)
+
+    return result
 
 
 def reaction_name_to_emoji_string(name: str, guild: discord.Guild | None) -> str:
