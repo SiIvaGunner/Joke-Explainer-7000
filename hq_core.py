@@ -172,9 +172,9 @@ def react_needs_user_cache(react: React) -> bool:
             break
     return result
 
-def format_user_id_cache_error(text: str, user_id_text: str, react: React, message: Message) -> str:
+def format_reaction_cache_error(text: str, post_text: str, react: React, message: Message) -> str:
     emoji_string = reaction_name_to_emoji_string(react.name, message.guild)
-    return f'\n**{text}**\n{get_rip_title(message.content)} {message.jump_url}{emoji_string}: {user_id_text}'
+    return f'\n**{text}**\n{get_rip_title(message.content)} {message.jump_url}{emoji_string}: {post_text}'
 
 async def validate_rip_message(message: Message) -> str:
     result = ""
@@ -192,19 +192,13 @@ async def validate_rip_message(message: Message) -> str:
         for react in count_dict_refetched.keys():
 
             if react not in count_dict_cached:
-                emoji_string = reaction_name_to_emoji_string(react.name, message.guild)
-                result += f'\nReaction missing in cache for {get_rip_title(message.content)} '+\
-                    f'{message.jump_url}{emoji_string}: x{count_dict_refetched[react]}'
+                result += format_reaction_cache_error(f'Reaction missing in cache. (missing entirely)', f'x{count_dict_refetched[react]}', react, message)
             elif count_dict_refetched[react] != count_dict_cached[react]:
-                emoji_string = reaction_name_to_emoji_string(react.name, message.guild)
-                result += f'\nReaction missing in cache for {get_rip_title(message.content)} '+\
-                    f'{message.jump_url}{emoji_string}: ~~x{count_dict_cached[react]}~~ x{count_dict_refetched[react]}'
+                result += format_reaction_cache_error(f'Reaction missing in cache. (counts do not match)', f'~~x{count_dict_cached[react]}~~ x{count_dict_refetched[react]}', react, message)
 
         for react in count_dict_cached.keys():
             if react not in count_dict_refetched:
-                emoji_string = reaction_name_to_emoji_string(react.name, message.guild)
-                result += f'\nReaction in cache outdated for {get_rip_title(message.content)} '+\
-                    f'{message.jump_url}{emoji_string}: ~~x{count_dict_cached[react]}~~ x0'
+                result += format_reaction_cache_error(f'Reaction in cache outdated.', f'~~x{count_dict_cached[react]}~~ x0', react, message)
 
     else:
         result += f'\nRip missing from cache: {get_rip_title(message.content)} {message.jump_url}'
@@ -224,28 +218,33 @@ async def validate_rip_message(message: Message) -> str:
                 react = init_react(reaction)
                 fetched_react_user_ids_dict[react] = [user.id async for user in reaction.users()]
 
+        if len(fetched_react_user_ids_dict) and message.id not in USER_REACT_CACHE:
+            result += f'\n**User react dict not initialied for ${message.jump_url}**' 
+            USER_REACT_CACHE[message.id] = {}
+
         for react, user_ids in fetched_react_user_ids_dict.items(): 
             if react not in USER_REACT_CACHE[message.id]:
-                result += format_user_id_cache_error(f'User react dict missing in user react cache for: ', '', react, message)
+                result += format_reaction_cache_error(f'User react dict missing in user react cache.', '', react, message)
                 USER_REACT_CACHE[message.id][react] = []
                 for user_id in user_ids:
                     USER_REACT_CACHE[message.id][react].append(user_id)
             else:
                 for user_id in user_ids:
                     if user_id not in USER_REACT_CACHE[message.id][react]:
-                        result += format_user_id_cache_error(f'User ID dict missing in user react cache for: ', f'({user_id})', react, message)
+                        result += format_reaction_cache_error(f'User ID dict missing in user react cache.', f'({user_id})', react, message)
                         USER_REACT_CACHE[message.id][react].append(user_id)
 
-        for react, user_ids in USER_REACT_CACHE[message.id].copy().items():
-            if react_needs_user_cache(react):
-                if react not in fetched_react_user_ids_dict:
-                    result += format_user_id_cache_error(f'User react data outdated in cache for: ', f'{user_ids}', react, message)
-                    USER_REACT_CACHE[message.id].pop(react)
-                else:
-                    for user_id in user_ids:
-                        if user_id not in fetched_react_user_ids_dict[react]:
-                            result += format_user_id_cache_error(f'User ID outdated in user react cache for: ', f'({user_id})', react, message)
-                            USER_REACT_CACHE[message.id][react].remove(user_id)
+        if message.id in USER_REACT_CACHE:
+            for react, user_ids in USER_REACT_CACHE[message.id].copy().items():
+                if len(user_ids) and react_needs_user_cache(react):
+                    if react not in fetched_react_user_ids_dict:
+                        result += format_reaction_cache_error(f'User react data outdated in user react cache.', f'{user_ids}', react, message)
+                        USER_REACT_CACHE[message.id].pop(react)
+                    else:
+                        for user_id in user_ids:
+                            if user_id not in fetched_react_user_ids_dict[react]:
+                                result += format_reaction_cache_error(f'User ID outdated in user react cache', f'({user_id})', react, message)
+                                USER_REACT_CACHE[message.id][react].remove(user_id)
 
     return result
 
@@ -310,7 +309,7 @@ async def get_rips(channel: TextChannel | Thread, desc: GetRipsDesc) -> List[Rip
     ## it is being updated, it would likely be incomplete or wrong! 
     await lock_channel(channel.id, desc.typing_channel)
 
-    if not len(RIP_CACHE[channel.id]):
+    if not len(RIP_CACHE[channel.id]) or desc.rebuild_cache:
         async with desc.typing_channel.typing() if desc.typing_channel is not None else empty_async_context():
             await process_rip_channel(channel, False, desc.typing_channel)
 
