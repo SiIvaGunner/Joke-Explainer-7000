@@ -262,14 +262,14 @@ async def validate_rip_message(message: Message) -> str:
 
 async def process_rip_message(message: Message, refetch_message: bool, is_validate_message: bool, typing_channel: TextChannel | Thread | None) -> str:
     return_message = ""
-    await lock_message(message.id, typing_channel)
     if is_message_rip(message):
+        await lock_message(message.id, typing_channel)
         if refetch_message:
             message = await message.channel.fetch_message(message.id)
         if is_validate_message:
             return_message = await validate_rip_message(message)
         cache_rip_in_message(message)
-    unlock_message(message.id)
+        unlock_message(message.id)
     return return_message
 
 async def process_rip_channel(channel: TextChannel | Thread, is_validate_message: bool, typing_channel: TextChannel | Thread | None) -> str:
