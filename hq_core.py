@@ -158,15 +158,9 @@ def init_rip(message) -> Rip:
             str(message.author), reacts, message.created_at)
 
 def cache_rip_in_message(message: Message):
-
     rip = init_rip(message)
-
-    if message.id not in CACHE_LOCK_MESSAGE:
-        CACHE_LOCK_MESSAGE[message.id] = asyncio.Lock()
-
     init_channel_cache(message.channel.id)
     RIP_CACHE[message.channel.id][message.id] = rip
-
     return rip
 
 def react_needs_user_cache(react: React) -> bool:
@@ -177,6 +171,10 @@ def react_needs_user_cache(react: React) -> bool:
             result = True
             break
     return result
+
+def format_user_id_cache_error(text: str, user_id_text: str, react: React, message: Message) -> str:
+    emoji_string = reaction_name_to_emoji_string(react.name, message.guild)
+    return f'\n**{text}**\n{get_rip_title(message.content)} {message.jump_url}{emoji_string}: {user_id_text}'
 
 async def validate_rip_message(message: Message) -> str:
     result = ""
@@ -228,33 +226,25 @@ async def validate_rip_message(message: Message) -> str:
 
         for react, user_ids in fetched_react_user_ids_dict.items(): 
             if react not in USER_REACT_CACHE[message.id]:
-                emoji_string = reaction_name_to_emoji_string(react.name, message.guild)
-                result += f'\nUser react dict missing in user react cache for {get_rip_title(message.content)} '+\
-                    f'{message.jump_url}{emoji_string}'
+                result += format_user_id_cache_error(f'User react dict missing in user react cache for: ', '', react, message)
                 USER_REACT_CACHE[message.id][react] = []
                 for user_id in user_ids:
                     USER_REACT_CACHE[message.id][react].append(user_id)
             else:
                 for user_id in user_ids:
                     if user_id not in USER_REACT_CACHE[message.id][react]:
-                        emoji_string = reaction_name_to_emoji_string(react.name, message.guild)
-                        result += f'\nUser ID missing in user react cache for {get_rip_title(message.content)} '+\
-                            f'{message.jump_url}{emoji_string}: ({user_id})'
+                        result += format_user_id_cache_error(f'User ID dict missing in user react cache for: ', f'({user_id})', react, message)
                         USER_REACT_CACHE[message.id][react].append(user_id)
 
         for react, user_ids in USER_REACT_CACHE[message.id].copy().items():
             if react_needs_user_cache(react):
                 if react not in fetched_react_user_ids_dict:
-                    emoji_string = reaction_name_to_emoji_string(react.name, message.guild)
-                    result += f'\nUser react data in cache outdated for {get_rip_title(message.content)} '+\
-                        f'{message.jump_url}{emoji_string}: {user_ids}'
+                    result += format_user_id_cache_error(f'User react data outdated in cache for: ', f'{user_ids}', react, message)
                     USER_REACT_CACHE[message.id].pop(react)
                 else:
                     for user_id in user_ids:
                         if user_id not in fetched_react_user_ids_dict:
-                            emoji_string = reaction_name_to_emoji_string(react.name, message.guild)
-                            result += f'\nUser ID outdated in user react cache for {get_rip_title(message.content)} '+\
-                                f'{message.jump_url}{emoji_string}: ({user_id})'
+                            result += format_user_id_cache_error(f'User ID outdated in user react cache for: ', f'({user_id})', react, message)
                             USER_REACT_CACHE[message.id][react].remove(user_id)
 
     return result
@@ -300,7 +290,7 @@ async def process_rip_channel(channel: TextChannel | Thread, is_validate_message
 
         case RipFetchType.PINS:
             async for message in channel.pins(limit = None):
-                await process_rip_message(message, True, is_validate_message, typing_channel)
+                return_message += await process_rip_message(message, True, is_validate_message, typing_channel)
 
         case _:
             assert "Unimplemented RipFetchType"
