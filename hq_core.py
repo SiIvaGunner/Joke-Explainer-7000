@@ -243,7 +243,7 @@ async def validate_rip_message(message: Message) -> str:
                     USER_REACT_CACHE[message.id].pop(react)
                 else:
                     for user_id in user_ids:
-                        if user_id not in fetched_react_user_ids_dict:
+                        if user_id not in fetched_react_user_ids_dict[react]:
                             result += format_user_id_cache_error(f'User ID outdated in user react cache for: ', f'({user_id})', react, message)
                             USER_REACT_CACHE[message.id][react].remove(user_id)
 
