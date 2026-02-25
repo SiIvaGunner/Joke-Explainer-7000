@@ -176,7 +176,7 @@ def format_reaction_cache_error(text: str, post_text: str, react: React, message
     emoji_string = reaction_name_to_emoji_string(react.name, message.guild)
     return f'\n**{text}**\n{get_rip_title(message.content)} {message.jump_url}{emoji_string}: {post_text}'
 
-async def validate_rip_message(message: Message) -> str:
+def validate_rip_message(message: Message, user_react_data: dict[React, List[int]]) -> str:
     result = ""
 
     if message.id in RIP_CACHE[message.channel.id]:
@@ -206,58 +206,80 @@ async def validate_rip_message(message: Message) -> str:
     channel_info = get_channel_info(message.channel)
     if channel_info.is_cache_qoc:
 
-        fetched_reactions_to_validate: List[discord.Reaction] = []
-        for reaction in message.reactions:
-            react = init_react(reaction)
-            if react_needs_user_cache(react):
-                fetched_reactions_to_validate.append(reaction)
-        
-        fetched_react_user_ids_dict: dict[React, List[int]] = {}
-        if len(fetched_reactions_to_validate):
-            for reaction in fetched_reactions_to_validate:
-                react = init_react(reaction)
-                fetched_react_user_ids_dict[react] = [user.id async for user in reaction.users()]
-
-        if len(fetched_react_user_ids_dict) and message.id not in USER_REACT_CACHE:
+        if len(user_react_data) and message.id not in USER_REACT_CACHE:
             result += f'\n**User react dict not initialied for ${message.jump_url}**' 
             USER_REACT_CACHE[message.id] = {}
 
-        for react, user_ids in fetched_react_user_ids_dict.items(): 
+        for react, user_ids in user_react_data.items(): 
             if react not in USER_REACT_CACHE[message.id]:
                 result += format_reaction_cache_error(f'User react dict missing in user react cache.', '', react, message)
-                USER_REACT_CACHE[message.id][react] = []
-                for user_id in user_ids:
-                    USER_REACT_CACHE[message.id][react].append(user_id)
             else:
                 for user_id in user_ids:
                     if user_id not in USER_REACT_CACHE[message.id][react]:
                         result += format_reaction_cache_error(f'User ID dict missing in user react cache.', f'({user_id})', react, message)
-                        USER_REACT_CACHE[message.id][react].append(user_id)
 
         if message.id in USER_REACT_CACHE:
             for react, user_ids in USER_REACT_CACHE[message.id].copy().items():
                 if len(user_ids) and react_needs_user_cache(react):
-                    if react not in fetched_react_user_ids_dict:
+                    if react not in user_react_data:
                         result += format_reaction_cache_error(f'User react data outdated in user react cache.', f'{user_ids}', react, message)
-                        USER_REACT_CACHE[message.id].pop(react)
                     else:
                         for user_id in user_ids:
-                            if user_id not in fetched_react_user_ids_dict[react]:
+                            if user_id not in user_react_data[react]:
                                 result += format_reaction_cache_error(f'User ID outdated in user react cache', f'({user_id})', react, message)
-                                USER_REACT_CACHE[message.id][react].remove(user_id)
 
     return result
 
+async def get_user_react_data(react_list: List[ReactionType], message: Message) -> dict[React, List[int]]:
+    result: dict[React, List[int]] = {}
+    if len(react_list):
+        for reaction in message.reactions:
+            react = init_react(reaction)
+            if react_is_one(react_list, react.name):
+                result[react] = []
+                # NOTE: (Ahmayk) this is slow! We have to do an api call for each user.
+                fetched_user_ids = [user.id async for user in reaction.users()]
+                for fetched_user_id in fetched_user_ids:
+                    result[react].append(fetched_user_id) 
+    return result
+
+def cache_user_react_data(user_react_data: dict[React, List[int]], message_id: int):
+    if len(user_react_data):
+        if message_id not in USER_REACT_CACHE:
+            USER_REACT_CACHE[message_id] = {} 
+        for react, user_ids in user_react_data.items():
+            USER_REACT_CACHE[message_id][react] = []
+            for user_id in user_ids:
+                USER_REACT_CACHE[message_id][react].append(user_id) 
 
 async def process_rip_message(message: Message, refetch_message: bool, is_validate_message: bool, typing_channel: TextChannel | Thread | None) -> str:
     return_message = ""
     if is_message_rip(message):
         await lock_message(message.id, typing_channel)
+
         if refetch_message:
             message = await message.channel.fetch_message(message.id)
+
+        user_react_data: dict[React, List[int]] = {}
+        channel_info = get_channel_info(message.channel)
+        if channel_info.is_cache_qoc:
+            react_list = []
+            for enum in UserReactCheckType:
+                reacts_of_check_type = user_react_check_type_to_react_list(enum)
+                for react in reacts_of_check_type:
+                    if react not in react_list:
+                        react_list.append(react)
+            user_react_data = await get_user_react_data(react_list, message)
+
         if is_validate_message:
-            return_message = await validate_rip_message(message)
+            return_message = validate_rip_message(message, user_react_data)
+
         cache_rip_in_message(message)
+        if channel_info.is_cache_qoc:
+            cache_user_react_data(user_react_data, message.id)
+
+        channel_info = get_channel_info(message.channel)
+
         unlock_message(message.id)
     return return_message
 
@@ -396,12 +418,6 @@ async def rebuild_cache_for_channel(channel_id: int) -> str:
     channel = bot.get_channel(channel_id)
     if channel:
         rips = await get_rips(channel, GetRipsDesc(rebuild_cache=True))
-
-        ##TODO: (Ahmayk) integrate with get_rips (will save a fetch_message call)
-        if channel_is_types(channel, ['QOC']):
-            for enum in UserReactCheckType:
-                for rip in rips:
-                    await user_is_react(enum, 0, rip, None)
 
         channel_type_string = '[Unknown type]'
         if channel_is_types(channel, ['QOC']):
@@ -556,22 +572,16 @@ async def user_is_react(user_react_check_type: UserReactCheckType, user_id: int,
     if fetch_user_ids: 
         channel = bot.get_channel(rip.channel_id)
         if channel:
-
             # NOTE: (Ahmayk) this message fetch isn't actually neccessary, but we need the
             # message react object to call reaction.users().
-            # An optimization here would be to figure out how to do this anyway,
+            # As far as I can tell this is the only way discord.py exposes this API call.
+            # An optimization here would be to figure out how to do this without the reaction object,
             # perhaps bypassing discord.py to make the direct api call we need
-            # In pratice we shouldn't be calling this too often anyway during regular usage
+            # In pratice we shouldn't be calling this code path too often anyway during regular usage
+            # So isn't the biggest problem
             message = await channel.fetch_message(rip.message_id)
-
-            for reaction in message.reactions:
-                react = init_react(reaction)
-                if react_is_one(react_list, react.name):
-                    # NOTE: (Ahmayk) this is slow! We have to do an api call for each user.
-                    USER_REACT_CACHE[rip.message_id][react] = []
-                    fetched_user_ids = [user.id async for user in reaction.users()]
-                    for fetched_user_id in fetched_user_ids:
-                        USER_REACT_CACHE[rip.message_id][react].append(fetched_user_id) 
+            user_react_data = await get_user_react_data(react_list, message)
+            cache_user_react_data(user_react_data, message.id)
 
     for react in rip.reacts:
         if react_is_one(react_list, react.name):
@@ -580,6 +590,7 @@ async def user_is_react(user_react_check_type: UserReactCheckType, user_id: int,
             if user_id in USER_REACT_CACHE[rip.message_id][react]:
                 result = True
                 break
+
 
     unlock_message(rip.message_id)
 
