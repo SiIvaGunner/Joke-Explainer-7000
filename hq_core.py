@@ -12,7 +12,7 @@ from simpleQoC.metadata import checkMetadata, isDupe
 import re
 import functools
 import typing
-from typing import NamedTuple, List
+from typing import NamedTuple, List, Tuple
 from enum import Enum, auto
 
 from contextlib import asynccontextmanager
@@ -103,6 +103,26 @@ async def discord_get_channel_pins(limit: int | None, channel: TextChannel | Thr
         await write_log(f'Discord API call failed fetching channel pins: {error_string}')
     return messages
 
+
+async def discord_cleanup_embeds(limit: int | None, expire_time: float, channel: TextChannel | Thread, \
+                                 typing_channel: TextChannel | Thread | None) -> Tuple[int, str]:
+    error_string = ""
+
+    def should_delete(message: Message):
+        result = message.author == bot.user and len(message.embeds)
+        if result and expire_time: 
+            result = (datetime.now(timezone.utc) - message.created_at) > timedelta(seconds=expire_time)
+        return result 
+
+    deleted_messages = [] 
+    try:
+        async with typing_channel.typing() if typing_channel is not None else empty_async_context():
+            deleted_messages = await channel.purge(limit=limit, check=should_delete)
+    except Exception as error:
+        error_string = f'Discord API call failed deleting messages: {type(error).__name__}: {error}'
+        await write_log(error_string)
+
+    return len(deleted_messages), error_string
 
 #===============================================#
 #                    CACHE                      #
@@ -1281,20 +1301,14 @@ async def check_qoc_and_metadata(text: str, message_id: int, message_author_name
 #                    EVENTS                     #
 #===============================================#
 
-async def remove_embeds_from_channel_startup(channel_ids: List[int], expire_time: float):
+async def remove_embeds_from_channel_startup(channel_ids: List[int], expire_time_seconds: float):
     prefix = get_config("prefix")
     for channel_id in channel_ids:
         channel = bot.get_channel(channel_id)
         if channel:
-            count = 0
-            for message in await discord_get_channel_messages(200, channel):
-                ##TODO: (Ahmayk) use bulk delete
-                if message.author == bot.user and message.embeds and (datetime.now(timezone.utc) - message.created_at) > timedelta(seconds=expire_time):
-                    await message.delete()
-                    count += 1
-            
+            count, error_string = await discord_cleanup_embeds(200, expire_time_seconds, channel, None) 
             if count > 0:
-                await send(f"Good morning! Removed {count} embed messages sent more than {expire_time // 60} minutes ago. " + \
+                await send(f"Good morning! Removed {count} embed messages sent more than {expire_time_seconds // 60} minutes ago. " + \
                        f"If there are older or newer embeds that should be removed, run {prefix}cleanup manually.", channel)
 
 @bot.event

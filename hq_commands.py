@@ -1517,14 +1517,11 @@ async def cleanup(args: list[str], command_context: CommandContext):
     if len(args):
         search_limit = int(args[0]) 
 
-    def should_delete(message: Message):
-        return message.author == bot.user and message.embeds
-
-    deleted_messages = [] 
-    async with command_context.channel.typing():
-        deleted_messages = await command_context.channel.purge(limit=search_limit, check=should_delete)
-    
-    await send(f"Removed {len(deleted_messages)} embed messages.", command_context.channel)
+    count, error_string = await discord_cleanup_embeds(search_limit, 0, command_context.channel, command_context.channel)
+    if (error_string):
+        await send(error_string, command_context.channel)
+    else:
+        await send(f"Removed {count} embed messages.", command_context.channel)
 
 
 async def get_suborqueue_rip_stats_string(channel_id: int, typing_channel: TextChannel | Thread) -> str:
