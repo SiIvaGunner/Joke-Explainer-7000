@@ -24,7 +24,6 @@ import discord
 from discord.abc import GuildChannel
 
 from hq_config import *
-from hq_discord import discord_fetch_message
 
 bot = discord.Client(
     intents = discord.Intents.all() # This was a change necessitated by an update to discord.py :/
@@ -52,6 +51,57 @@ DEFAULT_THUMBNAIL = '🖼️'
 QOC_DEFAULT_LINKERR = '🔗'
 QOC_DEFAULT_BITRATE = '🔢'
 QOC_DEFAULT_CLIPPING = '📢'
+
+#===============================================#
+#                Discord API Calls              #
+#===============================================#
+
+async def discord_fetch_message(message_id: int, channel: TextChannel | Thread) -> Message | None:
+    message = None
+    try:
+        message = await channel.fetch_message(message_id)
+    except Exception as error:
+        error_string = f"{type(error).__name__}: {error}"
+        await write_log(f'Discord API call failed fetching message {message_id} {error_string}')
+    return message
+
+async def discord_get_user_react_data(react_list: List[ReactionType], message: Message) -> dict[React, List[int]]:
+    result: dict[React, List[int]] = {}
+    if len(react_list):
+        for reaction in message.reactions:
+            react = init_react(reaction)
+            if react_is_one(react_list, react.name):
+                result[react] = []
+                # NOTE: (Ahmayk) this is slow! We have to do an api call for each user.
+                fetched_user_ids = [] 
+                try:
+                    fetched_user_ids = [user.id async for user in reaction.users()]
+                except Exception as error:
+                    error_string = f"{type(error).__name__}: {error}"
+                    await write_log(f'Discord API call failed fetching reaction user ids: {error_string}')
+
+                for fetched_user_id in fetched_user_ids:
+                    result[react].append(fetched_user_id) 
+    return result
+
+async def discord_get_channel_messages(limit: int | None, channel: TextChannel | Thread) -> List[Message]:
+    messages = [] 
+    try:
+        messages = [message async for message in channel.history(limit=limit)]
+    except Exception as error:
+        error_string = f"{type(error).__name__}: {error}"
+        await write_log(f'Discord API call failed fetching channel messages: {error_string}')
+    return messages
+
+
+async def discord_get_channel_pins(limit: int | None, channel: TextChannel | Thread) -> List[Message]:
+    messages: List[Message] = [] 
+    try:
+        messages = [message async for message in channel.pins(limit=limit)]
+    except Exception as error:
+        error_string = f"{type(error).__name__}: {error}"
+        await write_log(f'Discord API call failed fetching channel pins: {error_string}')
+    return messages
 
 
 #===============================================#
@@ -231,24 +281,6 @@ def validate_rip_message(message: Message, user_react_data: dict[React, List[int
 
     return result
 
-async def get_user_react_data(react_list: List[ReactionType], message: Message) -> dict[React, List[int]]:
-    result: dict[React, List[int]] = {}
-    if len(react_list):
-        for reaction in message.reactions:
-            react = init_react(reaction)
-            if react_is_one(react_list, react.name):
-                result[react] = []
-                # NOTE: (Ahmayk) this is slow! We have to do an api call for each user.
-                fetched_user_ids = [] 
-                try:
-                    fetched_user_ids = [user.id async for user in reaction.users()]
-                except Exception as error:
-                    error_string = f"{type(error).__name__}: {error}"
-                    await write_log(f'Discord API call failed: fetching user ids: {error_string}')
-
-                for fetched_user_id in fetched_user_ids:
-                    result[react].append(fetched_user_id) 
-    return result
 
 def cache_user_react_data(user_react_data: dict[React, List[int]], message_id: int):
     if len(user_react_data):
@@ -278,7 +310,7 @@ async def process_rip_message(message: Message, refetch_message: bool, is_valida
                 for react in reacts_of_check_type:
                     if react not in react_list:
                         react_list.append(react)
-            user_react_data = await get_user_react_data(react_list, message)
+            user_react_data = await discord_get_user_react_data(react_list, message)
 
         if is_validate_message:
             return_message = validate_rip_message(message, user_react_data)
@@ -297,11 +329,11 @@ async def process_rip_channel(channel: TextChannel | Thread, is_validate_message
     channel_info = get_channel_info(channel)
     match channel_info.rip_fetch_type: 
         case RipFetchType.ALL_MESSAGES_NO_THREADS:
-            async for message in channel.history(limit = None):
+            for message in await discord_get_channel_messages(None, channel):
                 return_message += await process_rip_message(message, False, is_validate_message, typing_channel)
 
         case RipFetchType.ALL_MESSAGES_AND_THREADS:
-            async for message in channel.history(limit = None):
+            for message in await discord_get_channel_messages(None, channel):
                 if message.thread is not None:
                     init_channel_cache(message.thread.id)
                     await lock_channel(message.thread.id, typing_channel)
@@ -319,7 +351,7 @@ async def process_rip_channel(channel: TextChannel | Thread, is_validate_message
                     return_message += await process_rip_message(message, False, is_validate_message, typing_channel)
 
         case RipFetchType.PINS:
-            async for message in channel.pins(limit = None):
+            for message in await discord_get_channel_pins(None, channel):
                 return_message += await process_rip_message(message, True, is_validate_message, typing_channel)
 
         case _:
@@ -371,7 +403,7 @@ async def get_rips_fast(channel: TextChannel | Thread, desc: GetRipsDesc) -> Lis
             result = await get_rips(channel, desc)
         else:
             async with desc.typing_channel.typing() if desc.typing_channel is not None else empty_async_context():
-                async for message in channel.pins(limit = None):
+                for message in await discord_get_channel_pins(None, channel):
                     if is_message_rip(message):
                         ##NOTE: (Ahmayk) No fetching message for reactions for speed!
                         rip = init_rip(message)
@@ -1255,7 +1287,8 @@ async def remove_embeds_from_channel_startup(channel_ids: List[int], expire_time
         channel = bot.get_channel(channel_id)
         if channel:
             count = 0
-            async for message in channel.history(limit = 200):
+            for message in await discord_get_channel_messages(200, channel):
+                ##TODO: (Ahmayk) use bulk delete
                 if message.author == bot.user and message.embeds and (datetime.now(timezone.utc) - message.created_at) > timedelta(seconds=expire_time):
                     await message.delete()
                     count += 1
@@ -1335,7 +1368,7 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
 
     else:
 
-        async for message in channel.pins(limit=1):
+        for message in await discord_get_channel_pins(1, channel):
 
             ##NOTE: (Ahmayk) only shit we recognize as rips are treated as rips
 

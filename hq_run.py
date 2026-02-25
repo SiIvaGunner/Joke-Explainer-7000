@@ -1,6 +1,5 @@
 from hq_config import *
 from hq_core import *
-from hq_discord import *
 from hq_commands import *
 from hq_fun import *
 
