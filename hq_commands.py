@@ -1396,7 +1396,7 @@ async def peek_url(args: list[str], command_context: CommandContext):
     brief='Check that all rips are in bot\'s cache',
 )
 async def validate_cache(args: list[str], command_context: CommandContext):
-    await send("Validating cache of rips in all channels...", command_context.channel)
+    await send("Validating cache of rips in all channels. This will take a few minutes...", command_context.channel)
 
     async with command_context.channel.typing():
         validate_result = await validate_cache_all()
@@ -1407,36 +1407,31 @@ async def validate_cache(args: list[str], command_context: CommandContext):
 
 @command(
     command_type=CommandType.MANAGEMENT,
-    format='<channel link>',
-    brief='Refetches rip data from discord for channel',
-    aliases=['refresh_cache']
+    format='[channel link]',
+    brief='Refetches rip data from discord',
+    desc='Insert a channel to rebuild the cache for just that channel.',
+    aliases=['refresh_cache', 'rebuild_cache']
 )
 async def reset_cache(args: list[str], command_context: CommandContext):
 
-    if not len(args):
-        return await send("Please provide a link to the channel you want to reset the cache for.", command_context.channel)
+    return_message = "" 
+    if len(args):
+        channel_link = args[0] 
+        channel_id, msg = parse_channel_link(channel_link, ['SUBS', 'SUBS_PIN', 'SUBS_THREAD', 'QUEUE', 'QOC'], False)
+        if len(msg) > 0:
+            return await send(msg, command_context.channel)
+        await send(f'Rebuilding cache for <#{channel_id}>. This will take a few minutes...', command_context.channel)
+        async with command_context.channel.typing():
+            await write_log(f'`{get_config('prefix')}rebuild_cache` run by {command_context.user.name} for <#{channel_id}> in {command_context.channel.jump_url}')
+            return_message = await rebuild_cache_for_channel(channel_id)
+    else:
+        await send(f'Rebuilding cache for all channels. This may take a few minutes...', command_context.channel)
+        async with command_context.channel.typing():
+            await write_log(f'`{get_config('prefix')}rebuild_cache` run by {command_context.user.name} in {command_context.channel.jump_url}')
+            return_message = await rebuild_cache_all()
 
-    channel_link = args[0] 
+    await send(f'Cache rebuilt!\n{return_message}', command_context.channel)
 
-    channel_id, msg = parse_channel_link(channel_link, ['SUBS', 'SUBS_PIN', 'SUBS_THREAD', 'QUEUE', 'QOC'], False)
-    if len(msg) > 0:
-        return await send(msg, command_context.channel)
-    
-    channel = bot.get_channel(channel_id)
-    init_channel_cache(channel.id)
-
-    await send("Rebuilding cache...", command_context.channel)
-
-    await lock_channel(channel.id, command_context.channel)
-    rip_count_old = len(RIP_CACHE[channel.id])
-    unlock_channel(channel.id)
-
-    return_message = f'Cache rebuilt!'
-
-    rips = await get_rips(channel, GetRipsDesc(typing_channel=command_context.channel, rebuild_cache=True))
-    return_message += f'\nRip count: {rip_count_old} => {len(rips)}' 
-
-    await send(return_message, command_context.channel)
 
 # ============ Config commands ============== #
 

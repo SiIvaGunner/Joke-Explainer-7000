@@ -390,6 +390,53 @@ async def validate_cache_regularly():
     else:
         print("Cache revalidated. No issues found.")
 
+async def rebuild_cache_for_channel(channel_id: int) -> str:
+    return_message = ""
+
+    channel = bot.get_channel(channel_id)
+    if channel:
+        rips = await get_rips(channel, GetRipsDesc(rebuild_cache=True))
+
+        ##TODO: (Ahmayk) integrate with get_rips (will save a fetch_message call)
+        if channel_is_types(channel, ['QOC']):
+            for enum in UserReactCheckType:
+                for rip in rips:
+                    await user_is_react(enum, 0, rip, None)
+
+        channel_type_string = '[Unknown type]'
+        if channel_is_types(channel, ['QOC']):
+            channel_type_string = 'qoc'
+        if channel_is_types(channel, ['QUEUE']):
+            channel_type_string = 'queued'
+        if channel_is_types(channel, ['SUBS', 'SUBS_THREAD', 'SUBS_PIN']):
+            channel_type_string = 'subbed'
+        return_message = f'Cached {len(rips)} {channel_type_string} rips in {channel.jump_url}.'
+
+        await write_log(return_message)
+    else:
+        return_message = f'Error caching channel: Failed to find channel: <#{channel_id}>'
+        await write_log(return_message)
+
+    return return_message
+
+async def rebuild_cache_all() -> str:
+
+    return_message = ""
+
+    queue_channel_ids = get_channel_ids_of_types(['QUEUE'])
+    for channel_id in queue_channel_ids:
+        return_message += "\n" + await rebuild_cache_for_channel(channel_id)
+
+    sub_channel_ids = get_channel_ids_of_types(['SUBS', 'SUBS_THREAD', 'SUBS_PIN'])
+    for channel_id in sub_channel_ids:
+        return_message += "\n" + await rebuild_cache_for_channel(channel_id)
+
+    qoc_channel_ids = get_channel_ids_of_types(['QOC'])
+    for channel_id in qoc_channel_ids:
+        return_message += "\n" + await rebuild_cache_for_channel(channel_id)
+
+    return return_message 
+
 
 async def remove_rip_from_cache(message_id: int, channel_id: int):
     ##NOTE: (Ahmayk) if something is processing on the message, we want to wait for that to finish
@@ -490,7 +537,7 @@ def user_react_check_type_to_react_list(user_react_check_type: UserReactCheckTyp
     return react_list
 
 async def user_is_react(user_react_check_type: UserReactCheckType, user_id: int, rip: Rip,\
-                        typing_channel: TextChannel | Thread) -> bool:
+                        typing_channel: TextChannel | Thread | None) -> bool:
     result = False
 
     await lock_message(rip.message_id, typing_channel)
@@ -1191,7 +1238,6 @@ async def remove_embeds_from_channel_startup(channel_ids: List[int], expire_time
             if count > 0:
                 await send(f"Good morning! Removed {count} embed messages sent more than {expire_time // 60} minutes ago. " + \
                        f"If there are older or newer embeds that should be removed, run {prefix}cleanup manually.", channel)
-    
 
 @bot.event
 async def on_ready():
@@ -1202,31 +1248,7 @@ async def on_ready():
     print('#################################')
 
     await write_log("Good morning! Caching rips...")
-
-    queue_channel_ids = get_channel_ids_of_types(['QUEUE'])
-    for channel_id in queue_channel_ids:
-        channel = bot.get_channel(channel_id)
-        if channel:
-            rips = await get_rips(channel, GetRipsDesc())
-            await write_log(f'Cached {len(rips)} queued rips in {channel.jump_url}.')
-
-    sub_channel_ids = get_channel_ids_of_types(['SUBS', 'SUBS_THREAD', 'SUBS_PIN'])
-    for channel_id in sub_channel_ids:
-        channel = bot.get_channel(channel_id)
-        if channel:
-            rips = await get_rips(channel, GetRipsDesc())
-            await write_log(f'Cached {len(rips)} subbed rips in {channel.jump_url}.')
-
-    qoc_channel_ids = get_channel_ids_of_types(['QOC'])
-    for channel_id in qoc_channel_ids:
-        channel = bot.get_channel(channel_id)
-        if channel:
-            rips = await get_rips(channel, GetRipsDesc())
-            for enum in UserReactCheckType:
-                for rip in rips:
-                    await user_is_react(enum, 0, rip, None)
-
-            await write_log(f'Cached {len(rips)} qoc rips in {channel.jump_url}.')
+    await rebuild_cache_all()
 
     await write_log('Validating cache...')
     validate_result = await validate_cache_all()
@@ -1235,6 +1257,7 @@ async def on_ready():
 
     validate_cache_regularly.start()
 
+    qoc_channel_ids = get_channel_ids_of_types(['QOC'])
     await remove_embeds_from_channel_startup(qoc_channel_ids, get_config('embed_seconds'))
 
     proxy_channel_ids = get_channel_ids_of_types(['PROXY_QOC'])

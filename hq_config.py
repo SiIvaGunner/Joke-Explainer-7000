@@ -20,13 +20,13 @@ def get_channel_ids_all() -> List[str]:
         result.append(channel["id"])
     return result
 
-def get_channel_ids_of_types(types: List[str]) -> List[str]:
+def get_channel_ids_of_types(types: List[str]) -> List[int]:
     result = []
     channels_json = get_config(CHANNEL_KEY)
     for channel in channels_json:
         for type in types:
             if type in channel["types"]: 
-                result.append(channel["id"])
+                result.append(int(channel["id"]))
                 break
     return result
 
