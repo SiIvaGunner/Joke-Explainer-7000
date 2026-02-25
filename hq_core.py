@@ -85,7 +85,8 @@ async def empty_async_context():
 #NOTE: (Ahmayk) Locking on either a channel or message cache allows us to manage congruent process and commands
 ## without one reading from or writing into the cache with outdated info
 async def _lock(id: int, lock_dict: dict[int, asyncio.Lock], typing_channel: TextChannel | Thread | None):
-    lock_dict[id] = asyncio.Lock()
+    if id not in lock_dict:
+        lock_dict[id] = asyncio.Lock()
 
     if lock_dict[id].locked():
         print(f'LOCKED ON id: {id}. Typing channel: {typing_channel}')
