@@ -206,60 +206,154 @@ def cache_rip_in_message(message: Message):
 
     return rip
 
+def react_needs_user_cache(react: React) -> bool:
+    result = False
+    for enum in UserReactCheckType:
+        react_list = user_react_check_type_to_react_list(enum)
+        if react_is_one(react_list, react.name):
+            result = True
+            break
+    return result
+
+async def validate_rip_message(message: Message) -> str:
+    result = ""
+
+    if message.id in RIP_CACHE[message.channel.id]:
+        cached_rip = RIP_CACHE[message.channel.id][message.id]
+        refetched_rip = init_rip(message)
+
+        if cached_rip.text != refetched_rip.text:
+            result += f'\nText outdated in cache in {get_rip_title(refetched_rip.text)}! {message.jump_url}'
+
+        count_dict_cached = get_react_counts(cached_rip)
+        count_dict_refetched = get_react_counts(refetched_rip)
+
+        for react in count_dict_refetched.keys():
+
+            if react not in count_dict_cached:
+                emoji_string = reaction_name_to_emoji_string(react.name, message.guild)
+                result += f'\nReaction missing in cache for {get_rip_title(message.content)} '+\
+                    f'{message.jump_url}{emoji_string}: x{count_dict_refetched[react]}'
+            elif count_dict_refetched[react] != count_dict_cached[react]:
+                emoji_string = reaction_name_to_emoji_string(react.name, message.guild)
+                result += f'\nReaction missing in cache for {get_rip_title(message.content)} '+\
+                    f'{message.jump_url}{emoji_string}: ~~x{count_dict_cached[react]}~~ x{count_dict_refetched[react]}'
+
+    else:
+        result += f'\nRip missing from cache: {get_rip_title(message.content)} {message.jump_url}'
+
+    channel_info = get_channel_info(message.channel)
+    if channel_info.is_cache_qoc:
+
+        fetched_reactions_to_validate: List[discord.Reaction] = []
+        for reaction in message.reactions:
+            react = init_react(reaction)
+            if react_needs_user_cache(react):
+                fetched_reactions_to_validate.append(reaction)
+        
+        fetched_react_user_ids_dict: dict[React, List[int]] = {}
+        if len(fetched_reactions_to_validate):
+            for reaction in fetched_reactions_to_validate:
+                react = init_react(reaction)
+                fetched_react_user_ids_dict[react] = [user.id async for user in reaction.users()]
+
+        for react, user_ids in fetched_react_user_ids_dict.items(): 
+            if react not in USER_REACT_CACHE[message.id]:
+                emoji_string = reaction_name_to_emoji_string(react.name, message.guild)
+                result += f'\nUser react dict missing in user react cache for {get_rip_title(message.content)} '+\
+                    f'{message.jump_url}{emoji_string}'
+                USER_REACT_CACHE[message.id][react] = []
+                for user_id in user_ids:
+                    USER_REACT_CACHE[message.id][react].append(user_id)
+            else:
+                for user_id in user_ids:
+                    if user_id not in USER_REACT_CACHE[message.id][react]:
+                        emoji_string = reaction_name_to_emoji_string(react.name, message.guild)
+                        result += f'\nUser ID missing in user react cache for {get_rip_title(message.content)} '+\
+                            f'{message.jump_url}{emoji_string}: ({user_id})'
+                        USER_REACT_CACHE[message.id][react].append(user_id)
+
+        for react, user_ids in USER_REACT_CACHE[message.id].copy().items():
+            if react_needs_user_cache(react):
+                if react not in fetched_react_user_ids_dict:
+                    emoji_string = reaction_name_to_emoji_string(react.name, message.guild)
+                    result += f'\nUser react data in cache outdated for {get_rip_title(message.content)} '+\
+                        f'{message.jump_url}{emoji_string}: {user_ids}'
+                    USER_REACT_CACHE[message.id].pop(react)
+                else:
+                    for user_id in user_ids:
+                        if user_id not in fetched_react_user_ids_dict:
+                            emoji_string = reaction_name_to_emoji_string(react.name, message.guild)
+                            result += f'\nUser ID outdated in user react cache for {get_rip_title(message.content)} '+\
+                                f'{message.jump_url}{emoji_string}: ({user_id})'
+                            USER_REACT_CACHE[message.id][react].remove(user_id)
+
+    return result
+
+
+async def process_rip_message(message: Message, refetch_message: bool, is_validate_message: bool, typing_channel: TextChannel | Thread | None) -> str:
+    return_message = ""
+    await lock_message(message.id, typing_channel)
+    if is_message_rip(message):
+        if refetch_message:
+            message = await message.channel.fetch_message(message.id)
+        if is_validate_message:
+            return_message = await validate_rip_message(message)
+        cache_rip_in_message(message)
+    unlock_message(message.id)
+    return return_message
+
+async def process_rip_channel(channel: TextChannel | Thread, is_validate_message: bool, typing_channel: TextChannel | Thread | None) -> str:
+    return_message = ""
+    channel_info = get_channel_info(channel)
+    match channel_info.rip_fetch_type: 
+        case RipFetchType.ALL_MESSAGES_NO_THREADS:
+            async for message in channel.history(limit = None):
+                return_message += await process_rip_message(message, False, is_validate_message, typing_channel)
+
+        case RipFetchType.ALL_MESSAGES_AND_THREADS:
+            async for message in channel.history(limit = None):
+                if message.thread is not None:
+                    init_channel_cache(message.thread.id)
+                    await lock_channel(message.thread.id, typing_channel)
+                    return_message += await process_rip_channel(message.thread, False, typing_channel)
+                    thread_rips = list(RIP_CACHE[message.thread.id].values())
+                    thread_rips.sort(key = lambda rip: rip.created_at, reverse=True)
+                    #NOTE: (Ahmayk) we insert thread rips also in its parent channel dict so that
+                    #we get all rips in theads when we get the parent channel's rips 
+                    for thread_rip in thread_rips:
+                        await lock_message(thread_rip.message_id, None)
+                        RIP_CACHE[channel.id][thread_rip.message_id] = thread_rip 
+                        unlock_message(thread_rip.message_id)
+                    unlock_channel(message.thread.id)
+                else:
+                    return_message += await process_rip_message(message, False, is_validate_message, typing_channel)
+
+        case RipFetchType.PINS:
+            async for message in channel.pins(limit = None):
+                await process_rip_message(message, True, is_validate_message, typing_channel)
+
+        case _:
+            assert "Unimplemented RipFetchType"
+
+    return return_message
+
 class GetRipsDesc(NamedTuple):
     typing_channel: TextChannel | Thread | None = None
     rebuild_cache: bool = False
 
 async def get_rips(channel: TextChannel | Thread, desc: GetRipsDesc) -> List[Rip]:
+
     init_channel_cache(channel.id)
-    channel_info = get_channel_info(channel)
 
     ##NOTE: (Ahmayk) We need to prevent other processes from accessing the cache 
     ## in the case where we are updating the cache. If we allow access to the cache while
     ## it is being updated, it would likely be incomplete or wrong! 
     await lock_channel(channel.id, desc.typing_channel)
 
-    if not len(RIP_CACHE[channel.id]) or desc.rebuild_cache:
-
+    if not len(RIP_CACHE[channel.id]):
         async with desc.typing_channel.typing() if desc.typing_channel is not None else empty_async_context():
-
-            match channel_info.rip_fetch_type: 
-                case RipFetchType.ALL_MESSAGES_NO_THREADS:
-                    async for message in channel.history(limit = None):
-                        await lock_message(message.id, desc.typing_channel)
-                        if is_message_rip(message):
-                            cache_rip_in_message(message)
-                        unlock_message(message.id)
-
-                case RipFetchType.ALL_MESSAGES_AND_THREADS:
-                    async for message in channel.history(limit = None):
-
-                        if message.thread is not None:
-                            thread_rips = await get_rips(message.thread, GetRipsDesc(rebuild_cache=desc.rebuild_cache))
-                            #NOTE: (Ahmayk) we insert thread rips also in its parent channel dict so that
-                            #we get all rips in theads when we get the parent channel's rips 
-                            for thread_rip in thread_rips:
-                                await lock_message(thread_rip.message_id, None)
-                                RIP_CACHE[channel.id][thread_rip.message_id] = thread_rip 
-                                unlock_message(thread_rip.message_id)
-                        else:
-                            await lock_message(message.id, desc.typing_channel)
-                            if is_message_rip(message):
-                                cache_rip_in_message(message)
-                            unlock_message(thread_rip.message_id)
-
-                case RipFetchType.PINS:
-                    async for message in channel.pins(limit = None):
-                        await lock_message(message.id, desc.typing_channel)
-                        if is_message_rip(message):
-                            # NOTE: (Ahmayk) channel.pins does not return reaction data,
-                            # so we have to fetch it manually. This is slow! But neccessary.
-                            fetched_message = await channel.fetch_message(message.id)
-                            cache_rip_in_message(fetched_message)
-                        unlock_message(message.id)
-
-                case _:
-                    assert "Unimplemented RipFetchType"
+            await process_rip_channel(channel, False, desc.typing_channel)
 
     unlock_channel(channel.id)
 
@@ -536,121 +630,14 @@ def get_react_counts(rip: Rip) -> dict[React, int]:
         count_dict[react] += 1
     return count_dict
 
-async def validate_rip_message(message: Message, channel_info: ChannelInfo) -> str:
-    result = ""
-
-    needs_suborqueue_recache = False
-    if message.id in RIP_CACHE_SUBORQUEUE[message.channel.id]:
-        cached_suborqueue_rip = RIP_CACHE_SUBORQUEUE[message.channel.id][message.id]
-        refetched_suborqueue_rip = init_suborqueue_rip(message)
-
-        if cached_suborqueue_rip.text != refetched_suborqueue_rip.text:
-            needs_suborqueue_recache = True
-            result += f'\nText outdated in SubOrQueue cache in {get_rip_title(refetched_suborqueue_rip.text)}! {message.jump_url}'
-
-        count_dict_cached = get_react_counts(cached_suborqueue_rip)
-        count_dict_refetched = get_react_counts(refetched_suborqueue_rip)
-
-        for react in count_dict_refetched.keys():
-
-            if react not in count_dict_cached:
-                needs_suborqueue_recache = True
-                emoji_string = reaction_name_to_emoji_string(react.name, message.guild)
-                result += f'\nReaction missing in SubOrQueue cache for {get_rip_title(message.content)} '+\
-                    f'{message.jump_url}{emoji_string}: x{count_dict_refetched[react]}'
-            elif count_dict_refetched[react] != count_dict_cached[react]:
-                needs_suborqueue_recache = True
-                emoji_string = reaction_name_to_emoji_string(react.name, message.guild)
-                result += f'\nReaction missing in SubOrQueue cache for {get_rip_title(message.content)} '+\
-                    f'{message.jump_url}{emoji_string}: ~~x{count_dict_cached[react]}~~ x{count_dict_refetched[react]}'
-
-    else:
-        result += f'\nRip missing from SubOrQueue cache: {get_rip_title(message.content)} {message.jump_url}'
-        needs_suborqueue_recache = True
-
-    if needs_suborqueue_recache:
-        cache_suborqueue_rip(message)
-
-    if channel_info.is_cache_qoc:
-        if message.id in RIP_CACHE_QOC[message.channel.id]:
-            needs_qoc_recache = False
-            qoc_rip = RIP_CACHE_QOC[message.channel.id][message.id]
-
-            if qoc_rip.text != message.content:
-                needs_qoc_recache = True
-                result += f'\nText outdated in QoC cache for {get_rip_title(message.content)}! {message.jump_url}'
-
-            react_and_users = [] 
-            for reaction in message.reactions:
-                fetched_react_and_users = await get_react_and_users_of_reaction(reaction)
-
-                for fetched_react_and_user in fetched_react_and_users:
-                    if fetched_react_and_user not in qoc_rip.react_and_users:
-                        needs_qoc_recache = True
-                        result += qoc_react_error_string(f'Fetched reaction not found in QoC cache for', fetched_react_and_user, message)
-                react_and_users.extend(fetched_react_and_users)
-
-            for cached_react_and_user in qoc_rip.react_and_users:
-                if cached_react_and_user not in react_and_users:
-                    needs_qoc_recache = True
-                    result += qoc_react_error_string(f'Cached QoC reaction outdated for', cached_react_and_user, message)
-
-            if needs_qoc_recache:
-                RIP_CACHE_QOC[message.channel.id][message.id] = init_qoc_rip(message, react_and_users) 
-        else:
-            await cache_qoc_rip(message)
-
-    return result
-
-
 async def validate_cache_all() -> str:
-
     result = ""
-
     for channel_id in get_channel_ids_of_types(['QOC', 'SUBS', 'SUBS_PIN', 'SUBS_THREAD', 'QUEUE']):
         channel = bot.get_channel(channel_id)
         if channel:
-    
-            init_channel_cache(channel.id)
-
-            channel_info = get_channel_info(channel)
-
-            match channel_info.rip_fetch_type:
-                case RipFetchType.ALL_MESSAGES_NO_THREADS:
-                    async for message in channel.history(limit = None):
-                        if is_message_rip(message):
-                            await lock_message(message.id, None)
-                            result += await validate_rip_message(message, channel_info)
-                            unlock_message(message.id)
-
-
-                case RipFetchType.ALL_MESSAGES_AND_THREADS:
-                    async for message in channel.history(limit = None):
-                        if message.thread is not None:
-                            async for thread_message in message.thread.history(limit = None):
-                                if is_message_rip(thread_message):
-                                    await lock_message(thread_message.id, None)
-                                    result += await validate_rip_message(thread_message, channel_info)
-                                    unlock_message(thread_message.id)
-
-                        if is_message_rip(message):
-                            await lock_message(message.id, None)
-                            result += await validate_rip_message(message, channel_info)
-                            unlock_message(message.id)
-
-                case RipFetchType.PINS:
-                    async for message in channel.pins(limit = None):
-                        if is_message_rip(message):
-                            await lock_message(message.id, None)
-                            fetched_message = await channel.fetch_message(message.id)
-                            result += await validate_rip_message(fetched_message, channel_info)
-                            unlock_message(message.id)
-
-                case _:
-                    assert "Unimplemented RipFetchType"
+            result += await process_rip_channel(channel, True, None)
         else:
             result += f'\nFailed to find channel of id {channel_id}'
-                
     return result
 
 times = []
@@ -772,10 +759,20 @@ def rip_has_react(reaction_type_list: List[ReactionType], rip: Rip):
 
 USER_REACT_CACHE: dict[int, dict[React, List[int]]] = {}
 
-#NOTE: (Ahmayk) This is an enum so we can iterate all possible user react checks on startup to cache the data 
+#NOTE: (Ahmayk) This is an enum so we can iterate 
+# all possible user react checks for caching on startup and validation
 class UserReactCheckType(Enum):
     REVIEW = auto()
     FIX = auto()
+
+def user_react_check_type_to_react_list(user_react_check_type: UserReactCheckType) -> List[ReactType]:
+    react_list = []
+    match(user_react_check_type):
+        case UserReactCheckType.REVIEW: 
+            react_list = REVIEW_REACT_LIST 
+        case UserReactCheckType.FIX:
+            react_list = FIX_REACT_LIST 
+    return react_list
 
 async def user_is_react(user_react_check_type: UserReactCheckType, user_id: int, rip: Rip,\
                         typing_channel: TextChannel | Thread) -> bool:
@@ -784,12 +781,7 @@ async def user_is_react(user_react_check_type: UserReactCheckType, user_id: int,
     if rip.message_id not in USER_REACT_CACHE:
         USER_REACT_CACHE[rip.message_id] = {} 
 
-    react_list = []
-    match(user_react_check_type):
-        case UserReactCheckType.REVIEW: 
-            react_list = REVIEW_REACT_LIST 
-        case UserReactCheckType.FIX:
-            react_list = FIX_REACT_LIST 
+    react_list = user_react_check_type_to_react_list(user_react_check_type)
 
     await lock_message(rip.message_id, typing_channel)
     fetch_user_ids = False 
@@ -1520,18 +1512,17 @@ async def on_ready():
 
             await write_log(f'Cached {len(rips)} qoc rips in {channel.jump_url}.')
 
+    await write_log('Validating cache...')
+    validate_result = await validate_cache_all()
+    validate_result += '\n**Startup caching complete.**'
+    await write_log(validate_result)
 
-    # await write_log('Validating cache...')
-    # validate_result = await validate_cache_all()
-    # validate_result += '\n**Startup caching complete.**'
-    # await write_log(validate_result)
+    validate_cache_regularly.start()
 
-    # validate_cache_regularly.start()
+    await remove_embeds_from_channel_startup(qoc_channel_ids, get_config('embed_seconds'))
 
-    # await remove_embeds_from_channel_startup(qoc_channel_ids, get_config('embed_seconds'))
-
-    # proxy_channel_ids = get_channel_ids_of_types(['PROXY_QOC'])
-    # await remove_embeds_from_channel_startup(proxy_channel_ids, get_config('proxy_embed_seconds'))
+    proxy_channel_ids = get_channel_ids_of_types(['PROXY_QOC'])
+    await remove_embeds_from_channel_startup(proxy_channel_ids, get_config('proxy_embed_seconds'))
 
 import traceback
 @bot.event
