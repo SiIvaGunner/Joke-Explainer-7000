@@ -1372,7 +1372,7 @@ async def process_suborqueue_rip_caching(message: Message):
 
 
 async def remove_reaction_from_cache(channel_id: int, message_id: int, emoji: discord.PartialEmoji, user_id: int | None, remove_all: bool):
-    in_rip_cache = RIP_CACHE and message_id in RIP_CACHE[channel_id]
+    in_rip_cache = channel_id in RIP_CACHE and message_id in RIP_CACHE[channel_id]
     in_user_react_cache = message_id in USER_REACT_CACHE
     if in_rip_cache or in_user_react_cache:
         await lock_message(message_id, None)
@@ -1409,7 +1409,7 @@ async def on_raw_reaction_clear_emoji(payload: discord.RawReactionClearEmojiEven
 
 @bot.event
 async def on_raw_reaction_clear(payload: discord.RawReactionClearEvent):
-    in_rip_cache = RIP_CACHE and payload.message_id in RIP_CACHE[payload.channel_id]
+    in_rip_cache = payload.channel_id in RIP_CACHE and payload.message_id in RIP_CACHE[payload.channel_id]
     in_user_react_cache = payload.message_id in USER_REACT_CACHE
     if in_rip_cache or in_user_react_cache:
         await lock_message(payload.message_id, None)
