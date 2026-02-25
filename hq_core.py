@@ -284,7 +284,7 @@ async def get_rips_fast(channel: TextChannel | Thread, desc: GetRipsDesc) -> Lis
         result = await get_rips(channel, desc)
 
     else:
-        if channel.id in CACHE_LOCK_CHANNEL and not CACHE_LOCK_CHANNEL[channel.id].locked() and len(RIP_CACHE[channel.id]):
+        if len(RIP_CACHE[channel.id]) and (not channel.id in CACHE_LOCK_CHANNEL or not CACHE_LOCK_CHANNEL[channel.id].locked()):
             result = await get_rips(channel, desc)
         else:
             async with desc.typing_channel.typing() if desc.typing_channel is not None else empty_async_context():
@@ -528,9 +528,9 @@ def qoc_react_error_string(text: str, react_and_user: ReactAndUser, message: Mes
     result = f'\n{text} {get_rip_title(message.content)}: {message.jump_url} {emoji_string} ({user_string})'
     return result
 
-def get_react_counts(suborqueue_rip: SubOrQueueRip) -> dict[React, int]:
+def get_react_counts(rip: Rip) -> dict[React, int]:
     count_dict: dict[React, int] = {}
-    for react in suborqueue_rip.reacts:
+    for react in rip.reacts:
         if react not in count_dict:
             count_dict[react] = 0
         count_dict[react] += 1

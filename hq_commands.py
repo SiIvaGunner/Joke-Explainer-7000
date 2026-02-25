@@ -576,7 +576,7 @@ async def limitcheck(args: list[str], command_context: CommandContext):
         qoc_channel = command_context.channel
 
     if qoc_channel:
-        rips = await get_suborqueue_rips_fast(qoc_channel, GetRipsDesc(typing_channel=command_context.channel))
+        rips = await get_rips_fast(qoc_channel, GetRipsDesc(typing_channel=command_context.channel))
         result = f"You can pin {get_config('soft_pin_limit') - len(rips)} more rips until I start complaining about pin space."
         result += proxy
         await send(result, command_context.channel)
@@ -607,7 +607,7 @@ async def count_subs(args: list[str], command_context: CommandContext):
         return
 
     channel = bot.get_channel(sub_channel_id)
-    rips = await get_suborqueue_rips_fast(channel, GetRipsDesc(typing_channel=command_context.channel))
+    rips = await get_rips_fast(channel, GetRipsDesc(typing_channel=command_context.channel))
     count = len(rips)
 
     if (count < 1):
@@ -909,14 +909,14 @@ async def scout_stats(args: list[str], command_context: CommandContext):
     if channel is None: 
         return await send("Error: Invalid channel found. Contact bot developers to update list of channels.", command_context.channel)
 
-    suborqueue_rips = await get_suborqueue_rips_fast(channel, GetRipsDesc(typing_channel=command_context.channel))
+    rips = await get_rips_fast(channel, GetRipsDesc(typing_channel=command_context.channel))
 
     count = {}
     for letter in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ': # could have done string.ascii_uppercase but i dont think the alphabet is getting any updates
         count[letter] = 0
 
-    for suborqueue_rip in suborqueue_rips:
-        rip_title = get_raw_rip_title(suborqueue_rip.text)
+    for rip in rips:
+        rip_title = get_raw_rip_title(rip.text)
         prefix = rip_title.lower()[0]
         if prefix in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ':  # isalpha becomes fucked with unicode characters i think
             count[prefix.upper()] += 1
@@ -931,17 +931,17 @@ async def scout_stats(args: list[str], command_context: CommandContext):
     for k, v in sorted(count.items()):
         result += f"{k}: " + ("▮" * int(v / maxCount * 20)) + f" ({v})\n"
 
-    if len(suborqueue_rips) == 0:
+    if len(rips) == 0:
         await send("No approved rips found.", command_context.channel)
     else:
         await send_embed(result, command_context.channel, EmbedDesc(expires=True))
 
 
-async def send_vibes(suborqueue_rips: List[SubOrQueueRip], max_emojis: int, command_context: CommandContext):
+async def send_vibes(rips: List[Rip], max_emojis: int, command_context: CommandContext):
     react_dict: dict[str, int] = {}
 
-    for suborqueue_rip in suborqueue_rips:
-        react_counts = get_react_counts(suborqueue_rip)
+    for rip in rips:
+        react_counts = get_react_counts(rip)
         for react in react_counts.keys():
             if react.name and len(react.name):
                 if react.name not in react_dict:
@@ -958,20 +958,20 @@ async def send_vibes(suborqueue_rips: List[SubOrQueueRip], max_emojis: int, comm
                     _temp_dict[k] = v
             react_dict = _temp_dict
     
-    result = ""
+    if len(react_dict):
+        result = ""
 
-    if min > 0:
-        result += f'*Showing reactions with minimum **{min}** occurances.*\n\n'
+        if min > 0:
+            result += f'*Showing reactions with minimum **{min}** occurances.*\n\n'
 
-    maxCount = max(max(react_dict.values()), 20)
-    for k, v in sorted(react_dict.items(), key=lambda item: item[1], reverse=True):
-        emoji_stirng = reaction_name_to_emoji_string(k, command_context.channel.guild)
-        result += f"{emoji_stirng}: " + ("▮" * int(v / maxCount * 20)) + f" ({v})\n"
+        maxCount = max(max(react_dict.values()), 20)
+        for k, v in sorted(react_dict.items(), key=lambda item: item[1], reverse=True):
+            emoji_stirng = reaction_name_to_emoji_string(k, command_context.channel.guild)
+            result += f"{emoji_stirng}: " + ("▮" * int(v / maxCount * 20)) + f" ({v})\n"
 
-    if len(suborqueue_rips) == 0:
-        await send("No rips found.", command_context.channel)
-    else:
         await send_embed(result, command_context.channel, EmbedDesc(expires=True))
+    else:
+        await send("zero vibes yey we chillin", command_context.channel)
 
 @command(
     command_type=CommandType.QOC,
@@ -985,9 +985,9 @@ async def vibecheck(args: list[str], command_context: CommandContext):
     channel = await get_qoc_channel(command_context.channel)
     if channel is None: return
 
-    suborqueue_rips = await get_suborqueue_rips(channel, GetRipsDesc(typing_channel=command_context.channel))
+    rips = await get_rips(channel, GetRipsDesc(typing_channel=command_context.channel))
 
-    await send_vibes(suborqueue_rips, 0, command_context)
+    await send_vibes(rips, 0, command_context)
 
 
 @command(
@@ -1008,7 +1008,7 @@ async def vibecheck_q(args: list[str], command_context: CommandContext):
     for channel_id in get_channel_ids_of_types(['QUEUE']):
         channel = bot.get_channel(channel_id)
         if channel:
-            rips = await get_suborqueue_rips(channel, GetRipsDesc(typing_channel=command_context.channel))
+            rips = await get_rips(channel, GetRipsDesc(typing_channel=command_context.channel))
             queue_rips.extend(rips)
 
     await send_vibes(queue_rips, max, command_context)
@@ -1031,7 +1031,7 @@ async def vibecheck_subs(args: list[str], command_context: CommandContext):
     for channel_id in get_channel_ids_of_types(['SUBS', 'SUBS_THREAD', 'SUBS_PIN']):
         channel = bot.get_channel(channel_id)
         if channel:
-            rips = await get_suborqueue_rips(channel, GetRipsDesc(typing_channel=command_context.channel))
+            rips = await get_rips(channel, GetRipsDesc(typing_channel=command_context.channel))
             subbed_rips.extend(rips)
 
     await send_vibes(subbed_rips, max, command_context)
@@ -1118,7 +1118,7 @@ async def vet_from(args: list[str], command_context: CommandContext):
         return await send("WARNING: ffmpeg command not found on the bot's server. Please contact the developers.", command_context.channel)
 
     async with command_context.channel.typing():
-        rips = await get_suborqueue_rips_fast(channel, GetRipsDesc())
+        rips = await get_rips_fast(channel, GetRipsDesc())
 
         for rip in rips:
             if not vet_all_pins and rip.created_at < from_timestamp:
@@ -1220,8 +1220,8 @@ async def count_dupe(args: list[str], command_context: CommandContext):
     for queue_channel_id in queue_channels:
         queue_channel = server.get_channel(queue_channel_id)
         if queue_channel:
-            suborqueue_rips = await get_suborqueue_rips_fast(queue_channel, GetRipsDesc(typing_channel=command_context.channel))
-            q += sum([isDupe(description, get_rip_description(r.text)) for r in suborqueue_rips if r.message_id != message.id])
+            rips = await get_rips_fast(queue_channel, GetRipsDesc(typing_channel=command_context.channel))
+            q += sum([isDupe(description, get_rip_description(r.text)) for r in rips if r.message_id != message.id])
 
     # https://codegolf.stackexchange.com/questions/4707/outputting-ordinal-numbers-1st-2nd-3rd#answer-4712 how
     ordinal = lambda n: "%d%s" % (n,"tsnrhtdd"[(n//10%10!=1)*(n%10<4)*n%10::4])
@@ -1258,7 +1258,7 @@ async def scan(ctx: Context, channel_link: str = None, start_index: int = None, 
     channel = bot.get_channel(channel_id)
     if channel is None: await ctx.channel.send("Error: Invalid channel found. Contact bot developers to update list of channels.")
 
-    rips = await get_suborqueue_rips_fast(channel, GetRipsDesc(typing_channel=ctx.channel))
+    rips = await get_rips_fast(channel, GetRipsDesc(typing_channel=ctx.channel))
     rips.reverse()
     num_rips = len(rips)
 
@@ -1423,23 +1423,17 @@ async def reset_cache(args: list[str], command_context: CommandContext):
     
     channel = bot.get_channel(channel_id)
     init_channel_cache(channel.id)
-    channel_info = get_channel_info(channel)
 
     await send("Rebuilding cache...", command_context.channel)
 
     await lock_channel(channel.id, command_context.channel)
-    suborqueue_count_old = len(RIP_CACHE_SUBORQUEUE[channel.id])
-    qoc_count_old = len(RIP_CACHE_QOC[channel.id])
+    rip_count_old = len(RIP_CACHE[channel.id])
     unlock_channel(channel.id)
 
     return_message = f'Cache rebuilt!'
 
-    suborqueue_rips = await get_suborqueue_rips(channel, GetRipsDesc(typing_channel=command_context.channel, rebuild_cache=True))
-    return_message += f'\nSubOrQueue rip count: {suborqueue_count_old} => {len(suborqueue_rips)}' 
-
-    if channel_info.is_cache_qoc:
-        qoc_rips = await get_qoc_rips(channel, GetRipsDesc(typing_channel=command_context.channel, rebuild_cache=True))
-        return_message += f'\nQoc rip count: {qoc_count_old} => {len(qoc_rips)}' 
+    rips = await get_rips(channel, GetRipsDesc(typing_channel=command_context.channel, rebuild_cache=True))
+    return_message += f'\nRip count: {rip_count_old} => {len(rips)}' 
 
     await send(return_message, command_context.channel)
 
@@ -1541,7 +1535,7 @@ async def get_suborqueue_rip_stats_string(channel_id: int, typing_channel: TextC
     channel = bot.get_channel(channel_id)
     if channel:
 
-        rips = await get_suborqueue_rips_fast(channel, GetRipsDesc(typing_channel=typing_channel))
+        rips = await get_rips_fast(channel, GetRipsDesc(typing_channel=typing_channel))
 
         if channel_is_types(channel, ['SUBS', 'SUBS_PIN']):
             ret += f"- <#{channel_id}>: **{len(rips)}** rips\n"
@@ -1584,7 +1578,7 @@ async def stats(args: list[str], command_context: CommandContext):
             email_count = 0
             channel = bot.get_channel(channel_id)
             if channel:
-                rips = await get_suborqueue_rips_fast(channel, GetRipsDesc(typing_channel=command_context.channel))
+                rips = await get_rips_fast(channel, GetRipsDesc(typing_channel=command_context.channel))
                 for rip in rips:
                     author = get_rip_author(rip.text, rip.message_author_name)
                     if 'email' in author.lower():
