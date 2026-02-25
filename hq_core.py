@@ -61,35 +61,6 @@ class React(NamedTuple):
     id: int
     name: str
 
-"""
-QocRips are rips that are pinned in a channel and used in QoC. They have info on who reacted to what.
-Exists only in QOC channels
-"""
-class QocRip(NamedTuple):
-    text: str
-    message_id: int
-    channel_id: int
-    message_author_id: int
-    message_author_name: str
-    react_and_users: List[ReactAndUser]
-    created_at: datetime
-
-"""
-SubOrQueue Rips are rips posted in a submission channel, or rips posted in an accepted rips queue.
-They can be in channels or threads depending on the channel type. 
-They do NOT include info on who reacted to what as an optimization as this info is slow to obtain.
-(This is the only difference between SubOrQueueRips and QocRips. They are split into different types 
-despite being mostly the same so that it is easier to manage this difference in data layout)
-"""
-class SubOrQueueRip(NamedTuple):
-    text: str
-    message_id: int
-    channel_id: int
-    message_author_id: int
-    message_author_name: str
-    reacts: List[React]
-    created_at: datetime
-
 class Rip(NamedTuple):
     text: str
     message_id: int
@@ -99,19 +70,11 @@ class Rip(NamedTuple):
     reacts: List[React]
     created_at: datetime
 
-RIP_CACHE_QOC: dict[int, dict[int, QocRip]] = {}
-RIP_CACHE_SUBORQUEUE: dict[int, dict[int, SubOrQueueRip]] = {}
-
 RIP_CACHE: dict[int, dict[int, Rip]] = {}
 
 def init_channel_cache(channel_id: int):
-    if channel_id not in RIP_CACHE_QOC:
-        RIP_CACHE_QOC[channel_id] = {}
-    if channel_id not in RIP_CACHE_SUBORQUEUE:
-        RIP_CACHE_SUBORQUEUE[channel_id] = {}
     if channel_id not in RIP_CACHE:
         RIP_CACHE[channel_id] = {}
-
 
 #NOTE: (Ahmayk) Dummy async context that we can call instead in the case where 
 #we do not input a channel for channel.typing()
@@ -402,226 +365,6 @@ def init_react(reaction: discord.Reaction) -> React:
             id = reaction.emoji.id
     return React(id, name) 
 
-
-async def get_react_and_users_of_reaction(reaction: discord.Reaction) -> List[ReactAndUser]:
-    react_and_users = []
-    react = init_react(reaction)
-    # NOTE: (Ahmayk) this is slow! We have to do an api call for each user.
-    # But is also neccessary
-    user_ids = [user.id async for user in reaction.users()]
-    for user_id in user_ids:
-        react_and_users.append(ReactAndUser(react.id, react.name, user_id))
-    return react_and_users
-
-def init_qoc_rip(message, react_and_users) -> QocRip:
-    return QocRip(message.content, message.id, message.channel.id, message.author.id, \
-            str(message.author), react_and_users, message.created_at)
-
-
-async def cache_qoc_rip(message: Message) -> QocRip:
-
-    react_and_users: List[ReactAndUser] = []
-    for reaction in message.reactions:
-        react_and_users.extend(await get_react_and_users_of_reaction(reaction))
-
-    qoc_rip = init_qoc_rip(message, react_and_users)
-
-    init_channel_cache(message.channel.id)
-    if message.id not in CACHE_LOCK_MESSAGE:
-        CACHE_LOCK_MESSAGE[message.id] = asyncio.Lock()
-
-    RIP_CACHE_QOC[message.channel.id][message.id] = qoc_rip
-
-    return qoc_rip
-
-
-
-async def get_qoc_rips(channel: TextChannel | Thread, desc: GetRipsDesc) -> List[QocRip]:
-    """
-    Gets all qoc rips from a channel. Makes a cache for the channel if it doesn't already exist. 
-
-    Blocks processing while cache is being created on that channel 
-    to not allow someone to access the cache with it half finished.
-    """
-
-    init_channel_cache(channel.id)
-    channel_info = get_channel_info(channel)
-
-    ##NOTE: (Ahmayk) If we hit either of these asserts, then we are calling get_qoc_rips() incorrectly!
-    assert channel_info.rip_fetch_type == RipFetchType.PINS
-    assert channel_info.is_cache_qoc 
-
-    ##NOTE: (Ahmayk) We need to prevent other processes from accessing the cache 
-    ## in the case where we are updating the cache. If we allow access to the cache while
-    ## it is being updated, it would likely be incomplete or wrong! 
-    await lock_channel(channel.id, desc.typing_channel)
-
-    if not len(RIP_CACHE_QOC[channel.id]) or desc.rebuild_cache:
-
-        async with desc.typing_channel.typing() if desc.typing_channel is not None else empty_async_context():
-            RIP_CACHE_QOC[channel.id] = {}
-
-            async for message in channel.pins(limit=None):
-                await lock_message(message.id, None)
-                if is_message_rip(message):
-
-                    # NOTE: (Ahmayk) channel.pins does not return reaction data,
-                    # so we have to fetch it manually. This is slow! But neccessary.
-                    fetched_message = await channel.fetch_message(message.id)
-                    await cache_qoc_rip(fetched_message)
-
-                    # NOTE: (Ahmayk) always cache suborqueue versions
-                    # so that the data is easily accessible via get_suborqueue_rips_fast()
-                    cache_suborqueue_rip(fetched_message)
-
-                unlock_message(message.id)
-
-    unlock_channel(channel.id)
-
-    result = list(RIP_CACHE_QOC[channel.id].values())
-    ##NOTE: (Ahmayk) show rips in expected order, newest at top
-    result.sort(key = lambda rip: rip.created_at, reverse=True)
-    return result
-
-def init_suborqueue_rip(message: Message) -> SubOrQueueRip:
-
-    reacts = []
-    for reaction in message.reactions:
-        react = init_react(reaction)
-        for i in range(0, reaction.count):
-            reacts.append(react)
-
-    return SubOrQueueRip(message.content, message.id, message.channel.id, \
-                         message.author.id, str(message.author), reacts, message.created_at)
-
-def cache_suborqueue_rip(message) -> SubOrQueueRip:
-
-    suborqueue_rip = init_suborqueue_rip(message)
-
-    init_channel_cache(message.channel.id)
-
-    if message.id not in CACHE_LOCK_MESSAGE:
-        CACHE_LOCK_MESSAGE[message.id] = asyncio.Lock()
-
-    RIP_CACHE_SUBORQUEUE[message.channel.id][message.id] = suborqueue_rip
-
-    return suborqueue_rip
-
-async def get_suborqueue_rips(channel: typing.Union[GuildChannel, Thread], desc: GetRipsDesc) -> List[SubOrQueueRip]:
-    """
-    Gets all SubOrQueue rips from a channel. Detects the channel type and  
-    grabs either 
-    - all messages (SUBS)
-    - all messages and all messages in threads (QUEUE, SUBS_THREAD)
-    - all pins (SUBS_PIN, QOC, anything else)
-
-    Discord can process messages in order very quickly, so this function is fast 
-    in most cases (excpet for pins, which require an extra call to fetch reaction data)
-
-    Blocks processing while cache is being created on that channel 
-    to not allow someone to access the cache with it half finished.
-    """
-
-    init_channel_cache(channel.id)
-    channel_info = get_channel_info(channel)
-
-    ##NOTE: (Ahmayk) We need to prevent other processes from accessing the cache 
-    ## in the case where we are updating the cache. If we allow access to the cache while
-    ## it is being updated, it would likely be incomplete or wrong! 
-    await lock_channel(channel.id, desc.typing_channel)
-
-    if not len(RIP_CACHE_SUBORQUEUE[channel.id]) or desc.rebuild_cache:
-
-        async with desc.typing_channel.typing() if desc.typing_channel is not None else empty_async_context():
-
-            match channel_info.rip_fetch_type: 
-                case RipFetchType.ALL_MESSAGES_NO_THREADS:
-                    async for message in channel.history(limit = None):
-                        if is_message_rip(message):
-                            await lock_message(message.id, None)
-                            cache_suborqueue_rip(message)
-                            unlock_message(message.id)
-
-                case RipFetchType.ALL_MESSAGES_AND_THREADS:
-                    async for message in channel.history(limit = None):
-                        if message.thread is not None:
-                            thread_suborqueue_rips = await get_suborqueue_rips(message.thread, GetRipsDesc(rebuild_cache=desc.rebuild_cache))
-                            #NOTE: (Ahmayk) we insert thread rips also in its parent channel dict so that
-                            #we get all rips in theads when we get the parent channel's rips 
-                            for thread_suborqueue_rip in thread_suborqueue_rips:
-                                await lock_message(thread_suborqueue_rip.message_id, None)
-                                RIP_CACHE_SUBORQUEUE[channel.id][thread_suborqueue_rip.message_id] = thread_suborqueue_rip 
-                                unlock_message(thread_suborqueue_rip.message_id)
-
-                        if is_message_rip(message):
-                            await lock_message(message.id, None)
-                            cache_suborqueue_rip(message)
-                            unlock_message(message.id)
-
-                case RipFetchType.PINS:
-                    async for message in channel.pins(limit = None):
-                        if is_message_rip(message):
-                            # NOTE: (Ahmayk) channel.pins does not return reaction data,
-                            # so we have to fetch it manually. This is slow! But neccessary.
-                            await lock_message(message.id, None)
-                            fetched_message = await channel.fetch_message(message.id)
-                            cache_suborqueue_rip(fetched_message)
-                            unlock_message(message.id)
-
-                case _:
-                    assert "Unimplemented RipFetchType"
-
-    unlock_channel(channel.id)
-
-    result = list(RIP_CACHE_SUBORQUEUE[channel.id].values())
-    ##NOTE: (Ahmayk) show rips in expected order, newest at top
-    result.sort(key = lambda rip: rip.created_at, reverse=True)
-    return result
-
-async def get_suborqueue_rips_fast(channel: typing.Union[GuildChannel, Thread], desc: GetRipsDesc) -> typing.List[SubOrQueueRip]:
-    """
-    Will return suborqueue rips of any channel type as fast as possible but may not have reaction data.
-    This function is for when we we don't care about reactions 
-    and only care about the number of rips or its metadata.
-
-    Channels that are not labeled with a matching channel type are assumed to be pin channels.
-    """
-
-    init_channel_cache(channel.id)
-    channel_info = get_channel_info(channel)
-
-    result = []
-
-    if channel_info.rip_fetch_type == RipFetchType.ALL_MESSAGES_AND_THREADS or \
-       channel_info.rip_fetch_type == RipFetchType.ALL_MESSAGES_NO_THREADS:
-
-        #NOTE: (Ahmayk) The path to get rips normally is already as fast
-        #as we can get so just do that
-        result = await get_suborqueue_rips(channel, desc)
-
-    else:
-        if channel.id in CACHE_LOCK_CHANNEL and not CACHE_LOCK_CHANNEL[channel.id].locked() and len(RIP_CACHE_SUBORQUEUE[channel.id]):
-            result = await get_suborqueue_rips(channel, desc)
-        else:
-            async with desc.typing_channel.typing() if desc.typing_channel is not None else empty_async_context():
-                async for message in channel.pins(limit = None):
-                    if is_message_rip(message):
-                        ##NOTE: (Ahmayk) No fetching message for reactions for speed!
-                        suborqueue_rip = init_suborqueue_rip(message)
-                        result.append(suborqueue_rip)
-                result.sort(key = lambda rip: rip.created_at, reverse=True)
-
-    return result
-
-def qoc_react_error_string(text: str, react_and_user: ReactAndUser, message: Message) -> str:
-    emoji_string = reaction_name_to_emoji_string(react_and_user.name, message.guild)
-    user = bot.get_user(react_and_user.user_id)
-    user_string = "[unknown user]"
-    if user:
-        user_string = user.name
-    result = f'\n{text} {get_rip_title(message.content)}: {message.jump_url} {emoji_string} ({user_string})'
-    return result
-
 def get_react_counts(rip: Rip) -> dict[React, int]:
     count_dict: dict[React, int] = {}
     for react in rip.reacts:
@@ -727,33 +470,9 @@ def react_is_one(reaction_type_list: List[ReactionType], name: str) -> bool:
             return True
     return False
 
-def suborqueue_rip_has_reaction(reaction_type: ReactionType, suborqueue_rip: SubOrQueueRip) -> bool:
-    for react in suborqueue_rip.reacts:
-        if react_is(reaction_type, react.name):
-            return True
-    return False
-
-def qoc_rip_has_reaction(reaction_type: ReactionType, qoc_rip: QocRip) -> bool:
-    for react_and_user in qoc_rip.react_and_users:
-        if react_is(reaction_type, react_and_user.name):
-            return True
-    return False
-
-def qoc_rip_has_reaction_one(reaction_type_list: List[ReactionType], qoc_rip: QocRip):
-    for react_and_user in qoc_rip.react_and_users:
-        if react_is_one(reaction_type_list, react_and_user.name):
-            return True
-    return False
-
-def qoc_rip_has_reaction_one_from_user(reaction_type_list: List[ReactionType], user_id: int, qoc_rip: QocRip):
-    for react_and_user in qoc_rip.react_and_users:
-        if react_and_user.user_id == user_id and react_is_one(reaction_type_list, react_and_user.name):
-            return True
-    return False
-
 def rip_has_react(reaction_type_list: List[ReactionType], rip: Rip):
-    for react_and_user in rip.reacts:
-        if react_is_one(reaction_type_list, react_and_user.name):
+    for react in rip.reacts:
+        if react_is_one(reaction_type_list, react.name):
             return True
     return False
 
@@ -1392,7 +1111,7 @@ async def check_metadata(text: str, message_id: int, message_author_name: str, f
         for channel_id in channel_ids:
             channel = bot.get_channel(channel_id)
             if channel:
-                rips = await get_suborqueue_rips_fast(channel, GetRipsDesc())
+                rips = await get_rips_fast(channel, GetRipsDesc())
 
         title = get_raw_rip_title(text)
         desc = get_rip_description(text)
