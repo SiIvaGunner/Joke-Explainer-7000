@@ -656,57 +656,58 @@ async def send_suborqueue_rips(desc: SendSubOrQueueDesc, command_context: Comman
     prefix = desc.search_key.lower()
     qoc_emote = get_qoc_emoji(command_context.channel.guild)
 
-    rips = []
+    selected_rip_message_id = 0 
+    if desc.suborqueue_rip_filter_type == SubOrQueueRipFilterType.RANDOM: 
+        temp_rips_all = []
+        for channel_id in channel_ids:
+            channel = bot.get_channel(channel_id)
+            if channel:
+                result += f'<#{channel_id}>:\n'
+                temp_rips = await get_rips(channel, GetRipsDesc(typing_channel=command_context.channel))
+                temp_rips_all.extend(temp_rips)
+        selected_rip_message_id = random.choice(temp_rips_all).message_id
+
     for channel_id in channel_ids:
         channel = bot.get_channel(channel_id)
         if channel:
-            rips_of_channel = await get_rips(channel, GetRipsDesc(typing_channel=command_context.channel))
-            rips.extend(rips_of_channel)
 
-    selected_rip_message_id = 0 
-    if desc.suborqueue_rip_filter_type == SubOrQueueRipFilterType.RANDOM: 
-        selected_rip_message_id = random.choice(rips).message_id
-
-    previous_rip_channel_id = 0 
-
-    for rip in rips:
-
-        if previous_rip_channel_id != rip.channel_id:
-            if previous_rip_channel_id != 0:
-                result += '------------------------------\n'
             result += f'<#{channel_id}>:\n'
 
-        previous_rip_channel_id = rip.channel_id
+            rips = await get_rips(channel, GetRipsDesc(typing_channel=command_context.channel))
 
-        rip_title = get_rip_title(rip.text)
-        rip_author = get_raw_rip_author(rip.text)
+            for rip in rips:
 
-        is_valid = False
-        match(desc.suborqueue_rip_filter_type):
-            case SubOrQueueRipFilterType.HASREACT:
-                is_valid = rip_has_react([desc.reaction_type], rip)
-            case SubOrQueueRipFilterType.UNSENT:
-                is_valid = line_contains_substring(rip_author, 'email') and \
-                        not rip_has_react([ReactionType.EMAILSENT], rip)
-            case SubOrQueueRipFilterType.SEARCH_TITLE:
-                is_valid = line_contains_substring(rip_title, desc.search_key)
-            case SubOrQueueRipFilterType.SEARCH_AUTHOR:
-                is_valid = line_contains_substring(rip_author, desc.search_key)
-            case SubOrQueueRipFilterType.SCOUT:
-                is_valid = rip_title.lower().startswith(prefix)
-            case SubOrQueueRipFilterType.ALL:
-                is_valid = True
-            case SubOrQueueRipFilterType.RANDOM:
-                is_valid = rip.message_id == selected_rip_message_id
-            case _:
-                assert "Unimplemented SubOrQueueRipFilterType"
+                rip_title = get_rip_title(rip.text)
+                rip_author = get_raw_rip_author(rip.text)
 
-        if is_valid:
-            if rip_has_react([ReactionType.QOC], rip):
-                result += f"{qoc_emote} "
-            rip_link = format_message_link(channel.guild.id, rip.channel_id, rip.message_id)
-            result += f'**[{rip_title}]({rip_link})**\n'
-            count += 1
+                is_valid = False
+                match(desc.suborqueue_rip_filter_type):
+                    case SubOrQueueRipFilterType.HASREACT:
+                        is_valid = rip_has_react([desc.reaction_type], rip)
+                    case SubOrQueueRipFilterType.UNSENT:
+                        is_valid = line_contains_substring(rip_author, 'email') and \
+                                not rip_has_react([ReactionType.EMAILSENT], rip)
+                    case SubOrQueueRipFilterType.SEARCH_TITLE:
+                        is_valid = line_contains_substring(rip_title, desc.search_key)
+                    case SubOrQueueRipFilterType.SEARCH_AUTHOR:
+                        is_valid = line_contains_substring(rip_author, desc.search_key)
+                    case SubOrQueueRipFilterType.SCOUT:
+                        is_valid = rip_title.lower().startswith(prefix)
+                    case SubOrQueueRipFilterType.ALL:
+                        is_valid = True
+                    case SubOrQueueRipFilterType.RANDOM:
+                        is_valid = rip.message_id == selected_rip_message_id
+                    case _:
+                        assert "Unimplemented SubOrQueueRipFilterType"
+
+                if is_valid:
+                    if rip_has_react([ReactionType.QOC], rip):
+                        result += f"{qoc_emote} "
+                    rip_link = format_message_link(channel.guild.id, rip.channel_id, rip.message_id)
+                    result += f'**[{rip_title}]({rip_link})**\n'
+                    count += 1
+
+            result += '------------------------------\n'
 
     if count == 0:
         not_found_message = "No rips found."
