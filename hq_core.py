@@ -202,6 +202,12 @@ async def validate_rip_message(message: Message) -> str:
                 result += f'\nReaction missing in cache for {get_rip_title(message.content)} '+\
                     f'{message.jump_url}{emoji_string}: ~~x{count_dict_cached[react]}~~ x{count_dict_refetched[react]}'
 
+        for react in count_dict_cached.keys():
+            if react not in count_dict_refetched:
+                emoji_string = reaction_name_to_emoji_string(react.name, message.guild)
+                result += f'\nReaction in cache outdated for {get_rip_title(message.content)} '+\
+                    f'{message.jump_url}{emoji_string}: ~~x{count_dict_cached[react]}~~ x0'
+
     else:
         result += f'\nRip missing from cache: {get_rip_title(message.content)} {message.jump_url}'
 
