@@ -24,6 +24,7 @@ import discord
 from discord.abc import GuildChannel
 
 from hq_config import *
+from hq_discord import discord_fetch_message
 
 bot = discord.Client(
     intents = discord.Intents.all() # This was a change necessitated by an update to discord.py :/
@@ -238,7 +239,13 @@ async def get_user_react_data(react_list: List[ReactionType], message: Message) 
             if react_is_one(react_list, react.name):
                 result[react] = []
                 # NOTE: (Ahmayk) this is slow! We have to do an api call for each user.
-                fetched_user_ids = [user.id async for user in reaction.users()]
+                fetched_user_ids = [] 
+                try:
+                    fetched_user_ids = [user.id async for user in reaction.users()]
+                except Exception as error:
+                    error_string = f"{type(error).__name__}: {error}"
+                    await write_log(f'Discord API call failed: fetching user ids: {error_string}')
+
                 for fetched_user_id in fetched_user_ids:
                     result[react].append(fetched_user_id) 
     return result
@@ -258,7 +265,9 @@ async def process_rip_message(message: Message, refetch_message: bool, is_valida
         await lock_message(message.id, typing_channel)
 
         if refetch_message:
-            message = await message.channel.fetch_message(message.id)
+            fetched_message = await discord_fetch_message(message.id, message.channel)
+            if fetched_message:
+                message = fetched_message
 
         user_react_data: dict[React, List[int]] = {}
         channel_info = get_channel_info(message.channel)
@@ -579,9 +588,10 @@ async def user_is_react(user_react_check_type: UserReactCheckType, user_id: int,
             # perhaps bypassing discord.py to make the direct api call we need
             # In pratice we shouldn't be calling this code path too often anyway during regular usage
             # So isn't the biggest problem
-            message = await channel.fetch_message(rip.message_id)
-            user_react_data = await get_user_react_data(react_list, message)
-            cache_user_react_data(user_react_data, message.id)
+            message = await discord_fetch_message(rip.message_id, channel)
+            if message:
+                user_react_data = await get_user_react_data(react_list, message)
+                cache_user_react_data(user_react_data, message.id)
 
     for react in rip.reacts:
         if react_is_one(react_list, react.name):
@@ -742,8 +752,12 @@ async def parse_message_link(link: str):
         return None, None, None, "Error: Cannot parse argument - make sure it is a valid link to message (right click > Copy Link)."
 
     server = bot.get_guild(server_id)
+
+    #TODO: (Ahmayk) handle server being null
     channel = server.get_channel_or_thread(channel_id)
-    message = await channel.fetch_message(msg_id)
+
+    #TODO: (Ahmayk) handle message being null
+    message = await discord_fetch_message(msg_id, channel)
 
     return server, channel, message, ""
 
@@ -1344,8 +1358,12 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
                 if is_valid:
                     #NOTE: (Ahmayk) have to fetch message to get reaction data for cache
                     await lock_message(message.id, None)
-                    fetched_message = await channel.fetch_message(message.id)
-                    cache_rip_in_message(fetched_message)
+
+                    fetched_message = await discord_fetch_message(message.id, channel)
+                    if fetched_message:
+                        message = fetched_message
+
+                    cache_rip_in_message(message)
                     unlock_message(message.id)
 
                     verdict, msg = await check_qoc_and_metadata(message.content, message.id, str(message.author))
@@ -1367,9 +1385,9 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
         if is_qoc_channel or is_suborqueue_channel:
 
-            message = await channel.fetch_message(payload.message_id)
+            message = await discord_fetch_message(payload.message_id, channel)
 
-            if is_message_rip(message):
+            if message and is_message_rip(message):
                 await lock_message(payload.message_id, None)
 
                 rip = cache_rip_in_message(message)
