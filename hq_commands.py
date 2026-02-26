@@ -1452,6 +1452,7 @@ async def validate_cache(args: list[str], command_context: CommandContext):
 async def reset_cache(args: list[str], command_context: CommandContext):
 
     string_and_errors = StringAndErrors()
+    prefix = get_config('prefix')
     if len(args):
         channel_link = args[0] 
         channel_id, msg = parse_channel_link(channel_link, ['SUBS', 'SUBS_PIN', 'SUBS_THREAD', 'QUEUE', 'QOC'], False)
@@ -1459,12 +1460,12 @@ async def reset_cache(args: list[str], command_context: CommandContext):
             return await send(msg, command_context.channel)
         await send(f'Rebuilding cache for <#{channel_id}>. This will take a few minutes...', command_context.channel)
         async with command_context.channel.typing():
-            await write_log(f'`{get_config('prefix')}rebuild_cache` run by {command_context.user.name} for <#{channel_id}> in {command_context.channel.jump_url}')
+            await write_log(f'`{prefix}rebuild_cache` run by {command_context.user.name} for <#{channel_id}> in {command_context.channel.jump_url}')
             string_and_errors = await rebuild_cache_for_channel(channel_id)
     else:
         await send(f'Rebuilding cache for all channels. This may take a few minutes...', command_context.channel)
         async with command_context.channel.typing():
-            await write_log(f'`{get_config('prefix')}rebuild_cache` run by {command_context.user.name} in {command_context.channel.jump_url}')
+            await write_log(f'`{prefix}rebuild_cache` run by {command_context.user.name} in {command_context.channel.jump_url}')
             string_and_errors = await rebuild_cache_all()
 
     txt = f'Cache rebuilt!\n{string_and_errors.string}'
