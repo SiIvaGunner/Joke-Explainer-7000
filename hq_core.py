@@ -65,7 +65,7 @@ class MessagesAndErrors(NamedTuple):
     error_strings: List[str]
 
 class UserReactDictAndErrors(NamedTuple):
-    user_react_dict: dict[React, List[int]]
+    user_react_dict: dict # dict[React, List[int]]
     error_strings: List[str]
 
 async def discord_fetch_message(message_id: int, channel: TextChannel | Thread) -> MessageAndErrors: 
@@ -78,7 +78,7 @@ async def discord_fetch_message(message_id: int, channel: TextChannel | Thread) 
         await write_log(error_strings[0])
     return MessageAndErrors(message, error_strings)
 
-async def discord_get_user_react_data(react_list: List[ReactionType], message: Message) -> UserReactDictAndErrors: 
+async def discord_get_user_react_data(react_list: List, message: Message) -> UserReactDictAndErrors:  # List[ReactionType]
     user_react_dict: dict[React, List[int]] = {}
     error_strings = [] 
     if len(react_list):
@@ -679,7 +679,7 @@ class UserReactCheckType(Enum):
     REVIEW = auto()
     FIX = auto()
 
-def user_react_check_type_to_react_list(user_react_check_type: UserReactCheckType) -> List[ReactType]:
+def user_react_check_type_to_react_list(user_react_check_type: UserReactCheckType) -> List[ReactionType]:
     react_list = []
     match(user_react_check_type):
         case UserReactCheckType.REVIEW: 
