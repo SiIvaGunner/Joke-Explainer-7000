@@ -287,10 +287,16 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
 
         if is_valid:
             link = format_message_link(channel.guild.id, channel.id, rip.message_id)
-            base_message = f'**[{rip_title}]({link})**\n{author}'
+            title_body = f'**[{rip_title}]({link})**'
             if len(indicator) > 0:
-                base_message = f'{indicator} **[{rip_title}]({link})** {indicator}\n{author}'
-            result += base_message + f' | {reacts}\n'
+                title_body = f'{indicator} {title_body} {indicator}'
+
+            utc = int(rip.created_at.replace(tzinfo=timezone.utc).timestamp())
+            info_body = f'{author} <t:{utc}:R>'
+            if len(reacts):
+                info_body += f' | {reacts}'
+
+            result += f'{title_body}\n{info_body}\n'
             result += readability_line 
 
     if result != "":
