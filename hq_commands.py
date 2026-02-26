@@ -246,7 +246,7 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
                 is_valid = not rip_has_react(FIX_REACT_LIST, rip)
             case RoundupFilterType.MYFRESH:
                 bool_and_errors = await user_is_react(UserReactCheckType.REVIEW, user_id, rip, command_context.channel)
-                is_valid = bool_and_errors.result 
+                is_valid = not bool_and_errors.result 
                 error_strings.extend(bool_and_errors.error_strings)
             case RoundupFilterType.FRESH:
                 is_valid = not rip_has_react(REVIEW_REACT_LIST, rip)
@@ -674,13 +674,13 @@ async def send_suborqueue_rips(desc: SendSubOrQueueDesc, command_context: Comman
 
     selected_rip_message_id = 0 
     if desc.suborqueue_rip_filter_type == SubOrQueueRipFilterType.RANDOM: 
-        temp_rips_all = []
+        temp_rips_all: List[Rip] = []
         for channel_id in channel_ids:
             channel = bot.get_channel(channel_id)
             if channel:
-                result += f'<#{channel_id}>:\n'
-                temp_rips = await get_rips(channel, GetRipsDesc(typing_channel=command_context.channel))
-                temp_rips_all.extend(temp_rips)
+                temp_rips_and_errors = await get_rips(channel, GetRipsDesc(typing_channel=command_context.channel))
+                error_strings.extend(temp_rips_and_errors.error_strings)
+                temp_rips_all.extend(temp_rips_and_errors.rips)
         selected_rip_message_id = random.choice(temp_rips_all).message_id
 
     for channel_id in channel_ids:
