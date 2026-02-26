@@ -230,16 +230,9 @@ def init_rip(message) -> Rip:
     reacts: List[React] = []
 
     for reaction in message.reactions:
-        name = ""
-        id = 0 
-        if isinstance(reaction.emoji, str):
-            name = reaction.emoji
-        elif type(reaction.emoji) == discord.Emoji:
-            name = reaction.emoji.name
-            if reaction.emoji.id:
-                id = reaction.emoji.id
+        react = init_react(reaction)
         for i in range(0, reaction.count):
-            reacts.append(React(id, name))
+            reacts.append(react)
 
     return Rip(message.content, message.id, message.channel.id, message.author.id, \
             str(message.author), reacts, message.created_at)
