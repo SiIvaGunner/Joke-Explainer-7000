@@ -527,13 +527,17 @@ for i in range(0, 23):
 
 @tasks.loop(time=times)
 async def validate_cache_regularly():
-    string_and_errors = await validate_cache_all()
-    if len(string_and_errors.string):
-        await write_log(f'**Cache validation had issues:**\n{string_and_errors.string}')
-    else:
-        #TODO: (Ahmayk) remove this once cache starts being trustworthy (hopefully this happens)
-        today = datetime.now()
-        print(f"{today.strftime('%m/%d/%y %I:%M %p')}  Cache revalidated. No issues found.")
+    try:
+        string_and_errors = await validate_cache_all()
+        if len(string_and_errors.string):
+            await write_log(f'**Cache validation had issues:**\n{string_and_errors.string}')
+        else:
+            #TODO: (Ahmayk) remove this once cache starts being trustworthy (hopefully this happens)
+            today = datetime.now()
+            print(f"{today.strftime('%m/%d/%y %I:%M %p')}  Cache revalidated. No issues found.")
+    except Exception as error:
+        await send_crash(f'ERROR on scheduled cache revalidation', error, None)
+    
 
 async def rebuild_cache_for_channel(channel_id: int) -> StringAndErrors:
     return_message = ""
@@ -1122,6 +1126,29 @@ async def write_log(msg: str = "Placeholder message", embed: bool = False):
         file.write('\n=========================================\n')
 
 
+async def send_crash(txt: str, error: Exception, channel: TextChannel | Thread | None):
+    error_string = f"{type(error).__name__}: {error}"
+    error_data = "".join(traceback.format_exception(type(error), error, error.__traceback__))
+
+    print(f"\033[91m {error_data}\033[0m")
+
+    description = f":boom: Intriguing! I have encountered an unexpected error! ```{error_string}```"
+    if channel:
+        await send(description, channel)
+
+    header = f'{txt}: {error_string}'
+    log_channel = bot.get_channel(get_log_channel())
+    if log_channel:
+        split_texts = split_long_message(error_data, 2000 - len(header))
+        for i, m in enumerate(split_texts):
+            string = f'```py\n{m}\n```'
+            if i == 0:
+                string = f'**{header}**\n{string}'
+            await send(string, log_channel)
+    else:
+        print("No log channel found.")
+
+
 def extract_rip_link(text: str) -> typing.List[str]:
     """
     Extract potential rip links from text.
@@ -1687,23 +1714,4 @@ async def on_message(message: Message):
     try:
         await command_info.func(args[1:], command_context)
     except Exception as error:
-
-        error_string = f"{type(error).__name__}: {error}"
-        error_data = "".join(traceback.format_exception(type(error), error, error.__traceback__))
-
-        print(f"\033[91m {error_data}\033[0m")
-
-        description = f":boom: Intriguing! I have encountered an unexpected error! ```{error_string}```"
-        await send(description, message.channel)
-
-        header = f'ERROR on command {prefix}{command_name}: {error_string}'
-        log_channel = bot.get_channel(get_log_channel())
-        if log_channel is not None:
-            split_texts = split_long_message(error_data, 2000 - len(header))
-            for i, m in enumerate(split_texts):
-                string = f'```py\n{m}\n```'
-                if i == 0:
-                    string = f'**{header}**\n{string}'
-                await send(string, log_channel)
-        else:
-            print("No log channel found.")
+        await send_crash(f'ERROR on command {prefix}{command_name}:', error, message.channel)
