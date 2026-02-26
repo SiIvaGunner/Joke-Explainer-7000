@@ -69,7 +69,7 @@ class Rip(NamedTuple):
     reacts: List[React]
     created_at: datetime
 
-class ReactionType(Enum):
+class ReactType(Enum):
     NULL = auto()
     GOLDCHECK = auto()
     CHECKREQ = auto()
@@ -84,8 +84,8 @@ class ReactionType(Enum):
     EMAILSENT = auto()
     NUMBER = auto()
 
-REVIEW_REACT_LIST = [ReactionType.CHECK, ReactionType.GOLDCHECK, ReactionType.FIX, ReactionType.ALERT, ReactionType.REJECT]
-FIX_REACT_LIST = [ReactionType.FIX, ReactionType.ALERT]
+REVIEW_REACT_LIST = [ReactType.CHECK, ReactType.GOLDCHECK, ReactType.FIX, ReactType.ALERT, ReactType.REJECT]
+FIX_REACT_LIST = [ReactType.FIX, ReactType.ALERT]
 
 #===============================================#
 #                AndErrors Types                #
@@ -130,7 +130,7 @@ async def discord_fetch_message(message_id: int, channel: TextChannel | Thread) 
         await write_log(error_strings[0])
     return MessageAndErrors(message, error_strings)
 
-async def discord_get_user_react_data(react_list: List[ReactionType], message: Message) -> UserReactDictAndErrors:
+async def discord_get_user_react_data(react_list: List[ReactType], message: Message) -> UserReactDictAndErrors:
     user_react_dict: dict[React, List[int]] = {}
     error_strings = [] 
     if len(react_list):
@@ -633,47 +633,47 @@ async def remove_rip_from_cache(message_id: int, channel_id: int):
 
 KEYCAP_EMOJIS = {'2️⃣': 2, '3️⃣': 3, '4️⃣': 4, '5️⃣': 5, '6️⃣': 6, '7️⃣': 7, '8️⃣': 8, '9️⃣': 9, '🔟': 10}
 
-def react_is(reaction_type: ReactionType, name: str) -> bool:
+def react_is(reaction_type: ReactType, name: str) -> bool:
     result = False
     name_lower = name.lower()
     match (reaction_type):
-        case ReactionType.GOLDCHECK:
+        case ReactType.GOLDCHECK:
             result = name_lower == "goldcheck" or name_lower == DEFAULT_GOLDCHECK
-        case ReactionType.CHECKREQ:
+        case ReactType.CHECKREQ:
             result = name_lower.endswith("check") and name_lower[0].isdigit()
-        case ReactionType.CHECK:
-            if not react_is(ReactionType.GOLDCHECK, name) and not react_is(ReactionType.CHECKREQ, name):
+        case ReactType.CHECK:
+            if not react_is(ReactType.GOLDCHECK, name) and not react_is(ReactType.CHECKREQ, name):
                 result = name_lower == "check" or name_lower == DEFAULT_CHECK
-        case ReactionType.FIX:
+        case ReactType.FIX:
             result = name_lower == "fix" or name_lower == "wrench" or name_lower == DEFAULT_FIX
-        case ReactionType.REJECT:
+        case ReactType.REJECT:
             result = name_lower == "reject" or name_lower == DEFAULT_REJECT
-        case ReactionType.STOP:
+        case ReactType.STOP:
             result = name_lower == "stop" or name_lower == "octagonal" or name_lower == DEFAULT_STOP
-        case ReactionType.ALERT:
+        case ReactType.ALERT:
             result = name_lower == "alert" or name_lower == DEFAULT_ALERT
-        case ReactionType.QOC:
+        case ReactType.QOC:
             result = name_lower == "qoc" or name_lower == DEFAULT_QOC
-        case ReactionType.METADATA:
+        case ReactType.METADATA:
             result = name_lower == "metadata" or name_lower == DEFAULT_METADATA
-        case ReactionType.THUMBNAIL:
+        case ReactType.THUMBNAIL:
             result = name_lower == "thumbnail" or name_lower == DEFAULT_THUMBNAIL
-        case ReactionType.EMAILSENT:
+        case ReactType.EMAILSENT:
             result = name_lower == "emailsent"
-        case ReactionType.NUMBER:
+        case ReactType.NUMBER:
             result = name in KEYCAP_EMOJIS
         case _:
             assert "Unimplemented ReactionType"
 
     return result
 
-def react_is_one(reaction_type_list: List[ReactionType], name: str) -> bool:
+def react_is_one(reaction_type_list: List[ReactType], name: str) -> bool:
     for reaction_type in reaction_type_list:
         if react_is(reaction_type, name):
             return True
     return False
 
-def rip_has_react(reaction_type_list: List[ReactionType], rip: Rip):
+def rip_has_react(reaction_type_list: List[ReactType], rip: Rip):
     for react in rip.reacts:
         if react_is_one(reaction_type_list, react.name):
             return True
@@ -687,7 +687,7 @@ class UserReactCheckType(Enum):
     REVIEW = auto()
     FIX = auto()
 
-def user_react_check_type_to_react_list(user_react_check_type: UserReactCheckType) -> List[ReactionType]:
+def user_react_check_type_to_react_list(user_react_check_type: UserReactCheckType) -> List[ReactType]:
     react_list = []
     match(user_react_check_type):
         case UserReactCheckType.REVIEW: 

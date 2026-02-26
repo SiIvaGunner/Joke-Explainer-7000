@@ -146,7 +146,7 @@ class RoundupDesc(NamedTuple):
     conditional_string: str = ""
     search_key: str = ""
     react_name: str = ""
-    reaction_type: ReactionType = ReactionType.NULL 
+    reaction_type: ReactType = ReactType.NULL 
     not_found_message: str = ""
 
 async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContext):
@@ -197,22 +197,22 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
         fix_or_alert = False
 
         for react_and_user in rip.reacts:
-            if react_is(ReactionType.GOLDCHECK, react_and_user.name):
+            if react_is(ReactType.GOLDCHECK, react_and_user.name):
                 num_goldchecks += 1
-            elif react_is(ReactionType.CHECKREQ, react_and_user.name):
+            elif react_is(ReactType.CHECKREQ, react_and_user.name):
                 try:
                     checks_required = int(react_and_user.name.split("check")[0])
                 except ValueError:
                     print("Error parsing checkreq react: {}".format(react_and_user.name))
-            elif react_is(ReactionType.CHECK, react_and_user.name):
+            elif react_is(ReactType.CHECK, react_and_user.name):
                 num_checks += 1
-            elif react_is(ReactionType.REJECT, react_and_user.name):
+            elif react_is(ReactType.REJECT, react_and_user.name):
                 num_rejects += 1
-            elif react_is_one([ReactionType.FIX, ReactionType.ALERT], react_and_user.name):
+            elif react_is_one([ReactType.FIX, ReactType.ALERT], react_and_user.name):
                 fix_or_alert = True
-            elif react_is(ReactionType.STOP, react_and_user.name):
+            elif react_is(ReactType.STOP, react_and_user.name):
                 specs_needed = True
-            elif react_is(ReactionType.NUMBER, react_and_user.name):
+            elif react_is(ReactType.NUMBER, react_and_user.name):
                 specs_required = KEYCAP_EMOJIS[react_and_user.name]
 
             reacts += reaction_name_to_emoji_string(react_and_user.name, command_context.channel.guild) 
@@ -251,8 +251,8 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
             case RoundupFilterType.FRESH:
                 is_valid = not rip_has_react(REVIEW_REACT_LIST, rip)
             case RoundupFilterType.SPICY:
-                is_valid = rip_has_react([ReactionType.CHECK], rip) and \
-                            rip_has_react([ReactionType.REJECT], rip)
+                is_valid = rip_has_react([ReactType.CHECK], rip) and \
+                            rip_has_react([ReactType.REJECT], rip)
             case RoundupFilterType.SEARCH_TITLE:
                 is_valid = False
                 for key in search_keys:
@@ -431,7 +431,7 @@ async def events(args: list[str], command_context: CommandContext):
 )
 async def checks(args: list[str], command_context: CommandContext):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.HASREACT, \
-                               reaction_type=ReactionType.CHECK, not_found_message="No checks found.")
+                               reaction_type=ReactType.CHECK, not_found_message="No checks found.")
     await send_roundup(roundup_desc, command_context)
 
 @command(
@@ -441,7 +441,7 @@ async def checks(args: list[str], command_context: CommandContext):
 )
 async def nochecks(args: list[str], command_context: CommandContext):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.NOTHASREACT, \
-                               reaction_type=ReactionType.CHECK, not_found_message="No non-checked rips found.")
+                               reaction_type=ReactType.CHECK, not_found_message="No non-checked rips found.")
     await send_roundup(roundup_desc, command_context)
 
 @command(
@@ -450,7 +450,7 @@ async def nochecks(args: list[str], command_context: CommandContext):
 )
 async def rejects(args: list[str], command_context: CommandContext):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.HASREACT, \
-                               reaction_type=ReactionType.REJECT, not_found_message="No rejected rips found.")
+                               reaction_type=ReactType.REJECT, not_found_message="No rejected rips found.")
     await send_roundup(roundup_desc, command_context)
 
 @command(
@@ -460,7 +460,7 @@ async def rejects(args: list[str], command_context: CommandContext):
 )
 async def norejects(args: list[str], command_context: CommandContext):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.NOTHASREACT, \
-                               reaction_type=ReactionType.REJECT, not_found_message="No non-rejected rips found.")
+                               reaction_type=ReactType.REJECT, not_found_message="No non-rejected rips found.")
     await send_roundup(roundup_desc, command_context)
 
 @command(
@@ -470,7 +470,7 @@ async def norejects(args: list[str], command_context: CommandContext):
 )
 async def fixes(args: list[str], command_context: CommandContext):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.HASREACT, \
-                               reaction_type=ReactionType.FIX, not_found_message="No wrenches found.")
+                               reaction_type=ReactType.FIX, not_found_message="No wrenches found.")
     await send_roundup(roundup_desc, command_context)
 
 @command(
@@ -480,7 +480,7 @@ async def fixes(args: list[str], command_context: CommandContext):
 )
 async def nofixes(args: list[str], command_context: CommandContext):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.NOTHASREACT, \
-                               reaction_type=ReactionType.FIX, not_found_message="No non-fix rips found.")
+                               reaction_type=ReactType.FIX, not_found_message="No non-fix rips found.")
     await send_roundup(roundup_desc, command_context)
 
 @command(
@@ -489,7 +489,7 @@ async def nofixes(args: list[str], command_context: CommandContext):
 )
 async def stops(args: list[str], command_context: CommandContext):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.HASREACT, \
-                               reaction_type=ReactionType.STOP, not_found_message="No octogons found.")
+                               reaction_type=ReactType.STOP, not_found_message="No octogons found.")
     await send_roundup(roundup_desc, command_context)
 
 @command(
@@ -647,7 +647,7 @@ class SubOrQueueRipFilterType(Enum):
 
 class SendSubOrQueueDesc(NamedTuple):
     suborqueue_rip_filter_type: SubOrQueueRipFilterType = SubOrQueueRipFilterType.NULL 
-    reaction_type: ReactionType = ReactionType.NULL 
+    reaction_type: ReactType = ReactType.NULL 
     channel_link: str = ""
     channel_types: List[str] = []
     search_key: str = ""
@@ -703,7 +703,7 @@ async def send_suborqueue_rips(desc: SendSubOrQueueDesc, command_context: Comman
                         is_valid = rip_has_react([desc.reaction_type], rip)
                     case SubOrQueueRipFilterType.UNSENT:
                         is_valid = line_contains_substring(rip_author, 'email') and \
-                                not rip_has_react([ReactionType.EMAILSENT], rip)
+                                not rip_has_react([ReactType.EMAILSENT], rip)
                     case SubOrQueueRipFilterType.SEARCH_TITLE:
                         is_valid = line_contains_substring(rip_title, desc.search_key)
                     case SubOrQueueRipFilterType.SEARCH_AUTHOR:
@@ -718,7 +718,7 @@ async def send_suborqueue_rips(desc: SendSubOrQueueDesc, command_context: Comman
                         assert "Unimplemented SubOrQueueRipFilterType"
 
                 if is_valid:
-                    if rip_has_react([ReactionType.QOC], rip):
+                    if rip_has_react([ReactType.QOC], rip):
                         result += f"{qoc_emote} "
                     rip_link = format_message_link(channel.guild.id, rip.channel_id, rip.message_id)
                     result += f'**[{rip_title}]({rip_link})**\n'
@@ -802,7 +802,7 @@ async def random_sub(args: list[str], command_context: CommandContext):
 async def frames(args: list[str], command_context: CommandContext):
     desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.HASREACT, \
                               channel_types = ["QUEUE"], \
-                              reaction_type = ReactionType.THUMBNAIL)
+                              reaction_type = ReactType.THUMBNAIL)
     await send_suborqueue_rips(desc, command_context)
 
 
@@ -814,7 +814,7 @@ async def frames(args: list[str], command_context: CommandContext):
 async def alerts(args: list[str], command_context: CommandContext):
     desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.HASREACT, \
                               channel_types = ["QUEUE"], \
-                              reaction_type = ReactionType.ALERT)
+                              reaction_type = ReactType.ALERT)
     await send_suborqueue_rips(desc, command_context)
 
 
@@ -826,7 +826,7 @@ async def alerts(args: list[str], command_context: CommandContext):
 async def metadata(args: list[str], command_context: CommandContext):
     desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.HASREACT, \
                               channel_types = ["QUEUE"], \
-                              reaction_type = ReactionType.METADATA)
+                              reaction_type = ReactType.METADATA)
     await send_suborqueue_rips(desc, command_context)
 
 
