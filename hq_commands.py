@@ -1451,7 +1451,7 @@ async def validate_cache(args: list[str], command_context: CommandContext):
 )
 async def reset_cache(args: list[str], command_context: CommandContext):
 
-    string_and_errors = StringAndErrors()
+    string_and_errors = StringAndErrors("None", [])
     prefix = get_config('prefix')
     if len(args):
         channel_link = args[0] 
