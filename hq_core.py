@@ -100,7 +100,7 @@ class MessagesAndErrors(NamedTuple):
     error_strings: List[str]
 
 class UserReactDictAndErrors(NamedTuple):
-    user_react_dict: dict # dict[React, List[int]]
+    user_react_dict: dict[React, List[int]]
     error_strings: List[str]
 
 class StringAndErrors(NamedTuple):
@@ -130,7 +130,7 @@ async def discord_fetch_message(message_id: int, channel: TextChannel | Thread) 
         await write_log(error_strings[0])
     return MessageAndErrors(message, error_strings)
 
-async def discord_get_user_react_data(react_list: List, message: Message) -> UserReactDictAndErrors:  # List[ReactionType]
+async def discord_get_user_react_data(react_list: List[ReactionType], message: Message) -> UserReactDictAndErrors:
     user_react_dict: dict[React, List[int]] = {}
     error_strings = [] 
     if len(react_list):
