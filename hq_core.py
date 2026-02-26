@@ -402,7 +402,7 @@ async def process_rip_channel(channel: TextChannel | Thread, is_validate_message
                             await lock_message(thread_rip.message_id, None)
                             RIP_CACHE[channel.id][thread_rip.message_id] = thread_rip 
                             unlock_message(thread_rip.message_id)
-                        unlock_channel(message.thread.id)
+                    unlock_channel(message.thread.id)
                 else:
                     string_and_errors = await process_rip_message(message, False, is_validate_message, typing_channel)
                     return_message += string_and_errors.string
@@ -1478,7 +1478,7 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
         if channel_info.rip_fetch_type == RipFetchType.PINS: 
             current_message_ids: list[int] = []
             messages_and_error = await discord_get_channel_pins(None, channel)
-            async for message in messages_and_error.messages: 
+            for message in messages_and_error.messages: 
                 current_message_ids.append(message.id)
 
             message_ids_to_remove = []
