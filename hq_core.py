@@ -686,7 +686,7 @@ def user_react_check_type_to_react_list(user_react_check_type: UserReactCheckTyp
 
 class BoolAndErrors(NamedTuple):
     result: bool
-    error_string: List[str]
+    error_strings: List[str]
 
 async def user_is_react(user_react_check_type: UserReactCheckType, user_id: int, rip: Rip,\
                         typing_channel: TextChannel | Thread | None) -> BoolAndErrors:
@@ -963,12 +963,13 @@ async def send(text: str, channel: TextChannel | Thread):
     limit = get_config("character_limit")
     split_message = split_long_message(text, limit)
     for line in split_message:
-        try:
-            await channel.send(line)
-        except Exception as error:
-            #NOTE: (Ahmayk) write_log here could cause infinite error loops so just stay quiet about this one 
-            txt = f'Failed to send message to {channel.jump_url}: {type(error).__name__}: {error}'
-            print(f"\033[91m {txt}\033[0m")
+        if len(line):
+            try:
+                await channel.send(line)
+            except Exception as error:
+                #NOTE: (Ahmayk) write_log here could cause infinite error loops so just stay quiet about this one 
+                txt = f'Failed to send message to {channel.jump_url}: {type(error).__name__}: {error}'
+                print(f"\033[91m {txt}\033[0m")
 
 class EmbedDesc(NamedTuple):
     expires: bool = False
@@ -1077,16 +1078,24 @@ async def send_embed(text: str, channel: TextChannel | Thread, desc: EmbedDesc):
         except Exception as error:
             await write_log(f'Failed to send embed to {channel.jump_url}: {type(error).__name__}: {error}')
 
-
-async def send_with_errors(txt: str, if_errors_txt: str, max_errors_to_send: int, error_strings: \
-                           List[str], channel: TextChannel | Thread):
-    return_text = txt
+def parse_errors(if_errors_txt: str, error_strings: List[str]) -> str:
+    max_errors_to_send = 3
+    return_text = "" 
     if len(error_strings):
-        return_text += f'{if_errors_txt}\n```' 
+        return_text += f':bangbang:{if_errors_txt}\n```' 
         return_text += "\n".join(error_strings[:max_errors_to_send])
         if len(error_strings) > max_errors_to_send:
             return_text += '\n ...(errors truncated)...'
         return_text += "```" 
+    return return_text
+
+async def send_if_errors(if_errors_txt: str, error_strings: List[str], channel: TextChannel | Thread):
+    return_text = parse_errors(if_errors_txt, error_strings) 
+    await send(return_text, channel)
+
+async def send_and_if_errors(txt: str, if_errors_txt: str, error_strings: List[str], channel: TextChannel | Thread):
+    error_text = parse_errors(if_errors_txt, error_strings) 
+    return_text = f'{txt}\n{error_text}'
     await send(return_text, channel)
 
 async def write_log(msg: str = "Placeholder message", embed: bool = False):
@@ -1423,8 +1432,8 @@ async def on_ready():
     await rebuild_cache_all()
 
     await write_log('Validating cache...')
-    validate_result = await validate_cache_all()
-    validate_result += '\n**Startup caching complete.**'
+    string_and_errors = await validate_cache_all()
+    validate_result = f'**Startup caching complete.**{string_and_errors.string}'
     await write_log(validate_result)
 
     validate_cache_regularly.start()
@@ -1487,7 +1496,7 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
 
         messages_and_errors = await discord_get_channel_pins(1, channel)
         if len(messages_and_errors.error_strings):
-            return await send_truncated_errors("Error: Failed to vet pinned message.", 3, messages_and_errors.error_strings, channel)
+            return await send_if_errors("Error: Failed to vet pinned message.", messages_and_errors.error_strings, channel)
         
         assert(len(messages_and_errors.messages))
         message = messages_and_errors.messages[0]
@@ -1515,13 +1524,14 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
             if is_valid:
                 await lock_message(message.id, None)
                 #NOTE: (Ahmayk) have to fetch message to get reaction data for cache
-                #TODO: (Ahmayk) what to do with errors?
                 message_and_errors = await discord_fetch_message(message.id, channel)
+                error_strings.extend(message_and_errors.error_strings)
                 if message_and_errors.message:
                     message = message_and_errors.message
                 cache_rip_in_message(message)
                 unlock_message(message.id)
 
+                #TODO: (Ahmayk) if this errors at all we need to know
                 verdict, msg = await check_qoc_and_metadata(message.content, message.id, str(message.author))
 
                 if len(verdict) > 0:
@@ -1531,9 +1541,9 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
                     return_message = f'**Rip**: **[{rip_title}]({link})**\n**Verdict**: {verdict}\n{msg}-# React {DEFAULT_CHECK} if this is resolved.'
 
         if is_vetted:
-            await send_with_errors(return_message, "Warning: Vetting pinned messae returned errors.", 3, error_strings, channel)
+            await send_and_if_errors(return_message, "Warning: Vetting pinned messae returned errors.", error_strings, channel)
         else:
-            await send_with_errors(return_message, "Warning: Pinned message not vetted.", 3, error_strings, channel)
+            await send_and_if_errors(return_message, "Warning: Pinned message not vetted.", error_strings, channel)
 
 
 @bot.event
