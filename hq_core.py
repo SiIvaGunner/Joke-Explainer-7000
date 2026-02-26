@@ -494,10 +494,12 @@ def init_react(reaction: discord.Reaction) -> React:
     id = 0 
     if isinstance(reaction.emoji, str):
         name = reaction.emoji
-    elif type(reaction.emoji) == discord.Emoji:
+    elif isinstance(reaction.emoji, discord.Emoji) or isinstance(reaction.emoji, discord.PartialEmoji):
         name = reaction.emoji.name
         if reaction.emoji.id:
             id = reaction.emoji.id
+    else:
+        assert False, "Unrecognized reaction type" # This shouldn't happen
     return React(id, name) 
 
 def get_react_counts(rip: Rip) -> dict[React, int]:
