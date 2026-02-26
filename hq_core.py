@@ -53,7 +53,42 @@ QOC_DEFAULT_BITRATE = '🔢'
 QOC_DEFAULT_CLIPPING = '📢'
 
 #===============================================#
-#                Discord API Calls              #
+#               Rip and React Types             #
+#===============================================#
+
+class React(NamedTuple):
+    id: int
+    name: str
+
+class Rip(NamedTuple):
+    text: str
+    message_id: int
+    channel_id: int
+    message_author_id: int
+    message_author_name: str
+    reacts: List[React]
+    created_at: datetime
+
+class ReactionType(Enum):
+    NULL = auto()
+    GOLDCHECK = auto()
+    CHECKREQ = auto()
+    CHECK = auto()
+    FIX = auto()
+    REJECT = auto()
+    STOP = auto()
+    ALERT = auto()
+    QOC = auto()
+    METADATA = auto()
+    THUMBNAIL = auto()
+    EMAILSENT = auto()
+    NUMBER = auto()
+
+REVIEW_REACT_LIST = [ReactionType.CHECK, ReactionType.GOLDCHECK, ReactionType.FIX, ReactionType.ALERT, ReactionType.REJECT]
+FIX_REACT_LIST = [ReactionType.FIX, ReactionType.ALERT]
+
+#===============================================#
+#                AndErrors Types                #
 #===============================================#
 
 class MessageAndErrors(NamedTuple):
@@ -67,6 +102,23 @@ class MessagesAndErrors(NamedTuple):
 class UserReactDictAndErrors(NamedTuple):
     user_react_dict: dict # dict[React, List[int]]
     error_strings: List[str]
+
+class StringAndErrors(NamedTuple):
+    string: str
+    error_strings: List[str]
+
+class RipsAndErrors(NamedTuple):
+    rips: List[Rip]
+    error_strings: List[str]
+
+class BoolAndErrors(NamedTuple):
+    result: bool
+    error_strings: List[str]
+
+#===============================================#
+#                Discord API Calls              #
+#===============================================#
+
 
 async def discord_fetch_message(message_id: int, channel: TextChannel | Thread) -> MessageAndErrors: 
     message = None
@@ -143,19 +195,6 @@ async def discord_cleanup_embeds(limit: int | None, expire_time: float, channel:
 #===============================================#
 #                    CACHE                      #
 #===============================================#
-
-class React(NamedTuple):
-    id: int
-    name: str
-
-class Rip(NamedTuple):
-    text: str
-    message_id: int
-    channel_id: int
-    message_author_id: int
-    message_author_name: str
-    reacts: List[React]
-    created_at: datetime
 
 RIP_CACHE: dict[int, dict[int, Rip]] = {}
 
@@ -320,10 +359,6 @@ def cache_user_react_data(user_react_data: dict[React, List[int]], message_id: i
             for user_id in user_ids:
                 USER_REACT_CACHE[message_id][react].append(user_id) 
 
-class StringAndErrors(NamedTuple):
-    string: str
-    error_strings: List[str]
-
 async def process_rip_message(message: Message, refetch_message: bool, is_validate_message: bool, \
                               typing_channel: TextChannel | Thread | None) -> StringAndErrors:
     return_message = ""
@@ -417,10 +452,6 @@ async def process_rip_channel(channel: TextChannel | Thread, is_validate_message
 class GetRipsDesc(NamedTuple):
     typing_channel: TextChannel | Thread | None = None
     rebuild_cache: bool = False
-
-class RipsAndErrors(NamedTuple):
-    rips: List[Rip]
-    error_strings: List[str]
 
 async def get_rips(channel: TextChannel | Thread, desc: GetRipsDesc) -> RipsAndErrors: 
 
@@ -602,24 +633,6 @@ async def remove_rip_from_cache(message_id: int, channel_id: int):
 
 KEYCAP_EMOJIS = {'2️⃣': 2, '3️⃣': 3, '4️⃣': 4, '5️⃣': 5, '6️⃣': 6, '7️⃣': 7, '8️⃣': 8, '9️⃣': 9, '🔟': 10}
 
-class ReactionType(Enum):
-    NULL = auto()
-    GOLDCHECK = auto()
-    CHECKREQ = auto()
-    CHECK = auto()
-    FIX = auto()
-    REJECT = auto()
-    STOP = auto()
-    ALERT = auto()
-    QOC = auto()
-    METADATA = auto()
-    THUMBNAIL = auto()
-    EMAILSENT = auto()
-    NUMBER = auto()
-
-REVIEW_REACT_LIST = [ReactionType.CHECK, ReactionType.GOLDCHECK, ReactionType.FIX, ReactionType.ALERT, ReactionType.REJECT]
-FIX_REACT_LIST = [ReactionType.FIX, ReactionType.ALERT]
-
 def react_is(reaction_type: ReactionType, name: str) -> bool:
     result = False
     name_lower = name.lower()
@@ -682,10 +695,6 @@ def user_react_check_type_to_react_list(user_react_check_type: UserReactCheckTyp
         case UserReactCheckType.FIX:
             react_list = FIX_REACT_LIST 
     return react_list
-
-class BoolAndErrors(NamedTuple):
-    result: bool
-    error_strings: List[str]
 
 async def user_is_react(user_react_check_type: UserReactCheckType, user_id: int, rip: Rip,\
                         typing_channel: TextChannel | Thread | None) -> BoolAndErrors:
