@@ -56,57 +56,74 @@ QOC_DEFAULT_CLIPPING = '📢'
 #                Discord API Calls              #
 #===============================================#
 
-async def discord_fetch_message(message_id: int, channel: TextChannel | Thread) -> Message | None:
+class MessageAndErrors(NamedTuple):
+    message: Message | None 
+    error_strings: List[str]
+
+class MessagesAndErrors(NamedTuple):
+    messages: List[Message]
+    error_strings: List[str]
+
+class UserReactDictAndErrors(NamedTuple):
+    user_react_dict: dict[React, List[int]]
+    error_strings: List[str]
+
+async def discord_fetch_message(message_id: int, channel: TextChannel | Thread) -> MessageAndErrors: 
     message = None
+    error_strings = [] 
     try:
         message = await channel.fetch_message(message_id)
     except Exception as error:
-        error_string = f"{type(error).__name__}: {error}"
-        await write_log(f'Discord API call failed fetching message {message_id} {error_string}')
-    return message
+        error_strings.append(f'Discord API call failed fetching message {message_id} {type(error).__name__}: {error}')
+        await write_log(error_strings[0])
+    return MessageAndErrors(message, error_strings)
 
-async def discord_get_user_react_data(react_list: List[ReactionType], message: Message) -> dict[React, List[int]]:
-    result: dict[React, List[int]] = {}
+async def discord_get_user_react_data(react_list: List[ReactionType], message: Message) -> UserReactDictAndErrors: 
+    user_react_dict: dict[React, List[int]] = {}
+    error_strings = [] 
     if len(react_list):
         for reaction in message.reactions:
             react = init_react(reaction)
             if react_is_one(react_list, react.name):
-                result[react] = []
+                user_react_dict[react] = []
                 # NOTE: (Ahmayk) this is slow! We have to do an api call for each user.
                 fetched_user_ids = [] 
                 try:
                     fetched_user_ids = [user.id async for user in reaction.users()]
                 except Exception as error:
-                    error_string = f"{type(error).__name__}: {error}"
-                    await write_log(f'Discord API call failed fetching reaction user ids: {error_string}')
-
+                    error_string = f'Discord API call failed fetching reaction user ids: {type(error).__name__}: {error}'
+                    await write_log(error_string)
+                    error_strings.append(error_string)
                 for fetched_user_id in fetched_user_ids:
-                    result[react].append(fetched_user_id) 
-    return result
+                    user_react_dict[react].append(fetched_user_id) 
+    return UserReactDictAndErrors(user_react_dict, error_strings)
 
-async def discord_get_channel_messages(limit: int | None, channel: TextChannel | Thread) -> List[Message]:
+async def discord_get_channel_messages(limit: int | None, channel: TextChannel | Thread) -> MessagesAndErrors: 
     messages = [] 
+    error_strings = [] 
     try:
         messages = [message async for message in channel.history(limit=limit)]
     except Exception as error:
-        error_string = f"{type(error).__name__}: {error}"
-        await write_log(f'Discord API call failed fetching channel messages: {error_string}')
-    return messages
+        error_strings.append( f'Discord API call failed fetching channel messages: {type(error).__name__}: {error}')
+        await write_log(error_strings[0])
+    return MessagesAndErrors(messages, error_strings) 
 
 
-async def discord_get_channel_pins(limit: int | None, channel: TextChannel | Thread) -> List[Message]:
+async def discord_get_channel_pins(limit: int | None, channel: TextChannel | Thread) -> MessagesAndErrors: 
     messages: List[Message] = [] 
+    error_strings = [] 
     try:
         messages = [message async for message in channel.pins(limit=limit)]
     except Exception as error:
-        error_string = f"{type(error).__name__}: {error}"
-        await write_log(f'Discord API call failed fetching channel pins: {error_string}')
-    return messages
+        error_strings.append(f'Discord API call failed fetching channel pins: {type(error).__name__}: {error}')
+        await write_log(error_strings[0])
+    return MessagesAndErrors(messages, error_strings)
 
 
 async def discord_cleanup_embeds(limit: int | None, expire_time: float, channel: TextChannel | Thread, \
-                                 typing_channel: TextChannel | Thread | None) -> Tuple[int, str]:
-    error_string = ""
+                                 typing_channel: TextChannel | Thread | None) -> MessagesAndErrors: 
+    deleted_messages = [] 
+    error_strings = [] 
 
     def should_delete(message: Message):
         result = message.author == bot.user and len(message.embeds)
@@ -114,15 +131,14 @@ async def discord_cleanup_embeds(limit: int | None, expire_time: float, channel:
             result = (datetime.now(timezone.utc) - message.created_at) > timedelta(seconds=expire_time)
         return result 
 
-    deleted_messages = [] 
     try:
         async with typing_channel.typing() if typing_channel is not None else empty_async_context():
             deleted_messages = await channel.purge(limit=limit, check=should_delete)
     except Exception as error:
-        error_string = f'Discord API call failed deleting messages: {type(error).__name__}: {error}'
-        await write_log(error_string)
+        error_strings.append(f'Discord API call failed deleting messages: {type(error).__name__}: {error}')
+        await write_log(error_strings[0])
 
-    return len(deleted_messages), error_string
+    return MessagesAndErrors(deleted_messages, error_strings)
 
 #===============================================#
 #                    CACHE                      #
@@ -311,15 +327,22 @@ def cache_user_react_data(user_react_data: dict[React, List[int]], message_id: i
             for user_id in user_ids:
                 USER_REACT_CACHE[message_id][react].append(user_id) 
 
-async def process_rip_message(message: Message, refetch_message: bool, is_validate_message: bool, typing_channel: TextChannel | Thread | None) -> str:
+class StringAndErrors(NamedTuple):
+    string: str
+    error_strings: List[str]
+
+async def process_rip_message(message: Message, refetch_message: bool, is_validate_message: bool, \
+                              typing_channel: TextChannel | Thread | None) -> StringAndErrors:
     return_message = ""
+    error_strings = [] 
     if is_message_rip(message):
         await lock_message(message.id, typing_channel)
 
         if refetch_message:
-            fetched_message = await discord_fetch_message(message.id, message.channel)
-            if fetched_message:
-                message = fetched_message
+            message_and_errors = await discord_fetch_message(message.id, message.channel)
+            if message_and_errors.message:
+                message = message_and_errors.message
+            error_strings.extend(message_and_errors.error_strings)
 
         user_react_data: dict[React, List[int]] = {}
         channel_info = get_channel_info(message.channel)
@@ -330,7 +353,10 @@ async def process_rip_message(message: Message, refetch_message: bool, is_valida
                 for react in reacts_of_check_type:
                     if react not in react_list:
                         react_list.append(react)
-            user_react_data = await discord_get_user_react_data(react_list, message)
+            
+            user_react_data_and_errors = await discord_get_user_react_data(react_list, message)
+            user_react_data = user_react_data_and_errors.user_react_dict
+            error_strings.extend(user_react_data_and_errors.error_strings)
 
         if is_validate_message:
             return_message = validate_rip_message(message, user_react_data)
@@ -342,48 +368,70 @@ async def process_rip_message(message: Message, refetch_message: bool, is_valida
         channel_info = get_channel_info(message.channel)
 
         unlock_message(message.id)
-    return return_message
+    return StringAndErrors(return_message, error_strings) 
 
-async def process_rip_channel(channel: TextChannel | Thread, is_validate_message: bool, typing_channel: TextChannel | Thread | None) -> str:
+async def process_rip_channel(channel: TextChannel | Thread, is_validate_message: bool, typing_channel: TextChannel | Thread | None) -> StringAndErrors:
     return_message = ""
+    error_strings = [] 
     channel_info = get_channel_info(channel)
     match channel_info.rip_fetch_type: 
         case RipFetchType.ALL_MESSAGES_NO_THREADS:
-            for message in await discord_get_channel_messages(None, channel):
-                return_message += await process_rip_message(message, False, is_validate_message, typing_channel)
+            messages_and_error = await discord_get_channel_messages(None, channel)
+            error_strings.extend(messages_and_error.error_strings)
+            for message in messages_and_error.messages:
+                string_and_errors = await process_rip_message(message, False, is_validate_message, typing_channel)
+                return_message += string_and_errors.string
+                error_strings.extend(string_and_errors.error_strings)
 
         case RipFetchType.ALL_MESSAGES_AND_THREADS:
-            for message in await discord_get_channel_messages(None, channel):
+            messages_and_error = await discord_get_channel_messages(None, channel)
+            error_strings.extend(messages_and_error.error_strings)
+            for message in messages_and_error.messages: 
                 if message.thread is not None:
                     init_channel_cache(message.thread.id)
                     await lock_channel(message.thread.id, typing_channel)
-                    return_message += await process_rip_channel(message.thread, False, typing_channel)
-                    thread_rips = list(RIP_CACHE[message.thread.id].values())
-                    thread_rips.sort(key = lambda rip: rip.created_at, reverse=True)
-                    #NOTE: (Ahmayk) we insert thread rips also in its parent channel dict so that
-                    #we get all rips in theads when we get the parent channel's rips 
-                    for thread_rip in thread_rips:
-                        await lock_message(thread_rip.message_id, None)
-                        RIP_CACHE[channel.id][thread_rip.message_id] = thread_rip 
-                        unlock_message(thread_rip.message_id)
-                    unlock_channel(message.thread.id)
+                    string_and_errors = await process_rip_channel(message.thread, False, typing_channel)
+                    return_message += string_and_errors.string
+                    error_strings.extend(string_and_errors.error_strings)
+                    if len(RIP_CACHE[message.thread.id]):
+                        thread_rips = list(RIP_CACHE[message.thread.id].values())
+                        thread_rips.sort(key = lambda rip: rip.created_at, reverse=True)
+                        #NOTE: (Ahmayk) we insert thread rips also in its parent channel dict so that
+                        #we get all rips in theads when we get the parent channel's rips 
+                        for thread_rip in thread_rips:
+                            await lock_message(thread_rip.message_id, None)
+                            RIP_CACHE[channel.id][thread_rip.message_id] = thread_rip 
+                            unlock_message(thread_rip.message_id)
+                        unlock_channel(message.thread.id)
                 else:
-                    return_message += await process_rip_message(message, False, is_validate_message, typing_channel)
+                    string_and_errors = await process_rip_message(message, False, is_validate_message, typing_channel)
+                    return_message += string_and_errors.string
+                    error_strings.extend(string_and_errors.error_strings)
 
         case RipFetchType.PINS:
-            for message in await discord_get_channel_pins(None, channel):
-                return_message += await process_rip_message(message, True, is_validate_message, typing_channel)
+            messages_and_errors = await discord_get_channel_pins(None, channel)
+            error_strings.extend(messages_and_errors.error_strings)
+            for message in messages_and_errors.messages:
+                string_and_errors = await process_rip_message(message, True, is_validate_message, typing_channel)
+                return_message += string_and_errors.string
+                error_strings.extend(string_and_errors.error_strings)
 
         case _:
             assert "Unimplemented RipFetchType"
 
-    return return_message
+    return StringAndErrors(return_message, error_strings) 
 
 class GetRipsDesc(NamedTuple):
     typing_channel: TextChannel | Thread | None = None
     rebuild_cache: bool = False
 
-async def get_rips(channel: TextChannel | Thread, desc: GetRipsDesc) -> List[Rip]:
+class RipsAndErrors(NamedTuple):
+    rips: List[Rip]
+    error_strings: List[str]
+
+async def get_rips(channel: TextChannel | Thread, desc: GetRipsDesc) -> RipsAndErrors: 
+
+    error_strings = [] 
 
     init_channel_cache(channel.id)
 
@@ -394,43 +442,52 @@ async def get_rips(channel: TextChannel | Thread, desc: GetRipsDesc) -> List[Rip
 
     if not len(RIP_CACHE[channel.id]) or desc.rebuild_cache:
         async with desc.typing_channel.typing() if desc.typing_channel is not None else empty_async_context():
-            await process_rip_channel(channel, False, desc.typing_channel)
+            string_and_errors = await process_rip_channel(channel, False, desc.typing_channel)
+            error_strings.extend(string_and_errors.error_strings)
+
+    rips = list(RIP_CACHE[channel.id].values())
 
     unlock_channel(channel.id)
 
-    result = list(RIP_CACHE[channel.id].values())
     ##NOTE: (Ahmayk) show rips in expected order, newest at top
-    result.sort(key = lambda rip: rip.created_at, reverse=True)
-    return result
+    rips.sort(key = lambda rip: rip.created_at, reverse=True)
+    return RipsAndErrors(rips, error_strings)
 
 
-async def get_rips_fast(channel: TextChannel | Thread, desc: GetRipsDesc) -> List[Rip]:
+async def get_rips_fast(channel: TextChannel | Thread, desc: GetRipsDesc) -> RipsAndErrors: 
 
     init_channel_cache(channel.id)
     channel_info = get_channel_info(channel)
 
-    result = []
+    rips = []
+    error_strings = []
 
     if channel_info.rip_fetch_type == RipFetchType.ALL_MESSAGES_AND_THREADS or \
        channel_info.rip_fetch_type == RipFetchType.ALL_MESSAGES_NO_THREADS:
 
         #NOTE: (Ahmayk) The path to get rips normally is already as fast
         #as we can get so just do that
-        result = await get_rips(channel, desc)
+        rips_and_errors = await get_rips(channel, desc)
+        rips = rips_and_errors.rips
+        error_strings = rips_and_errors.error_strings
 
     else:
         if len(RIP_CACHE[channel.id]) and (not channel.id in CACHE_LOCK_CHANNEL or not CACHE_LOCK_CHANNEL[channel.id].locked()):
-            result = await get_rips(channel, desc)
+            rips_and_errors = await get_rips(channel, desc)
+            rips = rips_and_errors.rips
+            error_strings = rips_and_errors.error_strings
         else:
             async with desc.typing_channel.typing() if desc.typing_channel is not None else empty_async_context():
-                for message in await discord_get_channel_pins(None, channel):
+                messages_and_errors = await discord_get_channel_pins(None, channel)
+                error_strings.extend(messages_and_errors.error_strings)
+                for message in messages_and_errors.messages:
                     if is_message_rip(message):
                         ##NOTE: (Ahmayk) No fetching message for reactions for speed!
                         rip = init_rip(message)
-                        result.append(rip)
-                result.sort(key = lambda rip: rip.created_at, reverse=True)
+                        rips.append(rip)
+                rips.sort(key = lambda rip: rip.created_at, reverse=True)
 
-    return result
+    return RipsAndErrors(rips, error_strings)
 
 def init_react(reaction: discord.Reaction) -> React:
     name = ""
@@ -451,15 +508,18 @@ def get_react_counts(rip: Rip) -> dict[React, int]:
         count_dict[react] += 1
     return count_dict
 
-async def validate_cache_all() -> str:
-    result = ""
+async def validate_cache_all() -> StringAndErrors:
+    return_string = ""
+    error_strings = []
     for channel_id in get_channel_ids_of_types(['QOC', 'SUBS', 'SUBS_PIN', 'SUBS_THREAD', 'QUEUE']):
         channel = bot.get_channel(channel_id)
         if channel:
-            result += await process_rip_channel(channel, True, None)
+            string_and_errors = await process_rip_channel(channel, True, None)
+            return_string = string_and_errors.string
+            error_strings = string_and_errors.error_strings
         else:
-            result += f'\nFailed to find channel of id {channel_id}'
-    return result
+            error_strings.append(f'Failed to find channel of id {channel_id}')
+    return StringAndErrors(return_string, error_strings) 
 
 times = []
 for i in range(0, 23):
@@ -467,18 +527,22 @@ for i in range(0, 23):
 
 @tasks.loop(time=times)
 async def validate_cache_regularly():
-    result = await validate_cache_all()
-    if len(result):
-        await write_log(f'**Cache validation had issues:**\n{result}')
+    string_and_errors = await validate_cache_all()
+    if len(string_and_errors.string):
+        await write_log(f'**Cache validation had issues:**\n{string_and_errors.string}')
     else:
-        print("Cache revalidated. No issues found.")
+        #TODO: (Ahmayk) remove this once cache starts being trustworthy (hopefully this happens)
+        today = datetime.now()
+        print(f"{today.strftime('%m/%d/%y %I:%M %p')}  Cache revalidated. No issues found.")
 
-async def rebuild_cache_for_channel(channel_id: int) -> str:
+async def rebuild_cache_for_channel(channel_id: int) -> StringAndErrors:
     return_message = ""
+    error_strings = [] 
 
     channel = bot.get_channel(channel_id)
     if channel:
-        rips = await get_rips(channel, GetRipsDesc(rebuild_cache=True))
+        rips_and_errors = await get_rips(channel, GetRipsDesc(rebuild_cache=True))
+        error_strings.extend(rips_and_errors.error_strings)
 
         channel_type_string = '[Unknown type]'
         if channel_is_types(channel, ['QOC']):
@@ -487,32 +551,39 @@ async def rebuild_cache_for_channel(channel_id: int) -> str:
             channel_type_string = 'queued'
         if channel_is_types(channel, ['SUBS', 'SUBS_THREAD', 'SUBS_PIN']):
             channel_type_string = 'subbed'
-        return_message = f'Cached {len(rips)} {channel_type_string} rips in {channel.jump_url}.'
+        return_message = f'Cached {len(rips_and_errors.rips)} {channel_type_string} rips in {channel.jump_url}.'
 
         await write_log(return_message)
     else:
-        return_message = f'Error caching channel: Failed to find channel: <#{channel_id}>'
+        error_strings.append(f'Error caching channel: Failed to find channel: <#{channel_id}>')
         await write_log(return_message)
 
-    return return_message
+    return StringAndErrors(return_message, error_strings) 
 
-async def rebuild_cache_all() -> str:
+async def rebuild_cache_all() -> StringAndErrors:
 
     return_message = ""
+    error_strings = []
 
     queue_channel_ids = get_channel_ids_of_types(['QUEUE'])
     for channel_id in queue_channel_ids:
-        return_message += "\n" + await rebuild_cache_for_channel(channel_id)
+        string_and_errors = await rebuild_cache_for_channel(channel_id)
+        return_message += f'\n{string_and_errors.string}'
+        error_strings.extend(string_and_errors.error_strings)
 
     sub_channel_ids = get_channel_ids_of_types(['SUBS', 'SUBS_THREAD', 'SUBS_PIN'])
     for channel_id in sub_channel_ids:
-        return_message += "\n" + await rebuild_cache_for_channel(channel_id)
+        string_and_errors = await rebuild_cache_for_channel(channel_id)
+        return_message += f'\n{string_and_errors.string}'
+        error_strings.extend(string_and_errors.error_strings)
 
     qoc_channel_ids = get_channel_ids_of_types(['QOC'])
     for channel_id in qoc_channel_ids:
-        return_message += "\n" + await rebuild_cache_for_channel(channel_id)
+        string_and_errors = await rebuild_cache_for_channel(channel_id)
+        return_message += f'\n{string_and_errors.string}'
+        error_strings.extend(string_and_errors.error_strings)
 
-    return return_message 
+    return StringAndErrors(return_message, error_strings) 
 
 
 async def remove_rip_from_cache(message_id: int, channel_id: int):
@@ -613,9 +684,14 @@ def user_react_check_type_to_react_list(user_react_check_type: UserReactCheckTyp
             react_list = FIX_REACT_LIST 
     return react_list
 
+class BoolAndErrors(NamedTuple):
+    result: bool
+    error_string: List[str]
+
 async def user_is_react(user_react_check_type: UserReactCheckType, user_id: int, rip: Rip,\
-                        typing_channel: TextChannel | Thread | None) -> bool:
+                        typing_channel: TextChannel | Thread | None) -> BoolAndErrors:
     result = False
+    error_strings = []
 
     await lock_message(rip.message_id, typing_channel)
 
@@ -640,10 +716,12 @@ async def user_is_react(user_react_check_type: UserReactCheckType, user_id: int,
             # perhaps bypassing discord.py to make the direct api call we need
             # In pratice we shouldn't be calling this code path too often anyway during regular usage
             # So isn't the biggest problem
-            message = await discord_fetch_message(rip.message_id, channel)
-            if message:
-                user_react_data = await get_user_react_data(react_list, message)
-                cache_user_react_data(user_react_data, message.id)
+            message_and_errors = await discord_fetch_message(rip.message_id, channel)
+            error_strings.extend(message_and_errors.error_strings)
+            if message_and_errors.message:
+                user_react_data_and_errors = await discord_get_user_react_data(react_list, message_and_errors.message)
+                error_strings.extend(user_react_data_and_errors.error_strings)
+                cache_user_react_data(user_react_data_and_errors.user_react_dict, message_and_errors.message.id)
 
     for react in rip.reacts:
         if react_is_one(react_list, react.name):
@@ -656,7 +734,7 @@ async def user_is_react(user_react_check_type: UserReactCheckType, user_id: int,
 
     unlock_message(rip.message_id)
 
-    return result
+    return BoolAndErrors(result, error_strings)
 
 
 def reaction_name_to_emoji_string(name: str, guild: discord.Guild | None) -> str:
@@ -785,10 +863,10 @@ def find_command_info(input: str) -> CommandInfo | None:
 #                    HELPERS                    #
 #===============================================#
 
-def channel_is_type(channel: typing.Union[GuildChannel, Thread], type: str):
+def channel_is_type(channel: typing.Union[GuildChannel, Thread], type: str) -> bool:
     return type in get_channel_config(channel.id).types or hasattr(channel, "parent") and channel_is_type(channel.parent, type)
 
-def channel_is_types(channel: typing.Union[GuildChannel, Thread], types: typing.List[str]):
+def channel_is_types(channel: typing.Union[GuildChannel, Thread], types: typing.List[str]) -> bool:
     return any([t in get_channel_config(channel.id).types for t in types]) or hasattr(channel, "parent") and channel_is_types(channel.parent, types)
 
 async def parse_message_link(link: str):
@@ -809,9 +887,10 @@ async def parse_message_link(link: str):
     channel = server.get_channel_or_thread(channel_id)
 
     #TODO: (Ahmayk) handle message being null
-    message = await discord_fetch_message(msg_id, channel)
+    #TODO: (Ahmayk) handle error 
+    message_and_errors = await discord_fetch_message(msg_id, channel)
 
-    return server, channel, message, ""
+    return server, channel, message_and_errors.message, ""
 
 
 ##TODO: (Ahmayk) refactor input system, don't give default on error by default
@@ -884,8 +963,12 @@ async def send(text: str, channel: TextChannel | Thread):
     limit = get_config("character_limit")
     split_message = split_long_message(text, limit)
     for line in split_message:
-        await channel.send(line)
-
+        try:
+            await channel.send(line)
+        except Exception as error:
+            #NOTE: (Ahmayk) write_log here could cause infinite error loops so just stay quiet about this one 
+            txt = f'Failed to send message to {channel.jump_url}: {type(error).__name__}: {error}'
+            print(f"\033[91m {txt}\033[0m")
 
 class EmbedDesc(NamedTuple):
     expires: bool = False
@@ -989,8 +1072,22 @@ async def send_embed(text: str, channel: TextChannel | Thread, desc: EmbedDesc):
         embed_groups.append(embed_list)
 
     for embed_group in embed_groups:
-        await channel.send(embeds=embed_group, delete_after=delete_after_seconds)
+        try:
+            await channel.send(embeds=embed_group, delete_after=delete_after_seconds)
+        except Exception as error:
+            await write_log(f'Failed to send embed to {channel.jump_url}: {type(error).__name__}: {error}')
 
+
+async def send_with_errors(txt: str, if_errors_txt: str, max_errors_to_send: int, error_strings: \
+                           List[str], channel: TextChannel | Thread):
+    return_text = txt
+    if len(error_strings):
+        return_text += f'{if_errors_txt}\n```' 
+        return_text += "\n".join(error_strings[:max_errors_to_send])
+        if len(error_strings) > max_errors_to_send:
+            return_text += '\n ...(errors truncated)...'
+        return_text += "```" 
+    await send(return_text, channel)
 
 async def write_log(msg: str = "Placeholder message", embed: bool = False):
     """
@@ -1232,7 +1329,9 @@ async def check_metadata(text: str, message_id: int, message_author_name: str, f
         for channel_id in channel_ids:
             channel = bot.get_channel(channel_id)
             if channel:
-                rips = await get_rips_fast(channel, GetRipsDesc())
+                rips_and_errors = await get_rips_fast(channel, GetRipsDesc())
+                rips = rips_and_errors.rips
+                #TODO: (Ahmayk) handle errors
 
         title = get_raw_rip_title(text)
         desc = get_rip_description(text)
@@ -1306,7 +1405,8 @@ async def remove_embeds_from_channel_startup(channel_ids: List[int], expire_time
     for channel_id in channel_ids:
         channel = bot.get_channel(channel_id)
         if channel:
-            count, error_string = await discord_cleanup_embeds(200, expire_time_seconds, channel, None) 
+            messages_and_errors = await discord_cleanup_embeds(200, expire_time_seconds, channel, None) 
+            count = len(messages_and_errors.messages)
             if count > 0:
                 await send(f"Good morning! Removed {count} embed messages sent more than {expire_time_seconds // 60} minutes ago. " + \
                        f"If there are older or newer embeds that should be removed, run {prefix}cleanup manually.", channel)
@@ -1368,7 +1468,8 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
 
         if channel_info.rip_fetch_type == RipFetchType.PINS: 
             current_message_ids: list[int] = []
-            async for message in channel.pins(limit=None):
+            messages_and_error = await discord_get_channel_pins(None, channel)
+            async for message in messages_and_error.messages: 
                 current_message_ids.append(message.id)
 
             message_ids_to_remove = []
@@ -1382,44 +1483,57 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
 
     else:
 
-        for message in await discord_get_channel_pins(1, channel):
+        return_message = ""
 
-            ##NOTE: (Ahmayk) only shit we recognize as rips are treated as rips
+        messages_and_errors = await discord_get_channel_pins(1, channel)
+        if len(messages_and_errors.error_strings):
+            return await send_truncated_errors("Error: Failed to vet pinned message.", 3, messages_and_errors.error_strings, channel)
+        
+        assert(len(messages_and_errors.messages))
+        message = messages_and_errors.messages[0]
 
-            if is_message_rip(message):
+        error_strings: List[str] = []
+        is_vetted = False
 
-                latest_pin_time = last_pin
+        if is_message_rip(message):
 
-                rips = await get_rips_fast(channel, GetRipsDesc())
+            latest_pin_time = last_pin
 
-                is_valid = True
-                SOFT_PIN_LIMIT = get_config('soft_pin_limit')
-                if len(rips) > SOFT_PIN_LIMIT:
-                    if get_channel_config(channel.id).pinlimit_must_die_mode:
-                        await message.unpin()
-                        await channel.send(f"**Error**: More than {SOFT_PIN_LIMIT} rips in pins. Unpinned.")
-                        is_valid = False
-                    else:
-                        await channel.send(f"**Warning**: More than {SOFT_PIN_LIMIT} rips pinned - please handle them first :(")
+            rips_and_errors = await get_rips_fast(channel, GetRipsDesc())
+            error_strings.extend(rips_and_errors.error_strings)
 
-                if is_valid:
-                    #NOTE: (Ahmayk) have to fetch message to get reaction data for cache
-                    await lock_message(message.id, None)
+            is_valid = True
+            SOFT_PIN_LIMIT = get_config('soft_pin_limit')
+            if len(rips_and_errors.rips) > SOFT_PIN_LIMIT:
+                if get_channel_config(channel.id).pinlimit_must_die_mode:
+                    await message.unpin()
+                    return_message = f"**Error**: More than {SOFT_PIN_LIMIT} rips in pins. Unpinned."
+                    is_valid = False
+                else:
+                    return_message = f"**Warning**: More than {SOFT_PIN_LIMIT} rips pinned - please handle them first :("
 
-                    fetched_message = await discord_fetch_message(message.id, channel)
-                    if fetched_message:
-                        message = fetched_message
+            if is_valid:
+                await lock_message(message.id, None)
+                #NOTE: (Ahmayk) have to fetch message to get reaction data for cache
+                #TODO: (Ahmayk) what to do with errors?
+                message_and_errors = await discord_fetch_message(message.id, channel)
+                if message_and_errors.message:
+                    message = message_and_errors.message
+                cache_rip_in_message(message)
+                unlock_message(message.id)
 
-                    cache_rip_in_message(message)
-                    unlock_message(message.id)
+                verdict, msg = await check_qoc_and_metadata(message.content, message.id, str(message.author))
 
-                    verdict, msg = await check_qoc_and_metadata(message.content, message.id, str(message.author))
+                if len(verdict) > 0:
+                    is_vetted = True
+                    rip_title = get_rip_title(message.content)
+                    link = format_message_link(channel.guild.id, channel.id, message.id)
+                    return_message = f'**Rip**: **[{rip_title}]({link})**\n**Verdict**: {verdict}\n{msg}-# React {DEFAULT_CHECK} if this is resolved.'
 
-                    # Send msg
-                    if len(verdict) > 0:
-                        rip_title = get_rip_title(message.content)
-                        link = format_message_link(channel.guild.id, channel.id, message.id)
-                        await channel.send("**Rip**: **[{}]({})**\n**Verdict**: {}\n{}-# React {} if this is resolved.".format(rip_title, link, verdict, msg, DEFAULT_CHECK))
+        if is_vetted:
+            await send_with_errors(return_message, "Warning: Vetting pinned messae returned errors.", 3, error_strings, channel)
+        else:
+            await send_with_errors(return_message, "Warning: Pinned message not vetted.", 3, error_strings, channel)
 
 
 @bot.event
@@ -1432,14 +1546,15 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
         if is_qoc_channel or is_suborqueue_channel:
 
-            message = await discord_fetch_message(payload.message_id, channel)
+            ##TODO: (Ahmayk) we can skip this fetch by searching cache for message_id first!
+            message_and_errors = await discord_fetch_message(payload.message_id, channel)
 
-            if message and is_message_rip(message):
+            if message_and_errors.message and is_message_rip(message_and_errors.message):
                 await lock_message(payload.message_id, None)
 
-                rip = cache_rip_in_message(message)
+                rip = cache_rip_in_message(message_and_errors.message)
 
-                if is_qoc_channel and message.pinned:
+                if is_qoc_channel and message_and_errors.message.pinned:
 
                     if rip.message_id not in USER_REACT_CACHE: 
                         USER_REACT_CACHE[rip.message_id] = {} 
