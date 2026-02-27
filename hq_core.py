@@ -1056,6 +1056,8 @@ async def send_embed(text: str, channel: TextChannel | Thread, desc: EmbedDesc):
         split_subgroups: List[str] = [] 
         if len(text_part) <= embed_character_limit_desc:
             split_subgroups.append(text_part)
+        elif len(text_part) == 0:
+            continue
         else:
             #NOTE: (Ahmayk) split in half, assuming that half of the  
             #max message character length (6000)
