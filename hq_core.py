@@ -1668,11 +1668,10 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
                 #TODO: (Ahmayk) if this errors at all we need to know
                 verdict, msg = await check_qoc_and_metadata(message.content, message.id, str(message.author))
 
-                if len(verdict) > 0:
-                    is_vetted = True
-                    rip_title = get_rip_title(message.content)
-                    link = format_message_link(channel.guild.id, channel.id, message.id)
-                    return_message = f'**Rip**: **[{rip_title}]({link})**\n**Verdict**: {verdict}\n{msg}-# React {DEFAULT_CHECK} if this is resolved.'
+                is_vetted = True
+                rip_title = get_rip_title(message.content)
+                link = format_message_link(channel.guild.id, channel.id, message.id)
+                return_message = f'**Rip**: **[{rip_title}]({link})**\n**Verdict**: {verdict}\n{msg}-# React {DEFAULT_CHECK} if this is resolved.'
 
         if is_vetted:
             await send_and_if_errors(return_message, "Warning: Vetting pinned messae returned errors.", error_strings, channel)
