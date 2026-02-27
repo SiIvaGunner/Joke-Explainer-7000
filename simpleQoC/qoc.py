@@ -772,6 +772,9 @@ def performQoC(url: str, fullFeedback: bool = True) -> Tuple[int, str]:
         if 'drive' in url and 'Sign-in' in e.message:
             # custom return value for sign-in issues, return 1 so it doesn't get filtered
             return (1, "Drive link is not accessible. Ask Mailroom to reupload if this is an email sub.")
+        elif 'drive/folder' in url:
+            # another custom return value because people keep submitting folders bruhhhhh
+            return (1, "Drive link is a folder. Please replace it with the link to the rip in the folder.")
         errors.append(e.message)
     
     else:
