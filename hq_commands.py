@@ -1422,9 +1422,9 @@ async def peek_url(args: list[str], command_context: CommandContext):
             if not ffmpegExists():
                 await send("ffmpeg not found on remote. Please contact developers, or run this command without the extra argument.", command_context.channel)
                 return
-            code, msg = await run_blocking(getFileMetadataFfprobe, urls)
+            code, msg = await run_blocking(getFileMetadataFfprobe, url)
         else:
-            code, msg = await run_blocking(getFileMetadataMutagen, urls)
+            code, msg = await run_blocking(getFileMetadataMutagen, url)
         
         if code == -1:
             await send(f'Error reading URL: {msg}', command_context.channel)
