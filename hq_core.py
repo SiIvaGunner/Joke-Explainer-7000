@@ -1115,8 +1115,8 @@ async def send_if_errors(if_errors_txt: str, error_strings: List[str], channel: 
 
 async def send_and_if_errors(txt: str, if_errors_txt: str, error_strings: List[str], channel: TextChannel | Thread):
     error_text = parse_errors(if_errors_txt, error_strings) 
-    return_text = f'{txt}\n{error_text}'
-    await send(return_text, channel)
+    if len(txt) or len(error_text):
+        await send(f'{txt}\n{error_text}', channel)
 
 async def write_log(msg: str = "Placeholder message", embed: bool = False):
     """
@@ -1412,23 +1412,17 @@ async def check_qoc_and_metadata(text: str, message_id: int, message_author_name
     """
     verdict = ""
     msg = ""
-    rip_title = get_rip_title(text)
     
     # QoC
     qcCode, qcMsg, detectedUrl = await check_qoc(text, fullFeedback)
-    if qcCode == -1:
-        await write_log("Warning: cannot QoC message\nRip: {}\n{}".format(rip_title, qcMsg))
-    elif (qcCode == 1) or fullFeedback:
+    if (qcCode != 0) or fullFeedback:
         verdict += code_to_verdict(qcCode, qcMsg)
         msg += qcMsg + "\n"
 
     # Metadata
     mtCode, mtMsg = await check_metadata(text, message_id, message_author_name, fullFeedback)
-    if mtCode == -1:
-        await write_log("Warning: cannot check metadata of message\nRip: {}\n{}".format(rip_title, mtMsg))
-    elif mtCode == 1:
+    if (mtCode != 0) or fullFeedback:
         verdict += ("" if len(verdict) == 0 else " ") + DEFAULT_METADATA
-    if (mtCode == 1) or fullFeedback:
         msg += mtMsg + "\n"
 
     # Check for lines between the rip description and link - if it does not start with "Joke", add a warning
@@ -1647,7 +1641,8 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
             if len(rips_and_errors.rips) > SOFT_PIN_LIMIT:
                 if get_channel_config(channel.id).pinlimit_must_die_mode:
                     await message.unpin()
-                    return_message = f"**Error**: More than {SOFT_PIN_LIMIT} rips in pins. Unpinned."
+                    await message.add_reaction('📌')
+                    return_message = f"**Error**: More than {SOFT_PIN_LIMIT} rips in pins. Unpinned.\n-# Remove the 📌 reaction when this is resolved."
                     is_valid = False
                 else:
                     return_message = f"**Warning**: More than {SOFT_PIN_LIMIT} rips pinned - please handle them first :("
@@ -1666,12 +1661,13 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
                 verdict, msg = await check_qoc_and_metadata(message.content, message.id, str(message.author))
 
                 is_vetted = True
-                rip_title = get_rip_title(message.content)
-                link = format_message_link(channel.guild.id, channel.id, message.id)
-                return_message = f'**Rip**: **[{rip_title}]({link})**\n**Verdict**: {verdict}\n{msg}-# React {DEFAULT_CHECK} if this is resolved.'
+                if len(msg):
+                    rip_title = get_rip_title(message.content)
+                    link = format_message_link(channel.guild.id, channel.id, message.id)
+                    return_message = f'**Rip**: **[{rip_title}]({link})**\n**Verdict**: {verdict}\n{msg}-# React {DEFAULT_CHECK} if this is resolved.'
 
         if is_vetted:
-            await send_and_if_errors(return_message, "Warning: Vetting pinned messae returned errors.", error_strings, channel)
+            await send_and_if_errors(return_message, "Warning: Vetting pinned message returned errors.", error_strings, channel)
         else:
             await send_and_if_errors(return_message, "Warning: Pinned message not vetted.", error_strings, channel)
 
