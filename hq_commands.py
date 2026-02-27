@@ -162,8 +162,8 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
     rips_and_errors = await get_rips(channel, get_rips_desc)
     error_strings = rips_and_errors.error_strings
 
-    is_spec_overdue_days = get_config('spec_overdue_days')
-    is_overdue_days = get_config('overdue_days')
+    spec_overdue_days = get_config('spec_overdue_days')
+    overdue_days = get_config('overdue_days')
     search_keys = roundup_desc.search_key.split('|')
 
     ##TODO: (Ahmayk) fuzzy username input (ie typing "ahmayk" and matching to their username or display name)
@@ -187,52 +187,7 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
 
     for i, rip in enumerate(rips_and_errors.rips):
 
-        reacts = ""
-        num_checks = 0
-        num_rejects = 0
-        num_goldchecks = 0
-        specs_required = 1
-        checks_required = 3
-        specs_needed = False
-        fix_or_alert = False
-
-        for react_and_user in rip.reacts:
-            if react_is(ReactType.GOLDCHECK, react_and_user.name):
-                num_goldchecks += 1
-            elif react_is(ReactType.CHECKREQ, react_and_user.name):
-                try:
-                    checks_required = int(react_and_user.name.split("check")[0])
-                except ValueError:
-                    print("Error parsing checkreq react: {}".format(react_and_user.name))
-            elif react_is(ReactType.CHECK, react_and_user.name):
-                num_checks += 1
-            elif react_is(ReactType.REJECT, react_and_user.name):
-                num_rejects += 1
-            elif react_is_one([ReactType.FIX, ReactType.ALERT], react_and_user.name):
-                fix_or_alert = True
-            elif react_is(ReactType.STOP, react_and_user.name):
-                specs_needed = True
-            elif react_is(ReactType.NUMBER, react_and_user.name):
-                specs_required = KEYCAP_EMOJIS[react_and_user.name]
-
-            reacts += reaction_name_to_emoji_string(react_and_user.name, command_context.channel.guild) 
-            reacts += " " 
-
-        indicator = ""
-        check_passed = (num_checks - num_rejects >= checks_required) and not fix_or_alert
-        specs_passed = (not specs_needed or num_goldchecks >= specs_required)
-        is_spec_overdue = (datetime.now(timezone.utc) - rip.created_at) > timedelta(days=is_spec_overdue_days)
-        is_overdue =      (datetime.now(timezone.utc) - rip.created_at) > timedelta(days=is_overdue_days)
-        if check_passed:
-            indicator = APPROVED_INDICATOR if specs_passed else AWAITING_SPECIALIST_INDICATOR
-        elif specs_needed and not specs_passed and is_spec_overdue:
-            indicator = SPECS_OVERDUE_INDICATOR
-        elif is_overdue:
-            indicator = OVERDUE_INDICATOR
-
-        rip_title = get_rip_title(rip.text)
-        author = get_rip_author(rip.text, rip.message_author_name)
-        author = author.replace('*', '').replace('_', '')
+        vet_reacts = ""
 
         is_valid = True
         match (roundup_desc.roundup_filter_type):
@@ -255,12 +210,14 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
                             rip_has_react([ReactType.REJECT], rip)
             case RoundupFilterType.SEARCH_TITLE:
                 is_valid = False
+                rip_title = get_rip_title(rip.text)
                 for key in search_keys:
                     if line_contains_substring(rip_title, key):
                         is_valid = True
                         break
             case RoundupFilterType.SEARCH_AUTHOR:
                 is_valid = False
+                author = get_rip_author(rip.text, rip.message_author_name)
                 for key in search_keys:
                     if line_contains_substring(author, key):
                         is_valid = True
@@ -276,27 +233,18 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
                         is_valid = True 
                         break
             case RoundupFilterType.OVERDUE:
+                is_overdue = (datetime.now(timezone.utc) - rip.created_at) > timedelta(days=overdue_days)
                 is_valid = is_overdue
             case RoundupFilterType.VET_ALL:
                 ##TODO: (Ahmayk) use error api
+                ##TODO: (Ahmayk) actually move this somewhere else when/if vetting command UX is redesigned lol
                 vet_reacts, msg = await vet_message(rip.text) 
-                reacts = vet_reacts
                 is_valid = True 
             case RoundupFilterType.RANDOM:
                 is_valid = (i == selected_index)
 
         if is_valid:
-            link = format_message_link(channel.guild.id, channel.id, rip.message_id)
-            title_body = f'**[{rip_title}]({link})**'
-            if len(indicator) > 0:
-                title_body = f'{indicator} {title_body} {indicator}'
-
-            utc = int(rip.created_at.replace(tzinfo=timezone.utc).timestamp())
-            info_body = f'{author} <t:{utc}:R>'
-            if len(reacts):
-                info_body += f' | {reacts}'
-
-            result += f'{title_body}\n{info_body}\n'
+            result += format_rip(rip, command_context.channel.guild, spec_overdue_days, overdue_days) + vet_reacts
             result += readability_line 
 
     if result != "":

@@ -1436,6 +1436,68 @@ async def check_qoc_and_metadata(text: str, message_id: int, message_author_name
     return verdict, msg
 
 
+def format_rip(rip: Rip, guild: discord.Guild, spec_overdue_days: int, overdue_days: int) -> str:
+
+    reacts = ""
+    num_checks = 0
+    num_rejects = 0
+    num_goldchecks = 0
+    specs_required = 1
+    checks_required = 3
+    specs_needed = False
+    fix_or_alert = False
+
+    for react_and_user in rip.reacts:
+        if react_is(ReactType.GOLDCHECK, react_and_user.name):
+            num_goldchecks += 1
+        elif react_is(ReactType.CHECKREQ, react_and_user.name):
+            try:
+                checks_required = int(react_and_user.name.split("check")[0])
+            except ValueError:
+                print("Error parsing checkreq react: {}".format(react_and_user.name))
+        elif react_is(ReactType.CHECK, react_and_user.name):
+            num_checks += 1
+        elif react_is(ReactType.REJECT, react_and_user.name):
+            num_rejects += 1
+        elif react_is_one([ReactType.FIX, ReactType.ALERT], react_and_user.name):
+            fix_or_alert = True
+        elif react_is(ReactType.STOP, react_and_user.name):
+            specs_needed = True
+        elif react_is(ReactType.NUMBER, react_and_user.name):
+            specs_required = KEYCAP_EMOJIS[react_and_user.name]
+
+        reacts += reaction_name_to_emoji_string(react_and_user.name, guild) 
+        reacts += " " 
+
+    indicator = ""
+    check_passed = (num_checks - num_rejects >= checks_required) and not fix_or_alert
+    specs_passed = (not specs_needed or num_goldchecks >= specs_required)
+    is_spec_overdue = (datetime.now(timezone.utc) - rip.created_at) > timedelta(days=spec_overdue_days)
+    is_overdue =      (datetime.now(timezone.utc) - rip.created_at) > timedelta(days=overdue_days)
+    if check_passed:
+        indicator = APPROVED_INDICATOR if specs_passed else AWAITING_SPECIALIST_INDICATOR
+    elif specs_needed and not specs_passed and is_spec_overdue:
+        indicator = SPECS_OVERDUE_INDICATOR
+    elif is_overdue:
+        indicator = OVERDUE_INDICATOR
+
+    rip_title = get_rip_title(rip.text)
+    author = get_rip_author(rip.text, rip.message_author_name)
+    author = author.replace('*', '').replace('_', '')
+
+    link = format_message_link(guild.id, rip.channel_id, rip.message_id)
+    title_body = f'**[{rip_title}]({link})**'
+    if len(indicator) > 0:
+        title_body = f'{indicator} {title_body} {indicator}'
+
+    utc = int(rip.created_at.replace(tzinfo=timezone.utc).timestamp())
+    info_body = f'{author} <t:{utc}:R>'
+    if len(reacts):
+        info_body += f' | {reacts}'
+
+    return f'{title_body}\n{info_body}\n'
+
+
 #===============================================#
 #                    EVENTS                     #
 #===============================================#
@@ -1507,19 +1569,40 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
         channel_info = get_channel_info(channel)
 
         if channel_info.rip_fetch_type == RipFetchType.PINS: 
+
+            txt = "" 
+            error_strings = []
+
             current_message_ids: list[int] = []
-            messages_and_error = await discord_get_channel_pins(None, channel)
-            for message in messages_and_error.messages: 
+            messages_and_errors = await discord_get_channel_pins(None, channel)
+            error_strings.extend(messages_and_errors.error_strings)
+            for message in messages_and_errors.messages: 
                 current_message_ids.append(message.id)
 
-            message_ids_to_remove = []
+            rips_to_remove: List[Rip] = []
             if channel.id in RIP_CACHE:
                 for message_id, rip in RIP_CACHE[channel.id].items():
                     if message_id not in current_message_ids:
-                        message_ids_to_remove.append(message_id)
+                        rips_to_remove.append(rip)
             
-            for message_id in message_ids_to_remove:
-                await remove_rip_from_cache(message_id, channel.id)
+            if len(rips_to_remove):
+                audit_log_entries = [entry async for entry in channel.guild.audit_logs(limit=10, action=discord.AuditLogAction.message_unpin)]
+                spec_overdue_days = get_config('spec_overdue_days')
+                overdue_days = get_config('overdue_days')
+
+                for rip in rips_to_remove:
+                    await remove_rip_from_cache(message_id, channel.id)
+
+                    user_string = 'Someone' 
+                    for entry in audit_log_entries:
+                        if entry.extra and entry.user and entry.extra.message_id == rip.message_id:
+                            user_string = entry.user.name
+                            break
+
+                    formatted_rip = format_rip(rip, channel.guild, spec_overdue_days, overdue_days)
+                    txt += f'\n:pushpin::x: **{user_string}** unpinned\n{formatted_rip}'
+
+            await send_and_if_errors(txt, "Errors during unpin.", error_strings, channel)
 
     else:
 
