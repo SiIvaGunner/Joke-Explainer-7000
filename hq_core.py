@@ -1642,10 +1642,10 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
                 if get_channel_config(channel.id).pinlimit_must_die_mode:
                     await message.unpin()
                     await message.add_reaction('📌')
-                    return_message = f"**Error**: More than {SOFT_PIN_LIMIT} rips in pins. Unpinned.\n-# Remove the 📌 reaction when this is resolved."
+                    await send(f"**Error**: More than {SOFT_PIN_LIMIT} rips in pins. Unpinned.\n-# Remove the 📌 reaction when this is resolved.", channel)
                     is_valid = False
                 else:
-                    return_message = f"**Warning**: More than {SOFT_PIN_LIMIT} rips pinned - please handle them first :("
+                    await send(f"**Warning**: More than {SOFT_PIN_LIMIT} rips pinned - please handle them first :(", channel)
 
             if is_valid:
                 await lock_message(message.id, None)
