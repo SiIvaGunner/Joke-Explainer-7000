@@ -115,6 +115,10 @@ class BoolAndErrors(NamedTuple):
     result: bool
     error_strings: List[str]
 
+class AuditLogEntriesAndErrors(NamedTuple):
+    audit_log_entires: List[discord.AuditLogEntry] 
+    error_strings: List[str]
+
 #===============================================#
 #                Discord API Calls              #
 #===============================================#
@@ -191,6 +195,17 @@ async def discord_cleanup_embeds(limit: int | None, expire_time: float, channel:
         await write_log(error_strings[0])
 
     return MessagesAndErrors(deleted_messages, error_strings)
+
+
+async def discord_get_audit_log_entries(action_type: discord.AuditLogAction, limit: int | None, guild: discord.Guild) -> AuditLogEntriesAndErrors: 
+    audit_log_entries = [] 
+    error_strings = [] 
+    try:
+        audit_log_entries = [entry async for entry in guild.audit_logs(limit=limit, action=action_type)]
+    except Exception as error:
+        error_strings.append( f'Discord API call failed fetching channel messages: {type(error).__name__}: {error}')
+        await write_log(error_strings[0])
+    return AuditLogEntriesAndErrors(audit_log_entries, error_strings) 
 
 #===============================================#
 #                    CACHE                      #
@@ -1573,6 +1588,8 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
             txt = "" 
             error_strings = []
 
+            await lock_channel(channel.id, channel)
+
             current_message_ids: list[int] = []
             messages_and_errors = await discord_get_channel_pins(None, channel)
             error_strings.extend(messages_and_errors.error_strings)
@@ -1584,9 +1601,10 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
                 for message_id, rip in RIP_CACHE[channel.id].items():
                     if message_id not in current_message_ids:
                         rips_to_remove.append(rip)
-            
+
             if len(rips_to_remove):
-                audit_log_entries = [entry async for entry in channel.guild.audit_logs(limit=10, action=discord.AuditLogAction.message_unpin)]
+                audit_log_entries_and_errors = await discord_get_audit_log_entries(discord.AuditLogAction.message_unpin, 10, channel.guild) 
+                error_strings.extend(audit_log_entries_and_errors.error_strings)
                 spec_overdue_days = get_config('spec_overdue_days')
                 overdue_days = get_config('overdue_days')
 
@@ -1594,13 +1612,15 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
                     await remove_rip_from_cache(message_id, channel.id)
 
                     user_string = 'Someone' 
-                    for entry in audit_log_entries:
+                    for entry in audit_log_entries_and_errors.audit_log_entires:
                         if entry.extra and entry.user and entry.extra.message_id == rip.message_id:
                             user_string = entry.user.name
                             break
 
                     formatted_rip = format_rip(rip, channel.guild, spec_overdue_days, overdue_days)
                     txt += f'\n:pushpin::x: **{user_string}** unpinned\n{formatted_rip}'
+
+            unlock_channel(channel.id)
 
             await send_and_if_errors(txt, "Errors during unpin.", error_strings, channel)
 
