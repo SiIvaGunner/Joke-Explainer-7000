@@ -134,6 +134,7 @@ class RoundupFilterType(Enum):
     SEARCH_REACTION = auto()
     HASREACT = auto()
     NOTHASREACT = auto()
+    UNSENTFIXES = auto()
     OVERDUE = auto()
     VET_ALL = auto()
     RANDOM = auto()
@@ -226,6 +227,8 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
                 is_valid = rip_has_react([roundup_desc.reaction_type], rip)
             case RoundupFilterType.NOTHASREACT:
                 is_valid = not rip_has_react([roundup_desc.reaction_type], rip)
+            case RoundupFilterType.UNSENTFIXES:
+                is_valid = rip_has_react([ReactType.FIX], rip) and not rip_has_react([ReactType.SENDBACK], rip)
             case RoundupFilterType.SEARCH_REACTION:
                 is_valid = False 
                 for react in rip.reacts:
@@ -435,6 +438,17 @@ async def fixes(args: list[str], command_context: CommandContext):
 async def nofixes(args: list[str], command_context: CommandContext):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.NOTHASREACT, \
                                reaction_type=ReactType.FIX, not_found_message="No non-fix rips found.")
+    await send_roundup(roundup_desc, command_context)
+
+
+@command(
+    command_type=CommandType.QOC,
+    brief="Show QoC rips with :fix: and not :sendback:",
+    aliases=['unsentwrenches']
+)
+async def unsentfixes(args: list[str], command_context: CommandContext):
+    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.UNSENTFIXES, \
+                               not_found_message="No unsent fixes found. Good job!")
     await send_roundup(roundup_desc, command_context)
 
 @command(

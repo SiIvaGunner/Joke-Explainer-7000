@@ -47,6 +47,7 @@ DEFAULT_ALERT = '❗'
 DEFAULT_QOC = '🛃'
 DEFAULT_METADATA = '📝'
 DEFAULT_THUMBNAIL = '🖼️'
+DEFAULT_SENDBACK = '➡️'
 
 QOC_DEFAULT_LINKERR = '🔗'
 QOC_DEFAULT_BITRATE = '🔢'
@@ -82,6 +83,7 @@ class ReactType(Enum):
     METADATA = auto()
     THUMBNAIL = auto()
     EMAILSENT = auto()
+    SENDBACK = auto()
     NUMBER = auto()
 
 REVIEW_REACT_LIST = [ReactType.CHECK, ReactType.GOLDCHECK, ReactType.FIX, ReactType.ALERT, ReactType.REJECT]
@@ -670,6 +672,8 @@ def react_is(reaction_type: ReactType, name: str) -> bool:
             result = name_lower == "thumbnail" or name_lower == DEFAULT_THUMBNAIL
         case ReactType.EMAILSENT:
             result = name_lower == "emailsent"
+        case ReactType.SENDBACK:
+            result = name_lower == "sendback" or name_lower == DEFAULT_SENDBACK
         case ReactType.NUMBER:
             result = name in KEYCAP_EMOJIS
         case _:
