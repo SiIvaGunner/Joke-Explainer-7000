@@ -1580,7 +1580,7 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
 
         if channel_info.rip_fetch_type == RipFetchType.PINS: 
 
-            txt = "" 
+            txt = "-# " 
             error_strings = []
 
             await lock_channel(channel.id, channel)
