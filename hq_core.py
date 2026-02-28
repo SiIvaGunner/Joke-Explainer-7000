@@ -1686,26 +1686,32 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
         if is_qoc_channel or is_suborqueue_channel:
 
-            ##TODO: (Ahmayk) we can skip this fetch by searching cache for message_id first!
-            message_and_errors = await discord_fetch_message(payload.message_id, channel)
+            await lock_channel(payload.channel_id, None)
+            if payload.message_id in RIP_CACHE:
 
-            if message_and_errors.message and is_message_rip(message_and_errors.message):
                 await lock_message(payload.message_id, None)
 
-                rip = cache_rip_in_message(message_and_errors.message)
+                ##NOTE: (Ahmayk) could skip this if we wanted to, but
+                ##we don't really lose much from doing a fetch here.
+                ##It guarentees that all reactions are accurate 
+                message_and_errors = await discord_fetch_message(payload.message_id, channel)
 
-                if is_qoc_channel and message_and_errors.message.pinned:
+                if message_and_errors.message:
+                    rip = cache_rip_in_message(message_and_errors.message)
+                    if is_qoc_channel and message_and_errors.message.pinned:
 
-                    if rip.message_id not in USER_REACT_CACHE: 
-                        USER_REACT_CACHE[rip.message_id] = {} 
+                        if rip.message_id not in USER_REACT_CACHE: 
+                            USER_REACT_CACHE[rip.message_id] = {} 
 
-                    react = React(payload.emoji.id or 0, payload.emoji.name)
-                    if react not in USER_REACT_CACHE[rip.message_id]: 
-                        USER_REACT_CACHE[rip.message_id][react] = [] 
+                        react = React(payload.emoji.id or 0, payload.emoji.name)
+                        if react not in USER_REACT_CACHE[rip.message_id]: 
+                            USER_REACT_CACHE[rip.message_id][react] = [] 
 
-                    USER_REACT_CACHE[rip.message_id][react].append(payload.user_id) 
+                        USER_REACT_CACHE[rip.message_id][react].append(payload.user_id) 
 
                 unlock_message(payload.message_id)
+
+            unlock_channel(payload.channel_id)
 
 
 async def process_suborqueue_rip_caching(message: Message):
