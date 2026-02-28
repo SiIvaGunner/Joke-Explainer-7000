@@ -1446,7 +1446,7 @@ async def check_qoc_and_metadata(text: str, message_id: int, message_author_name
     return verdict, msg
 
 
-def format_rip(rip: Rip, guild: discord.Guild, spec_overdue_days: int, overdue_days: int) -> str:
+def format_rip(rip: Rip, guild: discord.Guild, make_smol: bool, spec_overdue_days: int, overdue_days: int) -> str:
 
     reacts = ""
     num_checks = 0
@@ -1505,7 +1505,11 @@ def format_rip(rip: Rip, guild: discord.Guild, spec_overdue_days: int, overdue_d
     if len(reacts):
         info_body += f' | {reacts}'
 
-    return f'{title_body}\n{info_body}\n'
+    if make_smol:
+        return f'-# {title_body} {info_body}\n'
+    else:
+        return f'{title_body}\n{info_body}\n'
+
 
 
 #===============================================#
@@ -1580,7 +1584,7 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
 
         if channel_info.rip_fetch_type == RipFetchType.PINS: 
 
-            txt = "-# " 
+            txt = "" 
             error_strings = []
 
             await lock_channel(channel.id, channel)
@@ -1612,8 +1616,8 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
                             user_string = entry.user.name
                             break
 
-                    formatted_rip = format_rip(rip, channel.guild, spec_overdue_days, overdue_days)
-                    txt += f'\n:pushpin::x: **{user_string}** unpinned\n{formatted_rip}'
+                    formatted_rip = format_rip(rip, channel.guild, True, spec_overdue_days, overdue_days)
+                    txt += f'\n-# :pushpin::x: **{user_string}** unpinned\n{formatted_rip}'
 
             unlock_channel(channel.id)
 

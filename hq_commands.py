@@ -247,7 +247,7 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
                 is_valid = (i == selected_index)
 
         if is_valid:
-            result += format_rip(rip, command_context.channel.guild, spec_overdue_days, overdue_days) + vet_reacts
+            result += format_rip(rip, command_context.channel.guild, False, spec_overdue_days, overdue_days) + vet_reacts
             result += readability_line 
 
     if result != "":
