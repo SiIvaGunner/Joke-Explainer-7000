@@ -1604,7 +1604,7 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
                 overdue_days = get_config('overdue_days')
 
                 for rip in rips_to_remove:
-                    await remove_rip_from_cache(message_id, channel.id)
+                    await remove_rip_from_cache(rip.message_id, channel.id)
 
                     user_string = 'Someone' 
                     for entry in audit_log_entries_and_errors.audit_log_entires:
