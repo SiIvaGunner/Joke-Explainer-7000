@@ -1691,7 +1691,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         if is_qoc_channel or is_suborqueue_channel:
 
             await lock_channel(payload.channel_id, None)
-            if payload.message_id in RIP_CACHE:
+            if payload.channel_id in RIP_CACHE and payload.message_id in RIP_CACHE[payload.channel_id]:
 
                 await lock_message(payload.message_id, None)
 
