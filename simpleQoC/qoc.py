@@ -212,7 +212,14 @@ def downloadAudioFromUrl(validUrl: str) -> str:
 
 
 def parseAudio(filepath: str) -> FileType:
-    return File(filepath)
+    try:
+        file = File(filepath)
+    except wave.error as e:
+        raise QoCException(f'File type {os.path.splitext(filepath)[1]} is not supported ({e}). Try manually inspecting file metadata with ffprobe.')
+    else:
+        if file is None:
+            raise QoCException('Something went wrong parsing file.')
+        return file
 
 
 #=======================================#
@@ -670,7 +677,11 @@ def getFileMetadataMutagen(url: str) -> Tuple[int, str]:
     except QoCException as e:
         errors.append(e.message)
     else:
-        file = parseAudio(filepath)
+        try:
+            file = parseAudio(filepath)
+        except QoCException as e:
+            return (-1, e.message)
+        
         metadata = file.pprint()
     finally:
         if filepath:
@@ -778,9 +789,11 @@ def performQoC(url: str, fullFeedback: bool = True) -> Tuple[int, str]:
         errors.append(e.message)
     
     else:
-        file = parseAudio(filepath)
-        if file is None:
-            return (1, "File cannot be parsed.")
+        try:
+            file = parseAudio(filepath)
+        except QoCException as e:
+            return (-1, e.message)
+        
         DEBUG("File metadata: " + file.pprint())
 
         try:
