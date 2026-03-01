@@ -700,6 +700,8 @@ USER_REACT_CACHE: dict[int, dict[React, List[int]]] = {}
 class UserReactCheckType(Enum):
     REVIEW = auto()
     FIX = auto()
+    CHECK = auto()
+    REJECT = auto()
 
 def user_react_check_type_to_react_list(user_react_check_type: UserReactCheckType) -> List[ReactType]:
     react_list = []
@@ -708,6 +710,12 @@ def user_react_check_type_to_react_list(user_react_check_type: UserReactCheckTyp
             react_list = REVIEW_REACT_LIST 
         case UserReactCheckType.FIX:
             react_list = FIX_REACT_LIST 
+        case UserReactCheckType.CHECK:
+            react_list = [ReactType.CHECK] 
+        case UserReactCheckType.REJECT:
+            react_list = [ReactType.REJECT] 
+        case _:
+            assert f'Unimplemented UserReactCheckType {user_react_check_type}'
     return react_list
 
 async def user_is_react(user_react_check_type: UserReactCheckType, user_id: int, rip: Rip,\

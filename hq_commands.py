@@ -127,6 +127,8 @@ class RoundupFilterType(Enum):
     MYFIXES = auto()
     NOFIXES = auto()
     MYFRESH = auto()
+    MYCHECKS = auto()
+    MYREJECTS = auto()
     FRESH = auto()
     SPICY = auto()
     SEARCH_TITLE = auto()
@@ -169,14 +171,6 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
 
     ##TODO: (Ahmayk) fuzzy username input (ie typing "ahmayk" and matching to their username or display name)
     user_id = command_context.user.id
-    if roundup_desc.user_id:
-        match = re.search(r'\d+', str(roundup_desc.user_id))
-        if match:
-            ID = int(match.group(0))
-            if command_context.channel.guild:
-                search_author = command_context.channel.guild.get_member(ID)
-                if search_author:
-                    await command_context.channel.send(f"Searching for rips {roundup_desc.conditional_string} by {search_author.name}")
 
     selected_index = 0
     if roundup_desc.roundup_filter_type == RoundupFilterType.RANDOM:
@@ -203,6 +197,14 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
             case RoundupFilterType.MYFRESH:
                 bool_and_errors = await user_is_react(UserReactCheckType.REVIEW, user_id, rip, command_context.channel)
                 is_valid = not bool_and_errors.result 
+                error_strings.extend(bool_and_errors.error_strings)
+            case RoundupFilterType.MYCHECKS:
+                bool_and_errors = await user_is_react(UserReactCheckType.CHECK, user_id, rip, command_context.channel)
+                is_valid = bool_and_errors.result 
+                error_strings.extend(bool_and_errors.error_strings)
+            case RoundupFilterType.MYREJECTS:
+                bool_and_errors = await user_is_react(UserReactCheckType.REJECT, user_id, rip, command_context.channel)
+                is_valid = bool_and_errors.result 
                 error_strings.extend(bool_and_errors.error_strings)
             case RoundupFilterType.FRESH:
                 is_valid = not rip_has_react(REVIEW_REACT_LIST, rip)
@@ -290,8 +292,8 @@ async def mypins(args: list[str], command_context: CommandContext):
     aliases=['mywrenches'],
 )
 async def myfixes(args: list[str], command_context: CommandContext):
-    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.MYFIXES, \
-                               user_id = command_context.user.id, conditional_string = "with wrenches")
+    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.MYFIXES, 
+                               user_id = command_context.user.id, not_found_message="No fixes are yours.")
     await send_roundup(roundup_desc, command_context)
 
 
@@ -301,9 +303,29 @@ async def myfixes(args: list[str], command_context: CommandContext):
 )
 async def myfresh(args: list[str], command_context: CommandContext):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.MYFRESH, \
-                               user_id = command_context.user.id, conditional_string = "not reviewed")
+                               user_id = command_context.user.id, not_found_message = "You haven't reviewed any rips yet.")
     await send_roundup(roundup_desc, command_context)
 
+
+@command(
+    command_type=CommandType.QOC,
+    brief="Show QoC rips you've approved :check:",
+    aliases=["myapproved"]
+)
+async def mychecks(args: list[str], command_context: CommandContext):
+    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.MYCHECKS, \
+                               user_id = command_context.user.id, not_found_message = "No checks are yours.")
+    await send_roundup(roundup_desc, command_context)
+
+@command(
+    command_type=CommandType.QOC,
+    brief="Show QoC rips you've rejected :reject:",
+    aliases=["myrejected"]
+)
+async def myrejects(args: list[str], command_context: CommandContext):
+    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.MYREJECTS, \
+                               user_id = command_context.user.id, not_found_message = "No rejects are yours.")
+    await send_roundup(roundup_desc, command_context)
 
 @command(
     command_type=CommandType.QOC,
