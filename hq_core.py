@@ -1703,8 +1703,8 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
                     rip_title = get_rip_title(message.content)
                     link = format_message_link(channel.guild.id, channel.id, message.id)
 
-                    if verdict == QOC_DEFAULT_LINKERR:
-                        return_message += ":warning: **Rip link not Auto-QoCed**\n-# Remove the :link: reaction when the link is fixed and/or properly auto-qoced.\n"
+                    if QOC_DEFAULT_LINKERR in verdict:
+                        return_message += ":warning: **Rip link not Auto-QoCed**\n-# Remove the :link: reaction when the link is fixed and/or properly auto-qoced."
                         await message.add_reaction(QOC_DEFAULT_LINKERR)
                     return_message += f'\n**Rip**: **[{rip_title}]({link})**\n**Verdict**: {verdict}\n{msg}-# React {DEFAULT_CHECK} if this is resolved.'
 
