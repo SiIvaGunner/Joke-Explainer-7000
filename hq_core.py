@@ -1677,7 +1677,13 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
                 if len(msg):
                     rip_title = get_rip_title(message.content)
                     link = format_message_link(channel.guild.id, channel.id, message.id)
-                    return_message = f'**Rip**: **[{rip_title}]({link})**\n**Verdict**: {verdict}\n{msg}-# React {DEFAULT_CHECK} if this is resolved.'
+
+                    return_message = ""
+                    if verdict == QOC_DEFAULT_LINKERR:
+                        return_message += ":warning: **Rip link not Auto-QoCed**\n-# Remove the :link: reaction when the link is fixed and/or properly auto-qoced.\n"
+                        await message.add_reaction(QOC_DEFAULT_LINKERR)
+                    return_message += f'\n**Rip**: **[{rip_title}]({link})**\n**Verdict**: {verdict}\n{msg}\n-# React {DEFAULT_CHECK} if this is resolved.'
+
 
         if is_vetted:
             await send_and_if_errors(return_message, "Warning: Vetting pinned message returned errors.", error_strings, channel)
