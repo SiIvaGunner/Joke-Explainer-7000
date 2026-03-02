@@ -220,6 +220,24 @@ async def discord_get_audit_log_entries(action_type: discord.AuditLogAction, lim
         await log_exception(f'Discord API call failed to read audit log', error, error_strings, True)
     return AuditLogEntriesAndErrors(audit_log_entries, error_strings) 
 
+
+async def discord_unpin_message(message: Message) -> List[str]: 
+    error_strings: List[str] = [] 
+    try:
+        await message.unpin()
+    except Exception as error:
+        await log_exception(f'Discord API call failed to unpin message: {message.id}', error, error_strings, True)
+    return error_strings
+
+
+async def discord_add_reaction(reaction_string: str, message: Message) -> List[str]: 
+    error_strings: List[str] = [] 
+    try:
+        await message.add_reaction(reaction_string)
+    except Exception as error:
+        await log_exception(f'Discord API call failed to add reaction {reaction_string} to {message.id}', error, error_strings, True)
+    return error_strings
+
 #===============================================#
 #                    CACHE                      #
 #===============================================#
@@ -1653,8 +1671,8 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
             SOFT_PIN_LIMIT = get_config('soft_pin_limit')
             if len(rips_and_errors.rips) > SOFT_PIN_LIMIT:
                 if get_channel_config(channel.id).pinlimit_must_die_mode:
-                    await message.unpin()
-                    await message.add_reaction('📌')
+                    error_strings.extend(await discord_unpin_message(message))
+                    error_strings.extend(await discord_add_reaction('📌', message))
                     await send(f"**Error**: More than {SOFT_PIN_LIMIT} rips in pins. Unpinned.\n-# Remove the 📌 reaction when this is resolved.", channel)
                     is_valid = False
                 else:
@@ -1673,7 +1691,6 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
                 #TODO: (Ahmayk) if this errors at all we need to know
                 verdict, msg = await check_qoc_and_metadata(message.content, message.id, str(message.author))
 
-                is_vetted = True
                 if len(msg):
                     rip_title = get_rip_title(message.content)
                     link = format_message_link(channel.guild.id, channel.id, message.id)
@@ -1685,10 +1702,7 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
                     return_message += f'\n**Rip**: **[{rip_title}]({link})**\n**Verdict**: {verdict}\n{msg}\n-# React {DEFAULT_CHECK} if this is resolved.'
 
 
-        if is_vetted:
-            await send_and_if_errors(return_message, "Warning: Vetting pinned message returned errors.", error_strings, channel)
-        else:
-            await send_and_if_errors(return_message, "Warning: Pinned message not vetted.", error_strings, channel)
+        await send_and_if_errors(return_message, "Warning: Pining QoC rip returned errors.", error_strings, channel)
 
 
 @bot.event
