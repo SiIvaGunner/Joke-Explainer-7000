@@ -23,7 +23,7 @@ import random
     public=True,
     brief="Get info on all commands",
     format="[command]",
-    aliases=['commands', 'halp', 'test', 'helpme'],
+    aliases=['commands', 'halp', 'test', 'helpme', 'h'],
 )
 async def help(args: list[str], command_context: CommandContext):
 

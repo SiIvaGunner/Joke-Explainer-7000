@@ -125,20 +125,37 @@ class AuditLogEntriesAndErrors(NamedTuple):
 #                Discord API Calls              #
 #===============================================#
 
+async def log_exception(txt: str, error: Exception, error_strings: List[str], full_stack: bool):
+    error_text = f'{txt}\n{type(error).__name__}: {error}'
+    trace = traceback.format_exc()
+    if full_stack:
+        trace = "".join(traceback.extract_stack().format())
+    print(f"\033[91m {error_text}\n{trace}\033[0m")
+    log_channel = bot.get_channel(get_log_channel())
+    if log_channel:
+        split_texts = split_long_message(trace, 2000 - len(error_text))
+        for i, m in enumerate(split_texts):
+            string = f'```py\n{m}\n```'
+            if i == 0:
+                string = f'**{error_text}**\n{string}'
+            await send(string, log_channel)
+    else:
+        print("No log channel found.")
+
+    error_strings.append(error_text)
 
 async def discord_fetch_message(message_id: int, channel: TextChannel | Thread) -> MessageAndErrors: 
     message = None
-    error_strings = [] 
+    error_strings: List[str] = [] 
     try:
         message = await channel.fetch_message(message_id)
     except Exception as error:
-        error_strings.append(f'Discord API call failed fetching message {message_id} {type(error).__name__}: {error}')
-        await write_log(error_strings[0])
+        await log_exception(f'Discord API call failed to fetch message {message_id}', error, error_strings, True)
     return MessageAndErrors(message, error_strings)
 
 async def discord_get_user_react_data(react_list: List[ReactType], message: Message) -> UserReactDictAndErrors:
     user_react_dict: dict[React, List[int]] = {}
-    error_strings = [] 
+    error_strings: List[str] = [] 
     if len(react_list):
         for reaction in message.reactions:
             react = init_react(reaction)
@@ -149,39 +166,35 @@ async def discord_get_user_react_data(react_list: List[ReactType], message: Mess
                 try:
                     fetched_user_ids = [user.id async for user in reaction.users()]
                 except Exception as error:
-                    error_string = f'Discord API call failed fetching reaction user ids: {type(error).__name__}: {error}'
-                    await write_log(error_string)
-                    error_strings.append(error_string)
+                    await log_exception(f'Discord API call failed to fetch reaction user ids from {reaction}', error, error_strings, True)
                 for fetched_user_id in fetched_user_ids:
                     user_react_dict[react].append(fetched_user_id) 
     return UserReactDictAndErrors(user_react_dict, error_strings)
 
 async def discord_get_channel_messages(limit: int | None, channel: TextChannel | Thread) -> MessagesAndErrors: 
     messages = [] 
-    error_strings = [] 
+    error_strings: List[str] = [] 
     try:
         messages = [message async for message in channel.history(limit=limit)]
     except Exception as error:
-        error_strings.append( f'Discord API call failed fetching channel messages: {type(error).__name__}: {error}')
-        await write_log(error_strings[0])
+        await log_exception(f'Discord API call failed to fetch channel messages from {channel.name}', error, error_strings, True)
     return MessagesAndErrors(messages, error_strings) 
 
 
 async def discord_get_channel_pins(limit: int | None, channel: TextChannel | Thread) -> MessagesAndErrors: 
     messages: List[Message] = [] 
-    error_strings = [] 
+    error_strings: List[str] = [] 
     try:
         messages = [message async for message in channel.pins(limit=limit)]
     except Exception as error:
-        error_strings.append(f'Discord API call failed fetching channel pins: {type(error).__name__}: {error}')
-        await write_log(error_strings[0])
+        await log_exception(f'Discord API call failed to fetch channel pins from {channel.name}', error, error_strings, True)
     return MessagesAndErrors(messages, error_strings)
 
 
 async def discord_cleanup_embeds(limit: int | None, expire_time: float, channel: TextChannel | Thread, \
                                  typing_channel: TextChannel | Thread | None) -> MessagesAndErrors: 
     deleted_messages = [] 
-    error_strings = [] 
+    error_strings: List[str] = [] 
 
     def should_delete(message: Message):
         result = message.author == bot.user and len(message.embeds)
@@ -193,20 +206,18 @@ async def discord_cleanup_embeds(limit: int | None, expire_time: float, channel:
         async with typing_channel.typing() if typing_channel is not None else empty_async_context():
             deleted_messages = await channel.purge(limit=limit, check=should_delete)
     except Exception as error:
-        error_strings.append(f'Discord API call failed deleting messages: {type(error).__name__}: {error}')
-        await write_log(error_strings[0])
+        await log_exception(f'Discord API call failed to delete messages from {channel.name}', error, error_strings, True)
 
     return MessagesAndErrors(deleted_messages, error_strings)
 
 
 async def discord_get_audit_log_entries(action_type: discord.AuditLogAction, limit: int | None, guild: discord.Guild) -> AuditLogEntriesAndErrors: 
     audit_log_entries = [] 
-    error_strings = [] 
+    error_strings: List[str] = [] 
     try:
         audit_log_entries = [entry async for entry in guild.audit_logs(limit=limit, action=action_type)]
     except Exception as error:
-        error_strings.append( f'Discord API call failed fetching channel messages: {type(error).__name__}: {error}')
-        await write_log(error_strings[0])
+        await log_exception(f'Discord API call failed to read audit log', error, error_strings, True)
     return AuditLogEntriesAndErrors(audit_log_entries, error_strings) 
 
 #===============================================#
@@ -1156,25 +1167,11 @@ async def write_log(msg: str = "Placeholder message", embed: bool = False):
 
 async def send_crash(txt: str, error: Exception, channel: TextChannel | Thread | None):
     error_string = f"{type(error).__name__}: {error}"
-    error_data = "".join(traceback.format_exception(type(error), error, error.__traceback__))
-
-    print(f"\033[91m {error_data}\033[0m")
-
     description = f":boom: Intriguing! I have encountered an unexpected error! ```{error_string}```"
     if channel:
         await send(description, channel)
 
-    header = f'{txt}: {error_string}'
-    log_channel = bot.get_channel(get_log_channel())
-    if log_channel:
-        split_texts = split_long_message(error_data, 2000 - len(header))
-        for i, m in enumerate(split_texts):
-            string = f'```py\n{m}\n```'
-            if i == 0:
-                string = f'**{header}**\n{string}'
-            await send(string, log_channel)
-    else:
-        print("No log channel found.")
+    await log_exception(txt, error, [], False)
 
 
 def extract_rip_link(text: str) -> typing.List[str]:
