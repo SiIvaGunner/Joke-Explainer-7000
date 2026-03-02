@@ -1642,6 +1642,12 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
                     formatted_rip = format_rip(rip, channel.guild, True, spec_overdue_days, overdue_days)
                     txt += f'\n-# :pushpin::x: **{user_string}** unpinned\n{formatted_rip}'
 
+                rips_and_errors = await get_rips_fast(channel, GetRipsDesc())
+                error_strings.extend(rips_and_errors.error_strings)
+                count = len(rips_and_errors.rips)
+                soft_pin_limit = get_config('soft_pin_limit')
+                txt += f'-# Rip Count: {count}/{soft_pin_limit}'
+
             unlock_channel(channel.id)
 
             await send_and_if_errors(txt, "Errors during unpin.", error_strings, channel)
@@ -1658,7 +1664,6 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
         message = messages_and_errors.messages[0]
 
         error_strings: List[str] = []
-        is_vetted = False
 
         if is_message_rip(message):
 
@@ -1666,17 +1671,20 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
 
             rips_and_errors = await get_rips_fast(channel, GetRipsDesc())
             error_strings.extend(rips_and_errors.error_strings)
+            count = len(rips_and_errors.rips)
 
             is_valid = True
             SOFT_PIN_LIMIT = get_config('soft_pin_limit')
-            if len(rips_and_errors.rips) > SOFT_PIN_LIMIT:
+            if count > SOFT_PIN_LIMIT:
                 if get_channel_config(channel.id).pinlimit_must_die_mode:
                     error_strings.extend(await discord_unpin_message(message))
                     error_strings.extend(await discord_add_reaction('📌', message))
-                    await send(f"**Error**: More than {SOFT_PIN_LIMIT} rips in pins. Unpinned.\n-# Remove the 📌 reaction when this is resolved.", channel)
+                    await send(f":bangbang: **Error**: {count}/{SOFT_PIN_LIMIT} rips in pins. Unpinned.\n-# Remove the 📌 reaction when this is resolved.", channel)
                     is_valid = False
                 else:
-                    await send(f"**Warning**: More than {SOFT_PIN_LIMIT} rips pinned - please handle them first :(", channel)
+                    await send(f"**Warning: {count}/{SOFT_PIN_LIMIT}** rips pinned. Please handle other rips first :(", channel)
+            elif count > max(0, SOFT_PIN_LIMIT - 10):
+                await send(f"-# Warning: **{SOFT_PIN_LIMIT - count} rips** until pinlimit is reached.\n-# Rip Count: {count}/{SOFT_PIN_LIMIT}", channel)
 
             if is_valid:
                 await lock_message(message.id, None)
@@ -1695,11 +1703,10 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
                     rip_title = get_rip_title(message.content)
                     link = format_message_link(channel.guild.id, channel.id, message.id)
 
-                    return_message = ""
                     if verdict == QOC_DEFAULT_LINKERR:
                         return_message += ":warning: **Rip link not Auto-QoCed**\n-# Remove the :link: reaction when the link is fixed and/or properly auto-qoced.\n"
                         await message.add_reaction(QOC_DEFAULT_LINKERR)
-                    return_message += f'\n**Rip**: **[{rip_title}]({link})**\n**Verdict**: {verdict}\n{msg}\n-# React {DEFAULT_CHECK} if this is resolved.'
+                    return_message += f'\n**Rip**: **[{rip_title}]({link})**\n**Verdict**: {verdict}\n{msg}-# React {DEFAULT_CHECK} if this is resolved.'
 
 
         await send_and_if_errors(return_message, "Warning: Pining QoC rip returned errors.", error_strings, channel)
