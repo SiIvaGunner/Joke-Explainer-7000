@@ -1307,6 +1307,10 @@ def line_contains_substring(line: str, substring: str) -> bool:
     """
     Helper function to search substrings in Discord markdown-formatted line, ignoring case and formatting
     """
+    # Temporary "hacky" support for regex search until/if we figure out a better system
+    if substring.startswith("r\'") and substring.endswith("\'") or substring.startswith("r\"") and substring.endswith("\""):
+        regex_search_key = substring[2:-1]
+        return re.search(regex_search_key, line) is not None
     return substring.lower() in line.replace('*', '').replace('_', '').replace('|', '').replace('#', '').lower()
 
 
