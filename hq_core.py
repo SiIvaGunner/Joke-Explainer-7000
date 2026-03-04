@@ -133,15 +133,9 @@ async def log_exception(txt: str, error: Exception, error_strings: List[str], fu
     print(f"\033[91m {error_text}\n{trace}\033[0m")
     log_channel = bot.get_channel(get_log_channel())
     if log_channel:
-        split_texts = split_long_message(trace, 2000 - len(error_text))
-        for i, m in enumerate(split_texts):
-            string = f'```py\n{m}\n```'
-            if i == 0:
-                string = f'**{error_text}**\n{string}'
-            await send(string, log_channel)
+        await send(f'**{error_text}**\n```py\n{trace}{trace}{trace}\n```', log_channel)
     else:
         print("No log channel found.")
-
     error_strings.append(error_text)
 
 async def discord_fetch_message(message_id: int, channel: TextChannel | Thread) -> MessageAndErrors: 
@@ -1003,17 +997,44 @@ def split_long_message(a_message: str, character_limit) -> list[str]:  # avoid D
     Split a long message to fit Discord's character limit.
     Aug 6 2025: apparently embeds have a higher character limit?
     """
-    result = []
+    result: List[str] = []
+    #TODO: (Ahmayk) While unlikely, this could split things into a group that is bigger than 2000.
+    #we're not accounting for that currently.
     all_lines = a_message.splitlines()
     wall_of_text = ""
+    is_in_regular_codeblock = False
+    is_in_python_codeblock = False
     for line in all_lines:
         line = line.replace('@', '')  # no more pings lol
-        next_length = len(wall_of_text) + len(line)
-        if next_length > character_limit:
-            result.append(wall_of_text[:-1])  # append and get rid of the last newline
-            wall_of_text = line + '\n'
-        else:
-            wall_of_text += line + '\n'
+
+        if "```py" in line:
+            is_in_python_codeblock = True
+        elif "```" in line:
+            if is_in_python_codeblock:
+                is_in_python_codeblock = False
+            else:
+                is_in_regular_codeblock = not is_in_regular_codeblock
+
+        need_new_block = False 
+        if len(wall_of_text) + len(line) > character_limit:
+            need_new_block = True 
+
+        if is_in_python_codeblock or is_in_regular_codeblock:
+            if len(wall_of_text) + len(line) + len("\n```") > character_limit:
+                need_new_block = True 
+
+        if need_new_block: 
+            new_block = wall_of_text[:-1]
+            wall_of_text = "" 
+            if is_in_python_codeblock:
+                new_block += '\n```' 
+                wall_of_text = "```py\n" 
+            if is_in_regular_codeblock:
+                new_block += '\n```' 
+                wall_of_text = "```" 
+            result.append(new_block)
+
+        wall_of_text += line + '\n'
 
     result.append(wall_of_text[:-1])  # add anything remaining
     return result
