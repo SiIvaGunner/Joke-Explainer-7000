@@ -642,6 +642,7 @@ class SendSubOrQueueDesc(NamedTuple):
     channel_types: List[str] = []
     search_key: str = ""
     not_found_message: str = ""
+    random_count: int = 0
 
 async def send_suborqueue_rips(desc: SendSubOrQueueDesc, command_context: CommandContext):
     """
@@ -662,7 +663,7 @@ async def send_suborqueue_rips(desc: SendSubOrQueueDesc, command_context: Comman
     prefix = desc.search_key.lower()
     qoc_emote = get_qoc_emoji(command_context.channel.guild)
 
-    selected_rip_message_id = 0 
+    selected_rip_message_ids = [] 
     if desc.suborqueue_rip_filter_type == SubOrQueueRipFilterType.RANDOM: 
         temp_rips_all: List[Rip] = []
         for channel_id in channel_ids:
@@ -671,7 +672,11 @@ async def send_suborqueue_rips(desc: SendSubOrQueueDesc, command_context: Comman
                 temp_rips_and_errors = await get_rips(channel, GetRipsDesc(typing_channel=command_context.channel))
                 error_strings.extend(temp_rips_and_errors.error_strings)
                 temp_rips_all.extend(temp_rips_and_errors.rips)
-        selected_rip_message_id = random.choice(temp_rips_all).message_id
+        random.shuffle(temp_rips_all)
+        clamped_count = min(max(1, desc.random_count), len(temp_rips_all))
+        print(f'clamped: {clamped_count}')
+        for i in range(clamped_count):
+            selected_rip_message_ids.append(temp_rips_all[i].message_id)
 
     for channel_id in channel_ids:
         channel = bot.get_channel(channel_id)
@@ -703,7 +708,7 @@ async def send_suborqueue_rips(desc: SendSubOrQueueDesc, command_context: Comman
                     case SubOrQueueRipFilterType.ALL:
                         is_valid = True
                     case SubOrQueueRipFilterType.RANDOM:
-                        is_valid = rip.message_id == selected_rip_message_id
+                        is_valid = rip.message_id in selected_rip_message_ids
                     case _:
                         assert "Unimplemented SubOrQueueRipFilterType"
 
@@ -773,11 +778,26 @@ async def event_subs(args: list[str], command_context: CommandContext):
 @command(
     command_type=CommandType.SUBS,
     public=True,
-    brief=f'Show a random submitted rip',
+    format="[count]",
+    brief='Show a random submitted rip',
+    desc='Insert a number to roll that many rips.',
     aliases=['randomsub', 'randomqoc', 'luckysub', 'letsgogambling!sub!']
 )
 async def random_sub(args: list[str], command_context: CommandContext):
+
+    count = 1
+    if len(args):
+        if '-' in args[0]:
+            return await send(f'ERROR: Negative rips not implemented `(library not found: antirip)`', command_context.channel)
+        if args[0].isdigit():
+            count = int(args[0])
+            if count == 0:
+                return await send_embed(f'**[Zero. - Zero 64 (Zero Mix)](<https://www.youtube.com/watch?v=UtGL5yKdSCk>)**\nby Zero Z | 🔥 🔥 🍌 😭\n------------------------------', command_context.channel, EmbedDesc())
+        else:
+            return await send(f'**{args[0]}** is not a number. Please enter include how many rips you want to roll, or nothing if you just want one.', command_context.channel)
+
     desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.RANDOM, \
+                              random_count = count, \
                               channel_types = ['SUBS', 'SUBS_PIN', 'SUBS_THREAD'])
     await send_suborqueue_rips(desc, command_context)
 
