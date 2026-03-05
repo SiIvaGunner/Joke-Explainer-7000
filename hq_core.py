@@ -1277,6 +1277,9 @@ def get_rip_title(text: str) -> str:
     elif '||' in text.split('```')[0]:
         # if || is detected in the message before the first ```, make the rip title into spoiler
         return "`[Rip Contains Spoiler]`"
+    elif rip_title == 'ansi':
+        # fairly sure we will never upload a video named "ansi". other codeblock formats exist but this one is the most common for color so
+        return get_raw_rip_title(text.replace('```ansi', '```', 1))
     else:
         return rip_title
 
