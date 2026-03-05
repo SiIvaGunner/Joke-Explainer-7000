@@ -133,7 +133,7 @@ async def log_exception(txt: str, error: Exception, error_strings: List[str], fu
     print(f"\033[91m {error_text}\n{trace}\033[0m")
     log_channel = bot.get_channel(get_log_channel())
     if log_channel:
-        await send(f'**{error_text}**\n```py\n{trace}{trace}{trace}\n```', log_channel)
+        await send(f'**{error_text}**\n```py\n{trace}\n```', log_channel)
     else:
         print("No log channel found.")
     error_strings.append(error_text)
@@ -1004,7 +1004,7 @@ def split_long_message(a_message: str, character_limit) -> list[str]:  # avoid D
     wall_of_text = ""
     is_in_regular_codeblock = False
     is_in_python_codeblock = False
-    for line in all_lines:
+    for i, line in enumerate(all_lines):
         line = line.replace('@', '')  # no more pings lol
 
         if "```py" in line:
@@ -1022,6 +1022,11 @@ def split_long_message(a_message: str, character_limit) -> list[str]:  # avoid D
         if is_in_python_codeblock or is_in_regular_codeblock:
             if len(wall_of_text) + len(line) + len("\n```") > character_limit:
                 need_new_block = True 
+            if i != len(all_lines) - 1:
+                len_current_and_next = len(wall_of_text) + len(line) + len(all_lines[i + 1])
+                if len_current_and_next <= character_limit and \
+                   len_current_and_next + len("\n```") > character_limit:
+                    need_new_block = True 
 
         if need_new_block: 
             new_block = wall_of_text[:-1]
