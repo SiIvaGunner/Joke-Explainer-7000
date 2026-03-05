@@ -1574,6 +1574,14 @@ def choose_random_rips(rips: List[Rip], random_count: int) -> List[int]:
         result.append(rips[i].message_id)
     return result
 
+#NOTE: (Ahmayk) does not check if input is actually an emoji
+def emoji_to_react_name_if_emoji(s: str) -> str:
+    react_input = s 
+    match = re.fullmatch(r'<a?:(\w+):\d+>', react_input)
+    if match:
+        react_input = match.group(1)
+    return react_input
+
 #===============================================#
 #                    EVENTS                     #
 #===============================================#

@@ -494,11 +494,7 @@ async def hasreact(args: list[str], command_context: CommandContext):
     if not len(args): 
         return await send("Error: Please include an emoji to search for. I'll show rips reacted by that emoji", command_context.channel)
 
-    react_input = args[0] 
-    #NOTE: (Ahmayk) convert emoji to react_name
-    match = re.fullmatch(r'<a?:(\w+):\d+>', react_input)
-    if match:
-        react_input = match.group(1)
+    react_input = emoji_to_react_name_if_emoji(args[0])
 
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.SEARCH_REACTION, \
                                react_name=react_input, not_found_message=f'No rips with {args[0]} found.')
@@ -1083,6 +1079,138 @@ async def vibecheck_subs(args: list[str], command_context: CommandContext):
             subbed_rips.extend(rips_and_errors.rips)
 
     await send_vibes(subbed_rips, max, command_context)
+
+
+async def send_viberank(rips: List[Rip], react_name: str, max_rips: int, command_context: CommandContext):
+
+    class EmojiCount(NamedTuple):
+        rip: Rip
+        num_emojis: int
+
+    emoji_count_list: List[EmojiCount] = [] 
+
+    for rip in rips:
+        react_counts = get_react_counts(rip)
+        for react in react_counts.keys():
+            if react.name and len(react.name) and react.name == react_name:
+                emoji_count_list.append(EmojiCount(rip, react_counts[react]))
+
+    emoji_count_list.sort(key=lambda e: e.num_emojis, reverse=True)
+
+    if len(emoji_count_list):
+        result = ""
+
+        #NOTE: (Ahmayk) assumes all rips come from the same server 
+        channel = bot.get_channel(rip.channel_id)
+        guild_id = 0 
+        if channel:
+            channel = await bot.fetch_channel(rip.channel_id)
+        if channel:
+            guild_id = channel.guild.id 
+
+        emoji_count_list_most = emoji_count_list 
+        if max_rips > 0:
+            emoji_count_list_most = emoji_count_list_most[:max_rips]
+        if len(emoji_count_list_most) < len(emoji_count_list):
+            result += f'*Showing top **{len(emoji_count_list_most)}** rips with {react_name}.*\n\n'
+
+        emoji_stirng = reaction_name_to_emoji_string(react_name, command_context.channel.guild)
+        for emoji_count in emoji_count_list_most:
+            rip_title = get_rip_title(emoji_count.rip.text)
+            rip_link = format_message_link(guild_id, emoji_count.rip.channel_id, emoji_count.rip.message_id)
+            result += f'{emoji_stirng} **x{emoji_count.num_emojis}**: **[{rip_title}]({rip_link})**\n'
+
+        await send_embed(result, command_context.channel, EmbedDesc(expires=True))
+    else:
+        await send(f'zero {react_name} we chillin', command_context.channel)
+
+@command(
+    command_type=CommandType.QOC,
+    brief='Ranks QoC rips with the most of a react.',
+    format='<emoji> [all]',
+    desc='Only shows 30 rips at most. Include `all` or `a` to show everything.',
+    aliases=['reactrank'],
+)
+async def viberank(args: list[str], command_context: CommandContext):
+
+    if not len(args): 
+        return await send("Error: Please include an emoji to search for. I'll show QoC rips that have the most of that emoji", command_context.channel)
+
+    channel = await get_qoc_channel(command_context.channel)
+    if channel is None: return
+
+    react_input = emoji_to_react_name_if_emoji(args[0])
+
+    max = 30
+    if len(args) > 1:
+        max = 0 
+
+    rips_and_errors = await get_rips(channel, GetRipsDesc(typing_channel=command_context.channel))
+    if len(rips_and_errors.error_strings):
+        return await send_if_errors("o noes. Rank is error.", rips_and_errors.error_strings, command_context.channel)
+
+    await send_viberank(rips_and_errors.rips, react_input, max, command_context)
+
+@command(
+    command_type=CommandType.QUEUE,
+    public=True,
+    format='<emoji> [all]',
+    brief='Rank queued rips with the most of a react',
+    desc='Only shows 30 rips at most. Include `all` or `a` to show everything.',
+    aliases=['viberank_queue', 'viberank_queues', 'reactrank_q', 'reactrank_queue', 'reactrank_queues'],
+)
+async def viberank_q(args: list[str], command_context: CommandContext):
+
+    if not len(args): 
+        return await send("Error: Please include an emoji to search for. I'll show queued rips that have the most of that emoji", command_context.channel)
+
+    react_input = emoji_to_react_name_if_emoji(args[0])
+
+    max = 30
+    if len(args) > 1:
+        max = 0 
+
+    queue_rips = []
+    for channel_id in get_channel_ids_of_types(['QUEUE']):
+        channel = bot.get_channel(channel_id)
+        if channel:
+            rips_and_errors  = await get_rips(channel, GetRipsDesc(typing_channel=command_context.channel))
+            if len(rips_and_errors.error_strings):
+                return await send_if_errors("The vibes are bad!", rips_and_errors.error_strings, command_context.channel)
+            queue_rips.extend(rips_and_errors.rips)
+
+    await send_viberank(queue_rips, react_input, max, command_context)
+
+
+@command(
+    command_type=CommandType.SUBS,
+    public=True,
+    format='<emoji> [all]',
+    brief='Rank subbed rips with the most of a react',
+    desc='Only shows 30 rips at most. Include `all` or `a` to show everything.',
+    aliases=['viberank_sub', 'reactrank_sub'],
+)
+async def viberank_subs(args: list[str], command_context: CommandContext):
+
+    if not len(args): 
+        return await send("Error: Please include an emoji to search for. I'll show subbed rips that have the most of that emoji", command_context.channel)
+
+    react_input = emoji_to_react_name_if_emoji(args[0])
+
+    max = 30
+    if len(args) > 1:
+        max = 0 
+
+    subbed_rips = []
+    for channel_id in get_channel_ids_of_types(['SUBS', 'SUBS_THREAD', 'SUBS_PIN']):
+        channel = bot.get_channel(channel_id)
+        if channel:
+            rips_and_errors = await get_rips(channel, GetRipsDesc(typing_channel=command_context.channel))
+            if len(rips_and_errors.error_strings):
+                return await send_if_errors("vibes are kind of not in today. come back later", rips_and_errors.error_strings, command_context.channel)
+            subbed_rips.extend(rips_and_errors.rips)
+
+    await send_viberank(subbed_rips, react_input, max, command_context)
 
 @command(
     command_type=CommandType.SUBS,
