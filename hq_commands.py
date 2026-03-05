@@ -518,10 +518,10 @@ async def valdate_random_count_input(args: List[str], channel: TextChannel | Thr
         if args[0].isdigit():
             count = int(args[0])
             if count == 0:
-                await send_embed(f'**[Zero. - Zero 64 (Zero Mix)](<https://www.youtube.com/watch?v=UtGL5yKdSCk>)**\nby Zero Z | 🔥 🔥 🍌 😭\n------------------------------', command_context.channel, EmbedDesc())
+                await send_embed(f'**[Zero. - Zero 64 (Zero Mix)](<https://www.youtube.com/watch?v=UtGL5yKdSCk>)**\nby Zero Z | 🔥 🔥 🍌 😭\n------------------------------', channel, EmbedDesc())
                 return None
         else:
-            await send(f'**{args[0]}** is not a number. Please enter include how many rips you want to roll, or nothing if you just want one.', command_context.channel)
+            await send(f'**{args[0]}** is not a number. Please enter include how many rips you want to roll, or nothing if you just want one.', channel)
             return None
     return count
 
