@@ -19,6 +19,7 @@ from contextlib import asynccontextmanager
 import asyncio
 import re
 import math
+import random
 
 import discord
 from discord.abc import GuildChannel
@@ -1564,6 +1565,14 @@ def format_rip(rip: Rip, guild: discord.Guild, make_smol: bool, spec_overdue_day
         return f'{title_body}\n{info_body}\n'
 
 
+def choose_random_rips(rips: List[Rip], random_count: int) -> List[int]:
+    result = []
+    random.shuffle(rips)
+    ##NOTE: (Ahmayk) consider default 0 as 1, clamp by rip size
+    clamped_count = min(max(1, random_count), len(rips))
+    for i in range(clamped_count):
+        result.append(rips[i].message_id)
+    return result
 
 #===============================================#
 #                    EVENTS                     #

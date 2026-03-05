@@ -151,6 +151,7 @@ class RoundupDesc(NamedTuple):
     react_name: str = ""
     reaction_type: ReactType = ReactType.NULL 
     not_found_message: str = ""
+    random_count: int = 0
 
 async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContext):
     """
@@ -172,9 +173,9 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
     ##TODO: (Ahmayk) fuzzy username input (ie typing "ahmayk" and matching to their username or display name)
     user_id = command_context.user.id
 
-    selected_index = 0
+    selected_rip_message_ids = [] 
     if roundup_desc.roundup_filter_type == RoundupFilterType.RANDOM:
-        selected_index = random.randint(0, len(rips_and_errors.rips) - 1)
+        selected_rip_message_ids = choose_random_rips(rips_and_errors.rips, roundup_desc.random_count)
 
     readability_line = "━━━━━━━━━━━━━━━━━━\n"
 
@@ -246,7 +247,7 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
                 vet_reacts, msg = await vet_message(rip.text) 
                 is_valid = True 
             case RoundupFilterType.RANDOM:
-                is_valid = (i == selected_index)
+                is_valid = rip.message_id in selected_rip_message_ids
 
         if is_valid:
             result += format_rip(rip, command_context.channel.guild, False, spec_overdue_days, overdue_days) + vet_reacts
@@ -511,13 +512,35 @@ async def overdue(args: list[str], command_context: CommandContext):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.OVERDUE, not_found_message="No overdue rips.")
     await send_roundup(roundup_desc, command_context)
 
+
+async def valdate_random_count_input(args: List[str], channel: TextChannel | Thread) -> int | None:
+    count = 1
+    if len(args):
+        if '-' in args[0]:
+            await send(f'ERROR: Negative rips not implemented `(library not found: antirip)`', channel)
+            return None
+        if args[0].isdigit():
+            count = int(args[0])
+            if count == 0:
+                await send_embed(f'**[Zero. - Zero 64 (Zero Mix)](<https://www.youtube.com/watch?v=UtGL5yKdSCk>)**\nby Zero Z | 🔥 🔥 🍌 😭\n------------------------------', command_context.channel, EmbedDesc())
+                return None
+        else:
+            await send(f'**{args[0]}** is not a number. Please enter include how many rips you want to roll, or nothing if you just want one.', command_context.channel)
+            return None
+    return count
+
 @command(
     command_type=CommandType.QOC,
     brief=f'Show a random QoC rip',
+    format="[count]",
+    desc='Insert a number to roll that many rips.',
     aliases=['random', 'randomqoc', 'random_qoc', 'lucky', 'letsgogambling!']
 )
 async def randompull(args: list[str], command_context: CommandContext):
-    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.RANDOM, not_found_message="No gambling today, sorry!")
+    count = await valdate_random_count_input(args, command_context.channel)
+    if count == None: return
+    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.RANDOM, random_count = count, \
+                               not_found_message="No gambling today, sorry!")
     await send_roundup(roundup_desc, command_context)
 
 
@@ -672,11 +695,7 @@ async def send_suborqueue_rips(desc: SendSubOrQueueDesc, command_context: Comman
                 temp_rips_and_errors = await get_rips(channel, GetRipsDesc(typing_channel=command_context.channel))
                 error_strings.extend(temp_rips_and_errors.error_strings)
                 temp_rips_all.extend(temp_rips_and_errors.rips)
-        random.shuffle(temp_rips_all)
-        clamped_count = min(max(1, desc.random_count), len(temp_rips_all))
-        print(f'clamped: {clamped_count}')
-        for i in range(clamped_count):
-            selected_rip_message_ids.append(temp_rips_all[i].message_id)
+        selected_rip_message_ids = choose_random_rips(temp_rips_all, desc.random_count)
 
     for channel_id in channel_ids:
         channel = bot.get_channel(channel_id)
@@ -785,16 +804,8 @@ async def event_subs(args: list[str], command_context: CommandContext):
 )
 async def random_sub(args: list[str], command_context: CommandContext):
 
-    count = 1
-    if len(args):
-        if '-' in args[0]:
-            return await send(f'ERROR: Negative rips not implemented `(library not found: antirip)`', command_context.channel)
-        if args[0].isdigit():
-            count = int(args[0])
-            if count == 0:
-                return await send_embed(f'**[Zero. - Zero 64 (Zero Mix)](<https://www.youtube.com/watch?v=UtGL5yKdSCk>)**\nby Zero Z | 🔥 🔥 🍌 😭\n------------------------------', command_context.channel, EmbedDesc())
-        else:
-            return await send(f'**{args[0]}** is not a number. Please enter include how many rips you want to roll, or nothing if you just want one.', command_context.channel)
+    count = await valdate_random_count_input(args, command_context.channel)
+    if count == None: return
 
     desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.RANDOM, \
                               random_count = count, \
@@ -1088,11 +1099,16 @@ async def subs_all(args: list[str], command_context: CommandContext):
 @command(
     command_type=CommandType.QUEUE,
     public=True,
+    format="[count]",
     brief=f'Show a random submitted rip',
+    desc='Insert a number to roll that many rips.',
     aliases=['randomq', 'randomqueue', 'randomaccepted', 'luckyqueue', 'letsgogambling!queue!']
 )
 async def random_q(args: list[str], command_context: CommandContext):
+    count = await valdate_random_count_input(args, command_context.channel)
+    if count == None: return
     desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.RANDOM, \
+                              random_count=count, \
                               channel_types = ['QUEUE'])
     await send_suborqueue_rips(desc, command_context)
 
