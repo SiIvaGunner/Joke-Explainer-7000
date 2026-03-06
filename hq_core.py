@@ -84,6 +84,7 @@ class ReactType(Enum):
     METADATA = auto()
     THUMBNAIL = auto()
     EMAILSENT = auto()
+    ANTIMAIL = auto()
     SENDBACK = auto()
     NUMBER = auto()
 
@@ -696,6 +697,8 @@ def react_is(reaction_type: ReactType, name: str) -> bool:
             result = name_lower == "thumbnail" or name_lower == DEFAULT_THUMBNAIL
         case ReactType.EMAILSENT:
             result = name_lower == "emailsent"
+        case ReactType.ANTIMAIL:
+            result = name_lower == "antimail"
         case ReactType.SENDBACK:
             result = name_lower == "sendback" or name_lower == DEFAULT_SENDBACK
         case ReactType.NUMBER:

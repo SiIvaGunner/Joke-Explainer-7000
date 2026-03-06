@@ -713,7 +713,7 @@ async def send_suborqueue_rips(desc: SendSubOrQueueDesc, command_context: Comman
                         is_valid = rip_has_react([desc.reaction_type], rip)
                     case SubOrQueueRipFilterType.UNSENT:
                         is_valid = line_contains_substring(rip_author, 'email') and \
-                                not rip_has_react([ReactType.EMAILSENT], rip)
+                                not rip_has_react([ReactType.EMAILSENT, ReactType.ANTIMAIL], rip)
                     case SubOrQueueRipFilterType.SEARCH_TITLE:
                         is_valid = line_contains_substring(rip_title, desc.search_key)
                     case SubOrQueueRipFilterType.SEARCH_AUTHOR:
