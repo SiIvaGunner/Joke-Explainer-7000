@@ -1697,9 +1697,9 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
 
                 rips_and_errors = await get_rips_fast(channel, GetRipsDesc())
                 error_strings.extend(rips_and_errors.error_strings)
-                count = len(rips_and_errors.rips)
+                new_count = len(rips_and_errors.rips)
                 soft_pin_limit = get_config('soft_pin_limit')
-                txt += f'-# Rip Count: {count}/{soft_pin_limit}'
+                txt += f'-# Rip Count: {new_count}/{soft_pin_limit}'
 
             unlock_channel(channel.id)
 
@@ -1724,22 +1724,27 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
 
             rips_and_errors = await get_rips_fast(channel, GetRipsDesc())
             error_strings.extend(rips_and_errors.error_strings)
-            count = len(rips_and_errors.rips) + 1
 
-            is_valid = True
+            new_count = len(rips_and_errors.rips) + 1
+            is_pinlimit_must_die = get_channel_config(channel.id).pinlimit_must_die_mode
             SOFT_PIN_LIMIT = get_config('soft_pin_limit')
-            if count > SOFT_PIN_LIMIT:
-                if get_channel_config(channel.id).pinlimit_must_die_mode:
-                    error_strings.extend(await discord_unpin_message(message))
-                    error_strings.extend(await discord_add_reaction('📌', message))
-                    await send(f":bangbang: **Error**: {count}/{SOFT_PIN_LIMIT} rips in pins. Unpinned.\n-# Remove the 📌 reaction when this is resolved.", channel)
-                    is_valid = False
-                else:
-                    await send(f"**Warning: {count}/{SOFT_PIN_LIMIT}** rips pinned. Please handle other rips first :(", channel)
-            elif count > max(0, SOFT_PIN_LIMIT - 10):
-                await send(f"-# Warning: **{SOFT_PIN_LIMIT - count} rips** until pinlimit is reached.\n-# Rip Count: {count}/{SOFT_PIN_LIMIT}", channel)
 
-            if is_valid:
+            if is_pinlimit_must_die and new_count > SOFT_PIN_LIMIT:
+                error_strings.extend(await discord_unpin_message(message))
+                error_strings.extend(await discord_add_reaction('📌', message))
+                await send(f":bangbang: **Error**: {len(rips_and_errors.rips)}/{SOFT_PIN_LIMIT} rips in pins. Unpinned.\n-# Remove the 📌 reaction when this is resolved.", channel)
+            else:
+
+                if new_count > SOFT_PIN_LIMIT:
+                    await send(f":warning: **Warning: {new_count}/{SOFT_PIN_LIMIT}** rips pinned. Please handle other rips first :(", channel)
+                elif new_count == SOFT_PIN_LIMIT:
+                    if is_pinlimit_must_die:
+                        await send(f"-# Warning: **Pinlimit is reached!** Pinlimit must die is **on**, so you pin another rip, *prepare to die!*\n-# Rip Count: {new_count}/{SOFT_PIN_LIMIT}", channel)
+                    else:
+                        await send(f"-# Warning: **Pinlimit is reached!** Pinlimit must die is **off**, but please handle other rips first before pinning more.\n-# Rip Count: {new_count}/{SOFT_PIN_LIMIT}", channel)
+                elif new_count < SOFT_PIN_LIMIT and new_count >= max(0, SOFT_PIN_LIMIT - 10):
+                    await send(f"-# Warning: **{SOFT_PIN_LIMIT - new_count} rips** until pinlimit is reached.\n-# Rip Count: {new_count}/{SOFT_PIN_LIMIT}", channel)
+
                 await lock_message(message.id, None)
                 #NOTE: (Ahmayk) have to fetch message to get reaction data for cache
                 message_and_errors = await discord_fetch_message(message.id, channel)
