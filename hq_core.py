@@ -1724,7 +1724,7 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
 
             rips_and_errors = await get_rips_fast(channel, GetRipsDesc())
             error_strings.extend(rips_and_errors.error_strings)
-            count = len(rips_and_errors.rips)
+            count = len(rips_and_errors.rips) + 1
 
             is_valid = True
             SOFT_PIN_LIMIT = get_config('soft_pin_limit')
