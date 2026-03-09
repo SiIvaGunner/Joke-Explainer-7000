@@ -605,7 +605,15 @@ async def validate_cache_regularly():
             print(f"{today.strftime('%m/%d/%y %I:%M %p')}  Cache revalidated. No issues found.")
     except Exception as error:
         await send_crash(f'ERROR on scheduled cache revalidation', error, None)
-    
+
+@tasks.loop(time=times)
+async def cleanup_regularly():
+    qoc_channel_ids = get_channel_ids_of_types(['QOC'])
+    await remove_embeds_from_channel(qoc_channel_ids, get_config('embed_seconds'))
+
+    proxy_channel_ids = get_channel_ids_of_types(['PROXY_QOC'])
+    await remove_embeds_from_channel(proxy_channel_ids, get_config('proxy_embed_seconds'))
+
 
 async def rebuild_cache_for_channel(channel_id: int) -> StringAndErrors:
     return_message = ""
@@ -1592,16 +1600,15 @@ def emoji_to_react_name_if_emoji(s: str) -> str:
 #                    EVENTS                     #
 #===============================================#
 
-async def remove_embeds_from_channel_startup(channel_ids: List[int], expire_time_seconds: float):
-    prefix = get_config("prefix")
+async def remove_embeds_from_channel(channel_ids: List[int], expire_time_seconds: float):
     for channel_id in channel_ids:
         channel = bot.get_channel(channel_id)
         if channel:
             messages_and_errors = await discord_cleanup_embeds(200, expire_time_seconds, channel, None) 
             count = len(messages_and_errors.messages)
             if count > 0:
-                await send(f"Good morning! Removed {count} embed messages sent more than {expire_time_seconds // 60} minutes ago. " + \
-                       f"If there are older or newer embeds that should be removed, run {prefix}cleanup manually.", channel)
+                await send(f"Removed {count} embed messages sent more than {expire_time_seconds // 60} minutes ago. " + \
+                       f"I'm just cleaning up my embeds sent before I restarted, don't worry!", channel)
 
 @bot.event
 async def on_ready():
@@ -1620,12 +1627,7 @@ async def on_ready():
     await write_log(validate_result)
 
     validate_cache_regularly.start()
-
-    qoc_channel_ids = get_channel_ids_of_types(['QOC'])
-    await remove_embeds_from_channel_startup(qoc_channel_ids, get_config('embed_seconds'))
-
-    proxy_channel_ids = get_channel_ids_of_types(['PROXY_QOC'])
-    await remove_embeds_from_channel_startup(proxy_channel_ids, get_config('proxy_embed_seconds'))
+    cleanup_regularly.start()
 
 import traceback
 @bot.event
