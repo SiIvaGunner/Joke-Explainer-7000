@@ -988,7 +988,7 @@ def parse_channel_link(link: str | None, types: typing.List[str], give_default: 
     elif give_default:
         return default_id, f"Warning: Link is not a valid roundup channel, defaulting to <#{default_id}>."
     else:
-        return None, "Error: Link is not a valid roundup channel."
+        return -1, "Error: Link is not a valid roundup channel."
 
 
 async def get_qoc_channel(channel: TextChannel | Thread):
