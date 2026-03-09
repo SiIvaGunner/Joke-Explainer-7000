@@ -1643,7 +1643,6 @@ import types
 bot.close = types.MethodType(close_with_log, bot)
 
 latest_pin_time: datetime = datetime.now(timezone.utc)
-latest_scan_time: datetime = datetime.now(timezone.utc)
 
 @bot.event
 async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Thread], last_pin: datetime):
@@ -1739,7 +1738,7 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
                     await send(f":warning: **Warning: {new_count}/{SOFT_PIN_LIMIT}** rips pinned. Please handle other rips first :(", channel)
                 elif new_count == SOFT_PIN_LIMIT:
                     if is_pinlimit_must_die:
-                        await send(f"-# Warning: **Pinlimit is reached!** Pinlimit must die is **on**, so you pin another rip, *prepare to die!*\n-# Rip Count: {new_count}/{SOFT_PIN_LIMIT}", channel)
+                        await send(f"-# Warning: **Pinlimit is reached!** Pinlimit must die is **on**, so if you pin another rip, *prepare to die!*\n-# Rip Count: {new_count}/{SOFT_PIN_LIMIT}", channel)
                     else:
                         await send(f"-# Warning: **Pinlimit is reached!** Pinlimit must die is **off**, but please handle other rips first before pinning more.\n-# Rip Count: {new_count}/{SOFT_PIN_LIMIT}", channel)
                 elif new_count < SOFT_PIN_LIMIT and new_count >= max(0, SOFT_PIN_LIMIT - 10):
