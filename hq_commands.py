@@ -117,7 +117,7 @@ async def help(args: list[str], command_context: CommandContext):
         result += f'\n{" ".join(qoc_channels_strings)}'
         result += f'\n\n*To learn more about a command, use `{prefix}help <command>`*'
 
-        await send_embed(result, command_context.channel, EmbedDesc(seperator='\n\n'))
+        await send_embed(result, command_context.channel, EmbedDesc(seperator='\n\n', title="Commands"))
 
 # ============ Roundup commands ============== #
 
