@@ -193,7 +193,7 @@ async def discord_cleanup_embeds(limit: int | None, expire_time: float, channel:
     error_strings: List[str] = [] 
 
     def should_delete(message: Message):
-        result = message.author == bot.user and len(message.embeds) and (message.embeds[0].title is None)
+        result = message.author == bot.user and len(message.embeds) and (message.embeds[0].type == "rich") and (message.embeds[0].title is None)
         if result and expire_time: 
             result = (datetime.now(timezone.utc) - message.created_at) > timedelta(seconds=expire_time)
         return result 
