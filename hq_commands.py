@@ -147,7 +147,7 @@ class RoundupDesc(NamedTuple):
     message_author_name: str = ""
     user_id: int = 0 
     conditional_string: str = ""
-    search_key: str = ""
+    parsed_search_input: ParsedSearchInput = ParsedSearchInput([], False, "") 
     react_name: str = ""
     reaction_type: ReactType = ReactType.NULL 
     not_found_message: str = ""
@@ -168,13 +168,6 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
 
     spec_overdue_days = get_config('spec_overdue_days')
     overdue_days = get_config('overdue_days')
-
-    search_key = roundup_desc.search_key 
-    is_search_not = False
-    if "NOT" in roundup_desc.search_key:
-        is_search_not = True
-        search_key = roundup_desc.search_key.replace("NOT", "")
-    search_keys = search_key.split('|')
 
     ##TODO: (Ahmayk) fuzzy username input (ie typing "ahmayk" and matching to their username or display name)
     user_id = command_context.user.id
@@ -219,23 +212,11 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
                 is_valid = rip_has_react([ReactType.CHECK], rip) and \
                             rip_has_react([ReactType.REJECT], rip)
             case RoundupFilterType.SEARCH_TITLE:
-                is_valid = False
-                rip_title = get_rip_title(rip.text)
-                for key in search_keys:
-                    if line_contains_substring(rip_title, key):
-                        is_valid = True
-                        break
-                if is_search_not:
-                    is_valid = not is_valid 
+                title = get_rip_title(rip.text)
+                is_valid = search_with_parsed_input(title, roundup_desc.parsed_search_input) 
             case RoundupFilterType.SEARCH_AUTHOR:
-                is_valid = False
                 author = get_rip_author(rip.text, rip.message_author_name)
-                for key in search_keys:
-                    if line_contains_substring(author, key):
-                        is_valid = True
-                        break
-                if is_search_not:
-                    is_valid = not is_valid 
+                is_valid = search_with_parsed_input(author, roundup_desc.parsed_search_input) 
             case RoundupFilterType.HASREACT:
                 is_valid = rip_has_react([roundup_desc.reaction_type], rip)
             case RoundupFilterType.NOTHASREACT:
@@ -361,9 +342,9 @@ async def spicy(args: list[str], command_context: CommandContext):
 
 @command(
     command_type=CommandType.QOC,
-    format="<search text>",
+    format="[NOT] <search text>",
     brief="Search QoC rips titles",
-    desc="Does not need quotes.",
+    desc="Does not need quotes. Include NOT to search for rips that don't inlude the searched input.",
     examples=["Deltarune", "PAL", "Mother 3"]
 )
 async def search(args: list[str], command_context: CommandContext):
@@ -372,11 +353,11 @@ async def search(args: list[str], command_context: CommandContext):
         return await send("Error: Inclue what you want to search for! I'll search for it in the titles of QoC rips.", \
                            command_context.channel)
 
-    input_text = " ".join([str(s) for s in args])
+    parsed_search_input = parse_search_input(args)
 
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.SEARCH_TITLE, \
-            search_key=input_text,\
-            not_found_message = f'No rips containing `{input_text}` in title found.')
+            parsed_search_input=parsed_search_input,\
+            not_found_message = f'No rips {parsed_search_input.containing_error_string} in title found.')
     await send_roundup(roundup_desc, command_context)
 
 
@@ -387,17 +368,17 @@ async def search(args: list[str], command_context: CommandContext):
 )
 async def emails(args: list[str], command_context: CommandContext):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.SEARCH_AUTHOR, \
-            search_key= "email",\
+            parsed_search_input = parse_search_input(["email"]),\
             not_found_message = "No emails.")
     await send_roundup(roundup_desc, command_context)
 
 
 @command(
     command_type=CommandType.QOC,
-    format="<event name>",
+    format="[NOT] <event name>",
     brief="Search QoC event rips",
     aliases=["event"],
-    desc="This can also be used as a general purpose author line search tool. Does not need quotes.",
+    desc="This can also be used as a general purpose author line search tool. Does not need quotes. Include NOT to search for rips that don't inlude the searched input.",
     examples=["christmas", "secret", "deez nuts day", "ahmayk"]
 )
 async def events(args: list[str], command_context: CommandContext):
@@ -406,11 +387,11 @@ async def events(args: list[str], command_context: CommandContext):
         return await send("Error: Please include the event name tagged in rips.", \
                            command_context.channel)
 
-    input_text = " ".join([str(s) for s in args])
+    parsed_search_input = parse_search_input(args)
 
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.SEARCH_AUTHOR, \
-            search_key= input_text,\
-            not_found_message = f'No `{input_text}` rips.')
+            parsed_search_input=parsed_search_input,\
+            not_found_message = f'No rips {parsed_search_input.containing_error_string} in author line.')
     await send_roundup(roundup_desc, command_context)
 
 
@@ -669,7 +650,7 @@ class SendSubOrQueueDesc(NamedTuple):
     reaction_type: ReactType = ReactType.NULL 
     channel_link: str = ""
     channel_types: List[str] = []
-    search_key: str = ""
+    parsed_search_input: ParsedSearchInput = ParsedSearchInput([], False, "") 
     not_found_message: str = ""
     random_count: int = 0
 
@@ -689,7 +670,6 @@ async def send_suborqueue_rips(desc: SendSubOrQueueDesc, command_context: Comman
     error_strings = []
     count = 0
 
-    prefix = desc.search_key.lower()
     qoc_emote = get_qoc_emoji(command_context.channel.guild)
 
     selected_rip_message_ids = [] 
@@ -725,11 +705,15 @@ async def send_suborqueue_rips(desc: SendSubOrQueueDesc, command_context: Comman
                         is_valid = line_contains_substring(rip_author, 'email') and \
                                 not rip_has_react([ReactType.EMAILSENT, ReactType.ANTIMAIL], rip)
                     case SubOrQueueRipFilterType.SEARCH_TITLE:
-                        is_valid = line_contains_substring(rip_title, desc.search_key)
+                        is_valid = search_with_parsed_input(rip_title, desc.parsed_search_input) 
                     case SubOrQueueRipFilterType.SEARCH_AUTHOR:
-                        is_valid = line_contains_substring(rip_author, desc.search_key)
+                        is_valid = search_with_parsed_input(rip_author, desc.parsed_search_input) 
                     case SubOrQueueRipFilterType.SCOUT:
-                        is_valid = rip_title.lower().startswith(prefix)
+                        is_valid = False
+                        for key in desc.parsed_search_input.search_keys:
+                            if rip_title.lower().startswith(key.lower()):
+                                is_valid = True
+                                break
                     case SubOrQueueRipFilterType.ALL:
                         is_valid = True
                     case SubOrQueueRipFilterType.RANDOM:
@@ -759,9 +743,9 @@ async def send_suborqueue_rips(desc: SendSubOrQueueDesc, command_context: Comman
 @command(
     command_type=CommandType.SUBS,
     public=True,
-    format="<search text>",
+    format="[NOT] <search text>",
     brief='Search submission rip titles',
-    desc="Does not need quotes.",
+    desc="Does not need quotes. Include NOT to search for rips that don't inlude the searched input.",
     aliases=['search_sub'],
 )
 async def search_subs(args: list[str], command_context: CommandContext):
@@ -770,20 +754,21 @@ async def search_subs(args: list[str], command_context: CommandContext):
         return await send("Error: Inclue what you want to search for! I'll search for it in the titles of submitted rips.", \
                            command_context.channel)
 
-    input_text = " ".join([str(s) for s in args])
+    parsed_search_input = parse_search_input(args)
+
     desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.SEARCH_TITLE, \
                               channel_types = ['SUBS', 'SUBS_PIN', 'SUBS_THREAD'], \
-                              search_key = input_text, \
-                              not_found_message = f'No submissions containing `{input_text}` in title found.')
+                              parsed_search_input = parsed_search_input, \
+                              not_found_message = f'No submissions {parsed_search_input.containing_error_string} in title found.')
     await send_suborqueue_rips(desc, command_context)
 
 
 @command(
     command_type=CommandType.SUBS,
     public=True,
-    format="<event text>",
+    format="[NOT] <event text>",
     brief='Search for submission event rips',
-    desc="This can also be used as a general purpose author line search tool. Does not need quotes.",
+    desc="This can also be used as a general purpose author line search tool. Does not need quotes. Include NOT to search for rips that don't inlude the searched input.",
     aliases=['event_sub'],
 )
 async def event_subs(args: list[str], command_context: CommandContext):
@@ -792,11 +777,12 @@ async def event_subs(args: list[str], command_context: CommandContext):
         return await send("Error: Please include the event name tagged in submitted rips.", \
                            command_context.channel)
 
-    input_text = " ".join([str(s) for s in args])
+    parsed_search_input = parse_search_input(args)
+
     desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.SEARCH_AUTHOR, \
                               channel_types = ['SUBS', 'SUBS_PIN', 'SUBS_THREAD'], \
-                              search_key = input_text, \
-                              not_found_message = f'No submissions containing `{input_text}` in author line found.')
+                              parsed_search_input = parsed_search_input, \
+                              not_found_message = f'No submissions {parsed_search_input.containing_error_string} in author line found.')
     await send_suborqueue_rips(desc, command_context)
 
 
@@ -871,9 +857,9 @@ async def unsent(args: list[str], command_context: CommandContext):
 @command(
     command_type=CommandType.QUEUE,
     public=True,
-    format="<search text>",
+    format="[NOT] <search text>",
     brief='Search queued rip titles',
-    desc="Does not need quotes.",
+    desc="Does not need quotes. Include NOT to search for rips that don't inlude the searched input.",
     aliases=['search_queue', 'search_queues', 'search_qs'],
 )
 async def search_q(args: list[str], command_context: CommandContext):
@@ -882,20 +868,20 @@ async def search_q(args: list[str], command_context: CommandContext):
         return await send("Error: Inclue what you want to search for! I'll search for it in the titles of accepted queued rips.", \
                            command_context.channel)
 
-    input_text = " ".join([str(s) for s in args])
+    parsed_search_input = parse_search_input(args)
     desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.SEARCH_TITLE, \
                               channel_types = ['QUEUE'], \
-                              search_key = input_text, \
-                              not_found_message = f'No submissions containing `{input_text}` in title found.')
+                              parsed_search_input=parsed_search_input, \
+                              not_found_message = f'No submissions {parsed_search_input.containing_error_string} in title found.')
     await send_suborqueue_rips(desc, command_context)
 
 
 @command(
     command_type=CommandType.QUEUE,
     public=True,
-    format="<event text>",
+    format="[NOT] <event text>",
     brief='Search for queued event rips',
-    desc="This can also be used as a general purpose author line search tool. Does not need quotes.",
+    desc="This can also be used as a general purpose author line search tool. Does not need quotes. Include NOT to search for rips that don't inlude the searched input.",
     aliases=['event_queue', 'event_queues', "event_qs"],
 )
 async def event_q(args: list[str], command_context: CommandContext):
@@ -904,21 +890,21 @@ async def event_q(args: list[str], command_context: CommandContext):
         return await send("Error: Please include the event name tagged in queued rips.", \
                            command_context.channel)
 
-    input_text = " ".join([str(s) for s in args])
+    parsed_search_input = parse_search_input(args)
     desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.SEARCH_AUTHOR, \
                               channel_types = ['QUEUE'], \
-                              search_key = input_text, \
-                              not_found_message = f'No submissions containing `{input_text}` in author line found.')
+                              parsed_search_input= parsed_search_input, \
+                              not_found_message = f'No submissions {parsed_search_input.containing_error_string} in author line found.')
     await send_suborqueue_rips(desc, command_context)
 
 
 @command(
     command_type=CommandType.QUEUE,
     public=True,
-    format="<prefix>",
+    format="<prefix> NOT",
     brief='Search queued rips startting with prefix',
-    desc='The prefix can contain spaces.',
-    examples=['e', 'Level', 'deez nuts']
+    desc='The prefix can contain spaces. Include NOT to search for rips that don\'t start with the input.',
+    examples=['e', 'Level', 'deez nuts', 'NOT deez nuts']
 )
 async def scout(args: list[str], command_context: CommandContext):
 
@@ -926,12 +912,11 @@ async def scout(args: list[str], command_context: CommandContext):
         return await send("Error: Please provide a prefix. I'll find approved rips that start with it.", \
                            command_context.channel)
 
-    input_text = " ".join([str(s) for s in args])
-
+    parsed_search_input = parse_search_input(args)
     desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.SCOUT, \
                               channel_types = ['QUEUE'], \
-                              search_key = input_text, \
-                              not_found_message = f'No approved rips starting with {input_text} found.')
+                              parsed_search_input = parsed_search_input, \
+                              not_found_message = f'No approved rips {parsed_search_input.containing_error_string} in their first letters found.')
     await send_suborqueue_rips(desc, command_context)
 
 @command(

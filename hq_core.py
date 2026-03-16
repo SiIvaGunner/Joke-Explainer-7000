@@ -1596,6 +1596,42 @@ def emoji_to_react_name_if_emoji(s: str) -> str:
         react_input = match.group(1)
     return react_input
 
+class ParsedSearchInput(NamedTuple):
+    search_keys: List[str]
+    is_not: bool
+    containing_error_string: str
+
+def parse_search_input(args: List[str]) -> ParsedSearchInput:
+    is_not = False
+    if "NOT" in args:
+        is_not = True
+        args.remove("NOT")
+    search_keys = " ".join([str(s) for s in args]).split('|')
+
+    prefix = 'containing'
+    if is_not:
+        prefix = 'NOT containing'
+
+    containing_error_string = ''
+    if len(search_keys) == 1:
+        containing_error_string = f'{prefix} `{search_keys[0]}`'
+    elif len(search_keys) == 2:
+        containing_error_string = f'{prefix} `{search_keys[0]}` or `{search_keys[1]}`'
+    elif len(search_keys) > 2:
+        containing_error_string = f'{prefix} `{search_keys}`'
+
+    return ParsedSearchInput(search_keys, is_not, containing_error_string)
+
+def search_with_parsed_input(text: str, parsed_search_input: ParsedSearchInput) -> bool:
+    is_valid = False
+    for key in parsed_search_input.search_keys:
+        if line_contains_substring(text, key):
+            is_valid = True
+            break
+    if parsed_search_input.is_not:
+        is_valid = not is_valid 
+    return is_valid
+
 #===============================================#
 #                    EVENTS                     #
 #===============================================#
