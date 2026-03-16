@@ -168,7 +168,13 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
 
     spec_overdue_days = get_config('spec_overdue_days')
     overdue_days = get_config('overdue_days')
-    search_keys = roundup_desc.search_key.split('|')
+
+    search_key = roundup_desc.search_key 
+    is_search_not = False
+    if "NOT" in roundup_desc.search_key:
+        is_search_not = True
+        search_key = roundup_desc.search_key.replace("NOT", "")
+    search_keys = search_key.split('|')
 
     ##TODO: (Ahmayk) fuzzy username input (ie typing "ahmayk" and matching to their username or display name)
     user_id = command_context.user.id
@@ -219,6 +225,8 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
                     if line_contains_substring(rip_title, key):
                         is_valid = True
                         break
+                if is_search_not:
+                    is_valid = not is_valid 
             case RoundupFilterType.SEARCH_AUTHOR:
                 is_valid = False
                 author = get_rip_author(rip.text, rip.message_author_name)
@@ -226,6 +234,8 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
                     if line_contains_substring(author, key):
                         is_valid = True
                         break
+                if is_search_not:
+                    is_valid = not is_valid 
             case RoundupFilterType.HASREACT:
                 is_valid = rip_has_react([roundup_desc.reaction_type], rip)
             case RoundupFilterType.NOTHASREACT:
