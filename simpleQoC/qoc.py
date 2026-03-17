@@ -3,7 +3,7 @@ from pathlib import Path
 from inspect import getsourcefile
 from typing import Tuple
 import requests
-import cgi
+from email.message import EmailMessage
 import re
 import json
 
@@ -183,16 +183,16 @@ def getResponseFromUrl(validUrl: str, head: bool = False):
 def getHeadFromUrl(validUrl: str):
     return getResponseFromUrl(validUrl, True).headers
 
-
 def downloadAudioFromUrl(validUrl: str) -> str:
-    filepath = None
-
+    filename = "" 
     response = getResponseFromUrl(validUrl)
     try:
-        # apparently cgi is deprecated? may need to change to email.message
-        # https://stackoverflow.com/questions/32330152/how-can-i-parse-the-value-of-content-type-from-an-http-header-response
-        _, params = cgi.parse_header(response.headers['Content-Disposition'])
-        filename = params['filename']
+        msg = EmailMessage()
+        msg["Content-Disposition"] = response.headers.get("Content-Disposition")
+        content_filename = msg.get_filename()
+        if content_filename is None:
+            raise KeyError
+        filename = content_filename
     except KeyError:
         if not ('audio' in response.headers['Content-Type'] or 'video' in response.headers['Content-Type']):
             if 'html' in response.headers['Content-Type']:
