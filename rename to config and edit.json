@@ -1,20 +1,25 @@
 {
+    "prefix": "!",
     "metadata": true,
-    "pinlimit_must_die_mode": false,
-
     "embed_seconds": 2700,
     "proxy_embed_seconds": 10800,
-
     "character_limit": 2000,
-    "embed_character_limit": 4000,
-
+    "embed_character_limit_title": 256,
+    "embed_character_limit_footer": 2048,
+    "embed_character_limit_desc": 4096,
+    "embed_character_limit_total": 6000,
     "embed_color": 4724577,
-
     "spec_overdue_days": 3,
     "overdue_days": 7,
-
     "pin_limit": 250,
     "soft_pin_limit": 50,
-
-    "qoc_contains_pinned_rule": true
+    "channels": [
+        {
+            "name": "qoc",
+            "id": -1,
+            "types": ["QOC"],
+            "pinlimit_must_die_mode": false
+        }
+    ],
+    "log_channel": -1
 }

@@ -212,7 +212,14 @@ def downloadAudioFromUrl(validUrl: str) -> str:
 
 
 def parseAudio(filepath: str) -> FileType:
-    return File(filepath)
+    try:
+        file = File(filepath)
+    except wave.error as e:
+        raise QoCException(f'File type {os.path.splitext(filepath)[1]} is not supported ({e}). Try manually inspecting file metadata with ffprobe.')
+    else:
+        if file is None:
+            raise QoCException('Something went wrong parsing file.')
+        return file
 
 
 #=======================================#
@@ -670,7 +677,11 @@ def getFileMetadataMutagen(url: str) -> Tuple[int, str]:
     except QoCException as e:
         errors.append(e.message)
     else:
-        file = parseAudio(filepath)
+        try:
+            file = parseAudio(filepath)
+        except QoCException as e:
+            return (-1, e.message)
+        
         metadata = file.pprint()
     finally:
         if filepath:
@@ -756,6 +767,9 @@ def performQoC(url: str, fullFeedback: bool = True) -> Tuple[int, str]:
     try:
         downloadableUrl = parseUrl(url)
     except QoCException as e:
+        if 'drive/folders' in url:
+            # another custom return value because people keep submitting folders bruhhhhh
+            return (-1, "Drive link is a folder. Please replace it with the link to the rip in the folder.")
         return (-1, e.message)
     
     if not os.path.exists(DOWNLOAD_DIR):
@@ -770,14 +784,16 @@ def performQoC(url: str, fullFeedback: bool = True) -> Tuple[int, str]:
     
     except QoCException as e:
         if 'drive' in url and 'Sign-in' in e.message:
-            # custom return value for sign-in issues, return 1 so it doesn't get filtered
-            return (1, "Drive link is not accessible. Ask Mailroom to reupload if this is an email sub.")
+            # custom return value for sign-in issues
+            return (-1, "Drive link is not accessible. Ask Mailroom to reupload if this is an email sub.")
         errors.append(e.message)
     
     else:
-        file = parseAudio(filepath)
-        if file is None:
-            return (1, "File cannot be parsed.")
+        try:
+            file = parseAudio(filepath)
+        except QoCException as e:
+            return (-1, e.message)
+        
         DEBUG("File metadata: " + file.pprint())
 
         try:
