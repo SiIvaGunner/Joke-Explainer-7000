@@ -9,11 +9,6 @@ _For use by SilvaGunner Quality of Control_
 
 Requires **ffmpeg** as a runnable command in the terminal
 
-### TODO
-
-TODO: Figure out the new Discord API slash command syntax
-
-TODO: Search command that uses specific phrases/emoji?
 
 ### Misc
 
