@@ -6,7 +6,7 @@ from discord.ext import commands, tasks
 from datetime import datetime, timezone, timedelta, time
 
 from bot_secrets import YOUTUBE_API_KEY, YOUTUBE_CHANNEL_NAME
-from simpleQoC.qoc import performQoC, msgContainsBitrateFix, msgContainsClippingFix, msgContainsSigninErr, ffmpegExists, getFileMetadataMutagen, getFileMetadataFfprobe
+from simpleQoC.qoc import CheckResultType, QoCCheckType, QoCCheck, performQoC, msgContainsBitrateFix, msgContainsClippingFix, msgContainsSigninErr, ffmpegExists, getFileMetadataMutagen, getFileMetadataFfprobe
 from simpleQoC.metadata import checkMetadata, isDupe
 
 import re
@@ -25,6 +25,7 @@ import discord
 from discord.abc import GuildChannel
 
 from hq_config import *
+from hq_emojis import *
 
 bot = discord.Client(
     intents = discord.Intents.all() # This was a change necessitated by an update to discord.py :/
@@ -32,27 +33,6 @@ bot = discord.Client(
     # Also had to enable MESSAGE CONENT INTENT https://stackoverflow.com/questions/71553296/commands-dont-run-in-discord-py-2-0-no-errors-but-run-in-discord-py-1-7-3
     # 10/28/22 They changed it again!!! https://stackoverflow.com/questions/73458847/discord-py-error-message-discord-ext-commands-bot-privileged-message-content-i
 )
-
-# Emoji definitions
-APPROVED_INDICATOR = '🔥'
-AWAITING_SPECIALIST_INDICATOR = '♨️'
-SPECS_OVERDUE_INDICATOR = '🫑'
-OVERDUE_INDICATOR = '🕒'
-
-DEFAULT_CHECK = '✅'
-DEFAULT_FIX = '🔧'
-DEFAULT_STOP = '🛑'
-DEFAULT_GOLDCHECK = '🎉'
-DEFAULT_REJECT = '❌'
-DEFAULT_ALERT = '❗'
-DEFAULT_QOC = '🛃'
-DEFAULT_METADATA = '📝'
-DEFAULT_THUMBNAIL = '🖼️'
-DEFAULT_SENDBACK = '➡️'
-
-QOC_DEFAULT_LINKERR = '🔗'
-QOC_DEFAULT_BITRATE = '🔢'
-QOC_DEFAULT_CLIPPING = '📢'
 
 #===============================================#
 #               Rip and React Types             #
@@ -1413,19 +1393,20 @@ def code_to_verdict(code: int, msg: str) -> str:
     return verdict
 
 
-async def check_qoc(text: str, fullFeedback: bool = False) -> typing.Tuple[int, str, str]:
+async def check_qoc(text: str) -> dict[QoCCheckType, QoCCheck]: 
     """
     Perform simpleQoC on a message.
     """
     urls = extract_rip_link(text)
-    qcCode, qcMsg = -1, "No links detected."
-    detectedUrl = "" 
+    #TODO: (Ahmayk) Where do we put this?
+    # qcCode, qcMsg = -1, "No links detected."
+    # detectedUrl = "" 
+    qoc_checks = {} 
     for url in urls:
-        qcCode, qcMsg = await run_blocking(performQoC, url, fullFeedback)
-        if qcCode != -1:
-            detectedUrl = url
+        qoc_checks = await run_blocking(performQoC, url)
+        if QoCCheckType.LINK in qoc_checks and qoc_checks[QoCCheckType.LINK].result != CheckResultType.ERROR:
             break
-    return qcCode, qcMsg, detectedUrl
+    return qoc_checks 
 
 ##TODO: (Ahmayk) Now that checking rip metadata is fast due to being in cache, have this run on every qoc pin without the youtube check
 async def check_metadata(text: str, message_id: int, message_author_name: str, fullFeedback: bool = False) -> typing.Tuple[int, str]:
@@ -1475,41 +1456,35 @@ async def check_metadata(text: str, message_id: int, message_author_name: str, f
     return mtCode, mtMsg
 
 
-async def check_qoc_and_metadata(text: str, message_id: int, message_author_name: str, fullFeedback: bool = False) -> typing.Tuple[str, str]:
+async def check_qoc_and_metadata(text: str, message_id: int, message_author_name: str) -> typing.Tuple[str, str]:
     """
     Perform simpleQoC and metadata checking on a message.
-
-    - **message**: Message to check
-    - **fullFeedback**: If True, display "OK" messages. Otherwise, display only issues.
     """
-    verdict = ""
-    msg = ""
     
-    # QoC
-    qcCode, qcMsg, detectedUrl = await check_qoc(text, fullFeedback)
-    if (qcCode != 0) or fullFeedback:
-        verdict += code_to_verdict(qcCode, qcMsg)
-        msg += qcMsg + "\n"
+    perform_qoc_result = await check_qoc(text)
 
+    #TODO: (Ahmayk) reimplement
     # Metadata
-    mtCode, mtMsg = await check_metadata(text, message_id, message_author_name, fullFeedback)
-    if (mtCode != 0) or fullFeedback:
-        verdict += ("" if len(verdict) == 0 else " ") + DEFAULT_METADATA
-        msg += mtMsg + "\n"
+    # mtCode, mtMsg = await check_metadata(text, message_id, message_author_name, fullFeedback)
+    # if (mtCode != 0) or fullFeedback:
+    #     verdict += ("" if len(verdict) == 0 else " ") + DEFAULT_METADATA
+    #     msg += mtMsg + "\n"
+
+    #TODO: (Ahmayk) reimplement elsewhere
 
     # Check for lines between the rip description and link - if it does not start with "Joke", add a warning
     # in order to minimize accidental joke lines when uploading
-    if detectedUrl is not None:
-        try:
-            for line in text.split('```', 2)[2].splitlines():
-                line = "".join(c for c in line if c.isprintable())
-                if detectedUrl in line:
-                    break
-                elif len(line) > 0 and not line.startswith('Joke') and not line == '||':
-                    msg += "- Line not starting with ``Joke`` detected between description and rip URL. Recommend putting the URL directly under description to avoid accidentally uploading joke lines.\n"
-                    break
-        except IndexError:
-            pass
+    # if detectedUrl is not None:
+    #     try:
+    #         for line in text.split('```', 2)[2].splitlines():
+    #             line = "".join(c for c in line if c.isprintable())
+    #             if detectedUrl in line:
+    #                 break
+    #             elif len(line) > 0 and not line.startswith('Joke') and not line == '||':
+    #                 msg += "- Line not starting with ``Joke`` detected between description and rip URL. Recommend putting the URL directly under description to avoid accidentally uploading joke lines.\n"
+    #                 break
+    #     except IndexError:
+    #         pass
 
     return verdict, msg
 
@@ -1788,21 +1763,51 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
                 error_strings.extend(message_and_errors.error_strings)
                 if message_and_errors.message:
                     message = message_and_errors.message
-                cache_rip_in_message(message)
+                rip = cache_rip_in_message(message)
                 unlock_message(message.id)
 
-                #TODO: (Ahmayk) if this errors at all we need to know
-                verdict, msg = await check_qoc_and_metadata(message.content, message.id, str(message.author))
+                #TODO: (Ahmayk) check metadata too
+                qoc_checks = await check_qoc(rip.text)
+                link_error = QoCCheckType.LINK in qoc_checks and qoc_checks[QoCCheckType.LINK].result == CheckResultType.ERROR
+                if link_error:
+                    return_message += ":warning: **Rip link not Auto-QoCed**\n-# Remove the :link: reaction when the link is fixed and properly vetted."
+                    await message.add_reaction(QOC_DEFAULT_LINKERR)
 
-                if len(msg):
-                    rip_title = get_rip_title(message.content)
-                    link = format_message_link(channel.guild.id, channel.id, message.id)
+                is_pass_all = True
+                for qoc_check in qoc_checks.values():
+                    if qoc_check.result != CheckResultType.PASS:
+                        is_pass_all = False
+                        break
 
-                    if QOC_DEFAULT_LINKERR in verdict:
-                        return_message += ":warning: **Rip link not Auto-QoCed**\n-# Remove the :link: reaction when the link is fixed and/or properly auto-qoced."
-                        await message.add_reaction(QOC_DEFAULT_LINKERR)
-                    return_message += f'\n**Rip**: **[{rip_title}]({link})**\n**Verdict**: {verdict}\n{msg}-# React {DEFAULT_CHECK} if this is resolved.'
+                if not is_pass_all: 
+                    rip_title = get_rip_title(rip.text)
+                    link = format_message_link(message.guild.id, rip.channel_id, rip.message_id)
+                    return_message += f'\n**Rip**: **[{rip_title}]({link})**'
 
+                    verdict_emojis = ""
+                    qoc_text = ""
+                    if link_error: 
+                        verdict_emojis += QOC_DEFAULT_LINKERR 
+                    if is_pass_all:
+                        verdict_emojis += DEFAULT_CHECK
+                    else:
+                        full_feedback = False
+                        for qoc_check_type, qoc_check in qoc_checks.items():
+                            if len(qoc_check.msg) and (full_feedback or qoc_check.result != CheckResultType.PASS):
+                                qoc_text += f'\n- {qoc_check.msg}'
+
+                            if qoc_check.result == CheckResultType.FAIL and DEFAULT_FIX not in verdict_emojis:
+                                verdict_emojis += DEFAULT_FIX
+                                if qoc_check_type == QoCCheckType.BITRATE:
+                                    verdict_emojis += QOC_DEFAULT_BITRATE 
+                                if qoc_check_type == QoCCheckType.CLIPPING:
+                                    verdict_emojis += QOC_DEFAULT_CLIPPING
+
+                            if qoc_check.result == CheckResultType.ERROR and DEFAULT_ERROR not in verdict_emojis:
+                                verdict_emojis += DEFAULT_ERROR
+
+                    return_message += f'\n**Verdict**: {verdict_emojis}{qoc_text}'
+                    return_message += f'\n-# React {DEFAULT_CHECK} if this is resolved.'
 
         await send_and_if_errors(return_message, "Warning: Pining QoC rip returned errors.", error_strings, channel)
 

@@ -11,6 +11,14 @@ from mutagen import File, FileType, flac, wave
 from scipy.io import wavfile
 import subprocess
 import numpy as np
+from enum import Enum, auto
+from typing import NamedTuple, List, Tuple
+
+from hq_emojis import *
+
+#=======================================#
+#           TYPES AND CONSTANTS         #
+#=======================================#
 
 DOWNLOAD_DIR = Path(os.path.abspath(getsourcefile(lambda:0))).parent / 'audioDownloads'
 
@@ -18,6 +26,22 @@ DEFAULT_CLIPPING_THRESHOLD = 3
 DEFAULT_DS_CLIPPING_THRESHOLD = 5
 
 CLIPPING_FILESIZE_LIMIT = 1024 * 1024 * 500 # 500MB
+
+class CheckResultType(Enum):
+    NULL = -2 #NOTE: (Ahmayk) Nothing was done (example: No link exists) 
+    ERROR = -1 
+    PASS = 0 
+    FAIL = 1 
+
+class QoCCheck(NamedTuple):
+    result: CheckResultType = CheckResultType.NULL 
+    msg: str = ""
+
+class QoCCheckType(Enum):
+    LINK = auto()
+    BITRATE = auto()
+    CLIPPING = auto()
+    RESOLUTION = auto()
 
 #=======================================#
 #               DEBUGGING               #
@@ -226,26 +250,31 @@ def parseAudio(filepath: str) -> FileType:
 #           BITRATE CHECKING            #
 #=======================================#
 
-def checkBitrateFromFile(file: FileType) -> Tuple[bool, str]:
+def checkBitrateFromFile(file: FileType) -> QoCCheck: 
     """
     Check the bitrate of a mutagen File.
     Requires either lossless format or the metadata contains bitrate information.
-    If not, raises QoCException with the file metadata.
     """
+    result = CheckResultType.ERROR
+    msg = "ERROR: Unknown bitrate. File metadata: {}".format(file.pprint())
+
     if isinstance(file, wave.WAVE) or isinstance(file, flac.FLAC):
-        return (True, "Lossless file is OK.")
-    
+        result = CheckResultType.PASS
+        msg = "Lossless file is OK." 
     # seems video files show lower bitrate on properties view for some reason, shouldn't be an issue generally
-    if hasattr(file.info, 'bitrate'):
+    elif hasattr(file.info, 'bitrate'):
         bitrate = file.info.bitrate
         if bitrate == 0:      # Some MP4 files have 0 kbps bitrate?
-            return (True, "Bitrate is OK (0 kbps detected).")
+            result = CheckResultType.PASS
+            msg = "Bitrate is OK (0 kbps detected)."
         elif bitrate < 300000:    # Apparently some weird files can have bitrate at 317kbps or even 319.999kbps. Let's say 300k is good enough
-            return (False, "The {} file's bitrate is {}kbps. Please re-render at 320kbps.".format(type(file).__name__, bitrate // 1000))
+            result = CheckResultType.FAIL
+            msg = "The {} file's bitrate is {}kbps. Please re-render at 320kbps.".format(type(file).__name__, bitrate // 1000)
         else:
-            return (True, "Bitrate is OK.")
+            result = CheckResultType.PASS
+            msg = "Bitrate is OK."
     
-    raise QoCException("ERROR: Unknown bitrate. File metadata: {}".format(file.pprint()))
+    return QoCCheck(result, msg)
 
 
 def checkBitrateFromUrl(validUrl: str) -> Tuple[bool, str]:
@@ -305,7 +334,7 @@ def channelHasClipping(channel: np.ndarray, max, min, threshold: int) -> list:
     return getClipping(channel, max, threshold) + getClipping(channel, min, threshold)
     
 
-def checkClipping(wav_filepath: Path, threshold: int, doGradientAnalysis: bool) -> Tuple[bool, str]:
+def checkClipping(wav_filepath: Path, threshold: int, doGradientAnalysis: bool) -> QoCCheck: 
     """
     Checks whether a WAV file is clipping (waveform contains "flat" peaks).
     - **wav_filepath**: Path to a local WAV file.
@@ -315,7 +344,7 @@ def checkClipping(wav_filepath: Path, threshold: int, doGradientAnalysis: bool) 
     if os.path.getsize(wav_filepath) > CLIPPING_FILESIZE_LIMIT:
         # if WAV file is over 500 MB, skip clipping checking to not nuke the RAM by loading the entire waveform into memory
         # TODO: change to analyze by chunk?
-        return (True, "Unable to check for clipping due to large file size or audio length. Workaround TBA.")
+        return QoCCheck(CheckResultType.ERROR, "Unable to check for clipping due to large file size or audio length. Workaround TBA.")
     
     wavFile = parseAudio(wav_filepath)
 
@@ -333,9 +362,9 @@ def checkClipping(wav_filepath: Path, threshold: int, doGradientAnalysis: bool) 
         # TODO: fine tune arbitrarily chosen threshold
         # it may be possible to use 'and' since overflow/underflow will create large gradient both ways
         if maxG > 0.8 or minG < -0.8:
-            return (False, "Detected large gradient. Please verify clipping in Audacity.")
+            return QoCCheck(CheckResultType.ERROR, "Detected large gradient. Please verify clipping in Audacity.")
         else:
-            return (True, "The rip is not clipping.")
+            return QoCCheck(CheckResultType.PASS, "The rip is not clipping.")
 
     # +1 to min in order to mimic Audacity's Find Clipping algorithm,
     # even though WAV samples can technically go lower
@@ -397,12 +426,12 @@ def checkClipping(wav_filepath: Path, threshold: int, doGradientAnalysis: bool) 
         else:
             msg = "The rip is clipping at: " + ", ".join(clips) + "." + msg
         
-        return (False, msg)
+        return QoCCheck(CheckResultType.FAIL, msg)
     else:
-        return (True, "The rip is not clipping.")
+        return QoCCheck(CheckResultType.PASS, "The rip is not clipping.")
 
 
-def checkClippingFromFile(file: FileType, filepath: str, threshold: int = DEFAULT_CLIPPING_THRESHOLD) -> Tuple[bool, str]:
+def checkClippingFromFile(file: FileType, filepath: str, threshold: int = DEFAULT_CLIPPING_THRESHOLD) -> QoCCheck:
     """
     Checks whether a mutagen File is clipping.
     Requires the file having been downloaded locally.
@@ -418,20 +447,21 @@ def checkClippingFromFile(file: FileType, filepath: str, threshold: int = DEFAUL
     if not os.path.exists(wav_filepath):
         ffmpegToWAV(filepath, wav_filepath)
 
+    qoc_check = QoCCheck() 
     # do gradient analysis if file is 24-bit FLAC
     if isinstance(file, flac.FLAC) and file.info.bits_per_sample == 24:
         DEBUG("Input file is detected as 24-bit FLAC. Recommend verifing clipping in Audacity.")
-        check, msg = checkClipping(wav_filepath, threshold, True)
+        qoc_check = checkClipping(wav_filepath, threshold, True)
     else:
-        check, msg = checkClipping(wav_filepath, threshold, False)
+        qoc_check = checkClipping(wav_filepath, threshold, False)
 
     if newfile:
         os.remove(wav_filepath)
 
-    return (check, msg)
+    return qoc_check 
 
 
-def checkClippingFromUrl(validUrl: str, threshold: int = DEFAULT_CLIPPING_THRESHOLD) -> Tuple[bool, str]:
+def checkClippingFromUrl(validUrl: str, threshold: int = DEFAULT_CLIPPING_THRESHOLD) -> QoCCheck: 
     """
     Checks whether a URL media is clipping.
     Will only download locally if the URL contains WAV; otherwise convert to local WAV file directly.
@@ -453,13 +483,13 @@ def checkClippingFromUrl(validUrl: str, threshold: int = DEFAULT_CLIPPING_THRESH
 
     if is24bitFLAC:
         DEBUG("Input file is detected as 24-bit FLAC. Recommend verifing clipping in Audacity.")
-        check, msg = checkClipping(wav_filepath, threshold, True)
+        qoc_check = checkClipping(wav_filepath, threshold, True)
     else:
-        check, msg = checkClipping(wav_filepath, threshold, False)
+        qoc_check = checkClipping(wav_filepath, threshold, False)
 
     os.remove(wav_filepath)
 
-    return (check, msg)
+    return qoc_check 
 
 
 #=======================================#
@@ -619,7 +649,7 @@ def checkDLSClippingFromUrl(validUrl: str, threshold: int = DEFAULT_DS_CLIPPING_
 Verify that video files are at least 1080p
 """
 
-def checkResolution(filepath: str) -> Tuple[bool, str]:
+def checkResolution(filepath: str) -> QoCCheck: 
     probeOutput = ffprobeUrl(filepath)
     height = None
     for stream in probeOutput['streams']:
@@ -629,12 +659,12 @@ def checkResolution(filepath: str) -> Tuple[bool, str]:
             continue
     
     if height is None:
-        return (True, "No video streams detected")  
+        return QoCCheck(CheckResultType.PASS, "No video streams detected.")  
     else:
         if height < 1080:
-            return (False, f"The video file height is {height}. Please re-render at 1080p, unless intentional.")
+            return QoCCheck(CheckResultType.FAIL, f"The video file height is {height}. Please re-render at 1080p, unless intentional.")  
         else:
-            return (True, f"The video file height is {height}.")
+            return QoCCheck(CheckResultType.PASS, f"The video file height is {height}.")  
 
 
 #=======================================#
@@ -648,9 +678,6 @@ def msgContainsBitrateFix(msg: str) -> bool:
 
 def msgContainsClippingFix(msg: str) -> bool:
     return (msg.find("The rip is clipping") != -1) or (msg.find("The rip is heavily clipping") != -1)
-
-def msgContainsPRVRClippingFix(msg: str) -> bool:
-    return msg.find("Post-render volume reduction detected") != -1
 
 def msgContainsSigninErr(msg: str) -> bool:
     return msg.find("Drive link is not accessible") != -1
@@ -758,70 +785,62 @@ def getFileMetadataFfprobe(url: str) -> Tuple[int, str]:
 #            Main Function              #
 #=======================================#
 
-def performQoC(url: str, fullFeedback: bool = True) -> Tuple[int, str]:
+def performQoC(url: str) -> dict[QoCCheckType, QoCCheck]: 
     """
     Performs QoC on the given URL.
-    
-    - fullFeedback: Default True. If False, do not return "is OK" messages
     """
+
+    link_error_msg = ""
+
+    #TODO: (Ahmayk) Compress into function 
     try:
         downloadableUrl = parseUrl(url)
     except QoCException as e:
         if 'drive/folders' in url:
             # another custom return value because people keep submitting folders bruhhhhh
-            return (-1, "Drive link is a folder. Please replace it with the link to the rip in the folder.")
-        return (-1, e.message)
+            link_error_msg = "Drive link is a folder. Please replace it with the link to the rip in the folder."
+        else:
+            link_error_msg = e.message
     
-    if not os.path.exists(DOWNLOAD_DIR):
-        os.mkdir(DOWNLOAD_DIR)
-    
-    filepath = None
-    errors = []
+    filepath = "" 
 
-    try:
-        filepath = downloadAudioFromUrl(downloadableUrl)
-        DEBUG("Downloaded audio: " + Path(filepath).name)
-    
-    except QoCException as e:
-        if 'drive' in url and 'Sign-in' in e.message:
-            # custom return value for sign-in issues
-            return (-1, "Drive link is not accessible. Ask Mailroom to reupload if this is an email sub.")
-        errors.append(e.message)
-    
-    else:
+    if not len(link_error_msg):
+
+        if not os.path.exists(DOWNLOAD_DIR):
+            os.mkdir(DOWNLOAD_DIR)
+
+        #TODO: (Ahmayk) Compress into function 
+        try:
+            filepath = downloadAudioFromUrl(downloadableUrl)
+            DEBUG("Downloaded audio: " + Path(filepath).name)
+        except QoCException as e:
+            if 'drive' in url and 'Sign-in' in e.message:
+                # custom return value for sign-in issues
+                link_error_msg = "Drive link is not accessible. Ask Mailroom to reupload if this is an email sub."
+            else:
+                link_error_msg = e.message
+
+    if not len(link_error_msg):
         try:
             file = parseAudio(filepath)
         except QoCException as e:
-            return (-1, e.message)
-        
+            link_error_msg = e.message
+
+    result = {}
+    if not len(link_error_msg):
         DEBUG("File metadata: " + file.pprint())
+        result[QoCCheckType.LINK] = QoCCheck(CheckResultType.PASS, "")
+        result[QoCCheckType.BITRATE] = checkBitrateFromFile(file)
+        result[QoCCheckType.CLIPPING] = checkClippingFromFile(file, filepath)
+        result[QoCCheckType.RESOLUTION] = checkResolution(filepath)
+    else: 
+        result[QoCCheckType.LINK] = QoCCheck(CheckResultType.ERROR, link_error_msg)
 
-        try:
-            bitrateCheck, bitrateMsg = checkBitrateFromFile(file)
-        except QoCException as e:
-            errors.append(e.message)
+    if filepath:
+        os.remove(filepath)
 
-        try:
-            clippingCheck, clippingMsg = checkClippingFromFile(file, filepath)
-        except QoCException as e:
-            errors.append(e.message)
+    return result
 
-        resolutionCheck, resolutionMsg = checkResolution(filepath)
-    
-    finally:
-        if filepath:
-            os.remove(filepath)
-
-    if len(errors) > 0:
-        return (-1, '\n'.join(errors))
-    
-    msgs = []
-    if fullFeedback or not bitrateCheck: msgs.append(bitrateMsg)
-    if fullFeedback or not clippingCheck: msgs.append(clippingMsg)
-    if fullFeedback or not resolutionCheck: msgs.append(resolutionMsg)
-    message = "\n".join("- " + msg for msg in msgs)
-
-    return (0 if (bitrateCheck and clippingCheck and resolutionCheck) else 1, message)
 
 """
 Commented this out to work on it later
@@ -865,16 +884,19 @@ if __name__ == '__main__':
         DEBUG_MODE = True
     
     url = input('Paste the path of the audio you want to check: ')
-    code, msg = performQoC(url)
+    # code, msg = performQoC(url)
+    perform_qoc_result = performQoC(url)
 
-    code2emoji = {
-        -1: ":link:",
-        0: ":check:",
-        1: ":fix:",
-    }
+    # TODO: (Ahmayk) Reimplement
+
+    # code2emoji = {
+    #     -1: ":link:",
+    #     0: ":check:",
+    #     1: ":fix:",
+    # }
     
-    print(code2emoji[code] 
-          + (" :1234:" if msgContainsBitrateFix(msg) else "") 
-          + (" :loud_sound:" if msgContainsClippingFix(msg) else "")
-    )
-    print(msg)
+    # print(code2emoji[code] 
+    #       + (" :1234:" if msgContainsBitrateFix(msg) else "") 
+    #       + (" :loud_sound:" if msgContainsClippingFix(msg) else "")
+    # )
+    # print(msg)
