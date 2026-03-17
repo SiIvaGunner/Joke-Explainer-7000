@@ -1393,22 +1393,23 @@ def code_to_verdict(code: int, msg: str) -> str:
     return verdict
 
 
-async def check_qoc(text: str) -> dict[QoCCheckType, QoCCheck]: 
+async def check_qoc(text: str) -> Tuple[dict[QoCCheckType, QoCCheck], str]: 
     """
     Perform simpleQoC on a message.
     """
     urls = extract_rip_link(text)
     #TODO: (Ahmayk) Where do we put this?
     # qcCode, qcMsg = -1, "No links detected."
-    # detectedUrl = "" 
     qoc_checks = {} 
+    qoced_url = "" 
     for url in urls:
         qoc_checks = await run_blocking(performQoC, url)
         if QoCCheckType.LINK in qoc_checks and qoc_checks[QoCCheckType.LINK].result != CheckResultType.ERROR:
+            qoced_url = url
             break
-    return qoc_checks 
+    return qoc_checks, qoced_url
 
-async def check_metadata(text: str, message_id: int, message_author_name: str, fullFeedback: bool = False) -> typing.Tuple[int, str]:
+async def check_metadata(text: str, message_id: int, message_author_name: str, qoced_url: str, fullFeedback: bool = False) -> typing.Tuple[int, str]:
     """
     Perform metadata checking on rip info.
     If info contains the phrase "unusual metadata", skip most checks
@@ -1449,6 +1450,20 @@ async def check_metadata(text: str, message_id: int, message_author_name: str, f
                 if isDupe(desc, get_rip_description(rip.text), True):
                     link = format_message_link(channel.guild.id, channel.id, rip.message_id)
                     mtMsgs.append(f"Main mix detected in <#{rip.channel_id}>: [{rip_title}]({link}). Add something on the author line to avoid uploading this early.")
+
+        # Check for lines between the rip description and link - if it does not start with "Joke", add a warning
+        # in order to minimize accidental joke lines when uploading
+        if len(qoced_url):
+            try:
+                for line in text.split('```', 2)[2].splitlines():
+                    line = "".join(c for c in line if c.isprintable())
+                    if qoced_url in line:
+                        break
+                    elif len(line) > 0 and not line.startswith('Joke') and not line == '||':
+                        mtMsgs.append("Line not starting with ``Joke`` detected between description and rip URL. Recommend putting the URL directly under description to avoid accidentally uploading joke lines.")
+                        break
+            except IndexError:
+                pass
 
     mtMsg = '\n'.join(["- " + m for m in mtMsgs]) if len(mtMsgs) > 0 else ("- Metadata is OK." if fullFeedback else "")
 
@@ -1766,7 +1781,7 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
                 unlock_message(message.id)
 
                 #TODO: (Ahmayk) check metadata too
-                qoc_checks = await check_qoc(rip.text)
+                qoc_checks, qoced_url = await check_qoc(rip.text)
                 link_error = QoCCheckType.LINK in qoc_checks and qoc_checks[QoCCheckType.LINK].result == CheckResultType.ERROR
                 if link_error:
                     return_message += ":warning: **Rip link not Auto-QoCed**\n-# Remove the :link: reaction when the link is fixed and properly vetted."
@@ -1798,26 +1813,10 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
                         if qoc_check.result == CheckResultType.ERROR and DEFAULT_ERROR not in verdict_emojis:
                             verdict_emojis += DEFAULT_ERROR
 
-                mtCode, mtMsg = await check_metadata(rip.text, rip.message_id, rip.message_author_name, False)
+                mtCode, mtMsg = await check_metadata(rip.text, rip.message_id, rip.message_author_name, qoced_url, False)
                 if (mtCode != 0):
                     verdict_emojis.append(DEFAULT_METADATA)
                     qoc_text += "\n" + mtMsg
-
-                #TODO: (Ahmayk) reimplement elsewhere
-
-                # Check for lines between the rip description and link - if it does not start with "Joke", add a warning
-                # in order to minimize accidental joke lines when uploading
-                # if detectedUrl is not None:
-                #     try:
-                #         for line in text.split('```', 2)[2].splitlines():
-                #             line = "".join(c for c in line if c.isprintable())
-                #             if detectedUrl in line:
-                #                 break
-                #             elif len(line) > 0 and not line.startswith('Joke') and not line == '||':
-                #                 msg += "- Line not starting with ``Joke`` detected between description and rip URL. Recommend putting the URL directly under description to avoid accidentally uploading joke lines.\n"
-                #                 break
-                #     except IndexError:
-                #         pass
 
                 everything_passed = is_qoc_pass_all and mtCode == 0
                 if everything_passed:

@@ -170,6 +170,9 @@ def checkMetadata(description: str, channel_name: str, playlist_id: str, api_key
 
     # Check metadata based on provided playlist ID
     if len(playlist_id) > 0:
+        playlist_name = "" 
+        channel = "" 
+        videos = [] 
         try:
             try:
                 playlist_name, channel = get_playlist_details(playlist_id, api_key)
@@ -186,14 +189,13 @@ def checkMetadata(description: str, channel_name: str, playlist_id: str, api_key
             
         except MetadataException as e:
             messages.add(remove_links(e.message))
-            return -1, messages
 
-        if channel_name != channel:
+        if len(channel_name) and len(channel) and channel_name != channel:
             # Playlist source check
             messages.add("Playlist is not from {} (found playlist from {})".format(channel_name, channel))
         else:
             # Duplicate title check
-            if title in [video['title'] for video in videos]:
+            if len(videos) and title in [video['title'] for video in videos]:
                 messages.add("Video title already exists in playlist.")
     else:
         playlist_name = None
