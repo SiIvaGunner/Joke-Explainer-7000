@@ -235,7 +235,8 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
             case RoundupFilterType.VET_ALL:
                 ##TODO: (Ahmayk) use error api
                 ##TODO: (Ahmayk) actually move this somewhere else when/if vetting command UX is redesigned lol
-                vet_reacts, msg = await vet_message(rip.text) 
+                ##TODO: (Ahmayk) reimplement or get rid of this lol 
+                # vet_reacts, msg = await vet_message(rip.text) 
                 is_valid = True 
             case RoundupFilterType.RANDOM:
                 is_valid = rip.message_id in selected_rip_message_ids

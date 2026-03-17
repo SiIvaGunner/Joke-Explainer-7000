@@ -169,10 +169,13 @@ def checkMetadata(description: str, channel_name: str, playlist_id: str, api_key
                 adv_messages.add('Playlist field is not a valid playlist, YouTube redirect or Drive link. Ignore if this is intentional.')
 
     # Check metadata based on provided playlist ID
-    if len(playlist_id) > 0:
-        playlist_name = "" 
+    playlist_name = "" 
+    videos = []
+    if not len(api_key):
+        messages.add(":warning: YouTube API Key not defined. No YouTube videos or playlists checked.")
+
+    if len(playlist_id) > 0 and len(api_key):
         channel = "" 
-        videos = [] 
         try:
             try:
                 playlist_name, channel = get_playlist_details(playlist_id, api_key)
@@ -197,9 +200,6 @@ def checkMetadata(description: str, channel_name: str, playlist_id: str, api_key
             # Duplicate title check
             if len(videos) and title in [video['title'] for video in videos]:
                 messages.add("Video title already exists in playlist.")
-    else:
-        playlist_name = None
-        videos = []
 
     # Check metadata by patterns
     with open(PATTERNS_FILE, 'r', encoding='utf-8') as file:
@@ -238,47 +238,48 @@ def checkMetadata(description: str, channel_name: str, playlist_id: str, api_key
             # Compare desc['Music'] and title
             track = get_music_from_desc(desc)
 
-            game = None
-            temp_messages = set()
-            good_match = False
+            if title == track:
+                adv_messages.add('Game name in Music field should be removed.')
 
-            for p in patterns["TITLE"]:
-                match = re.match(p.replace('[[TRACK]]', re.escape(track)), title)
-                if match:
-                    game = match.group('game')
-                    existing_titles = [video['title'] for video in videos]
+            if len(videos):
+                game = None
+                temp_messages = set()
+                good_match = False
 
-                    # Check game name
-                    if p.startswith('[[TRACK]]'):
-                        game_match = any([video.endswith(game) for video in existing_titles])
-                    elif p.endswith('[[TRACK]]'):
-                        game_match = any([video.startswith(game) for video in existing_titles])
-                    else:
-                        # unsupported game matching
-                        game_match = True
-                    
-                    if len(existing_titles) > 0 and (game != playlist_name) and not game_match:
-                        if title[-1] == ' ':
-                            temp_messages.add('Trailing whitespace detected at end of title.')
-                        elif len(title) == 100 or (game in playlist_name or any([game in video for video in existing_titles])):
-                            temp_messages.add('Game in title appears to be cut off. Ignore if this was intentional to go under 100-character limit.')
+                for p in patterns["TITLE"]:
+                    match = re.match(p.replace('[[TRACK]]', re.escape(track)), title)
+                    if match:
+                        game = match.group('game')
+                        existing_titles = [video['title'] for video in videos]
+
+                        # Check game name
+                        if p.startswith('[[TRACK]]'):
+                            game_match = any([video.endswith(game) for video in existing_titles])
+                        elif p.endswith('[[TRACK]]'):
+                            game_match = any([video.startswith(game) for video in existing_titles])
                         else:
-                            temp_messages.add(f'Game in title does not match playlist name (``{playlist_name}``) nor any existing videos in playlist.')
-                    else:
-                        # Check that at least one other existing video has the same title formatting
-                        other_p = p.replace('[[TRACK]]', r'(?P<track>[^\n]*)').replace(r'(?P<game>[^\n]*)', re.escape(game))
-                        if len(existing_titles) > 0 and not any([re.match(other_p, t) is not None for t in existing_titles]):
-                            game = None
-                            continue
-                        good_match = True
+                            # unsupported game matching
+                            game_match = True
+                        
+                        if len(playlist_name) and len(existing_titles) > 0 and (game != playlist_name) and not game_match:
+                            if title[-1] == ' ':
+                                temp_messages.add('Trailing whitespace detected at end of title.')
+                            elif len(title) == 100 or (game in playlist_name or any([game in video for video in existing_titles])):
+                                temp_messages.add('Game in title appears to be cut off. Ignore if this was intentional to go under 100-character limit.')
+                            else:
+                                temp_messages.add(f'Game in title does not match playlist name (``{playlist_name}``) nor any existing videos in playlist.')
+                        else:
+                            # Check that at least one other existing video has the same title formatting
+                            other_p = p.replace('[[TRACK]]', r'(?P<track>[^\n]*)').replace(r'(?P<game>[^\n]*)', re.escape(game))
+                            if len(existing_titles) > 0 and not any([re.match(other_p, t) is not None for t in existing_titles]):
+                                game = None
+                                continue
+                            good_match = True
 
-            if not good_match:
-                adv_messages = adv_messages.union(temp_messages)
-            
-            if game is None:
-                if title == track:
-                    adv_messages.add('Game name in Music field should be removed.')
-                else:
+                if not good_match:
+                    adv_messages = adv_messages.union(temp_messages)
+                
+                if game is None and title != track:
                     adv_messages.add('Title format does not match {}, or Music line is incorrect (e.g. missing mixname).'.format('existing videos in playlist' if len(videos) > 0 else 'any known pattern'))
     
     if advanced: messages = messages.union(adv_messages)
