@@ -1408,7 +1408,6 @@ async def check_qoc(text: str) -> dict[QoCCheckType, QoCCheck]:
             break
     return qoc_checks 
 
-##TODO: (Ahmayk) Now that checking rip metadata is fast due to being in cache, have this run on every qoc pin without the youtube check
 async def check_metadata(text: str, message_id: int, message_author_name: str, fullFeedback: bool = False) -> typing.Tuple[int, str]:
     """
     Perform metadata checking on rip info.
@@ -1465,10 +1464,10 @@ async def check_qoc_and_metadata(text: str, message_id: int, message_author_name
 
     #TODO: (Ahmayk) reimplement
     # Metadata
-    # mtCode, mtMsg = await check_metadata(text, message_id, message_author_name, fullFeedback)
-    # if (mtCode != 0) or fullFeedback:
-    #     verdict += ("" if len(verdict) == 0 else " ") + DEFAULT_METADATA
-    #     msg += mtMsg + "\n"
+    mtCode, mtMsg = await check_metadata(text, message_id, message_author_name, fullFeedback)
+    if (mtCode != 0) or fullFeedback:
+        verdict += ("" if len(verdict) == 0 else " ") + DEFAULT_METADATA
+        msg += mtMsg + "\n"
 
     #TODO: (Ahmayk) reimplement elsewhere
 
@@ -1773,41 +1772,64 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
                     return_message += ":warning: **Rip link not Auto-QoCed**\n-# Remove the :link: reaction when the link is fixed and properly vetted."
                     await message.add_reaction(QOC_DEFAULT_LINKERR)
 
-                is_pass_all = True
+                is_qoc_pass_all = True
                 for qoc_check in qoc_checks.values():
                     if qoc_check.result != CheckResultType.PASS:
-                        is_pass_all = False
+                        is_qoc_pass_all = False
                         break
 
-                if not is_pass_all: 
+                verdict_emojis: List[str] = [] 
+                qoc_text = ""
+                full_feedback = False
+                if link_error: 
+                    verdict_emojis.append(QOC_DEFAULT_LINKERR)
+                else:
+                    for qoc_check_type, qoc_check in qoc_checks.items():
+                        if len(qoc_check.msg) and (full_feedback or qoc_check.result != CheckResultType.PASS):
+                            qoc_text += f'\n- {qoc_check.msg}'
+
+                        if qoc_check.result == CheckResultType.FAIL and DEFAULT_FIX not in verdict_emojis:
+                            verdict_emojis.append(DEFAULT_FIX)
+                            if qoc_check_type == QoCCheckType.BITRATE:
+                                verdict_emojis.append(QOC_DEFAULT_BITRATE)
+                            if qoc_check_type == QoCCheckType.CLIPPING:
+                                verdict_emojis.append(QOC_DEFAULT_CLIPPING)
+
+                        if qoc_check.result == CheckResultType.ERROR and DEFAULT_ERROR not in verdict_emojis:
+                            verdict_emojis += DEFAULT_ERROR
+
+                mtCode, mtMsg = await check_metadata(rip.text, rip.message_id, rip.message_author_name, False)
+                if (mtCode != 0):
+                    verdict_emojis.append(DEFAULT_METADATA)
+                    qoc_text += "\n" + mtMsg
+
+                #TODO: (Ahmayk) reimplement elsewhere
+
+                # Check for lines between the rip description and link - if it does not start with "Joke", add a warning
+                # in order to minimize accidental joke lines when uploading
+                # if detectedUrl is not None:
+                #     try:
+                #         for line in text.split('```', 2)[2].splitlines():
+                #             line = "".join(c for c in line if c.isprintable())
+                #             if detectedUrl in line:
+                #                 break
+                #             elif len(line) > 0 and not line.startswith('Joke') and not line == '||':
+                #                 msg += "- Line not starting with ``Joke`` detected between description and rip URL. Recommend putting the URL directly under description to avoid accidentally uploading joke lines.\n"
+                #                 break
+                #     except IndexError:
+                #         pass
+
+                everything_passed = is_qoc_pass_all and mtCode == 0
+                if everything_passed:
+                    verdict_emojis.append(DEFAULT_CHECK)
+
+                if full_feedback or not everything_passed: 
                     rip_title = get_rip_title(rip.text)
                     link = format_message_link(message.guild.id, rip.channel_id, rip.message_id)
                     return_message += f'\n**Rip**: **[{rip_title}]({link})**'
-
-                    verdict_emojis = ""
-                    qoc_text = ""
-                    if link_error: 
-                        verdict_emojis += QOC_DEFAULT_LINKERR 
-                    if is_pass_all:
-                        verdict_emojis += DEFAULT_CHECK
-                    else:
-                        full_feedback = False
-                        for qoc_check_type, qoc_check in qoc_checks.items():
-                            if len(qoc_check.msg) and (full_feedback or qoc_check.result != CheckResultType.PASS):
-                                qoc_text += f'\n- {qoc_check.msg}'
-
-                            if qoc_check.result == CheckResultType.FAIL and DEFAULT_FIX not in verdict_emojis:
-                                verdict_emojis += DEFAULT_FIX
-                                if qoc_check_type == QoCCheckType.BITRATE:
-                                    verdict_emojis += QOC_DEFAULT_BITRATE 
-                                if qoc_check_type == QoCCheckType.CLIPPING:
-                                    verdict_emojis += QOC_DEFAULT_CLIPPING
-
-                            if qoc_check.result == CheckResultType.ERROR and DEFAULT_ERROR not in verdict_emojis:
-                                verdict_emojis += DEFAULT_ERROR
-
-                    return_message += f'\n**Verdict**: {verdict_emojis}{qoc_text}'
+                    return_message += f'\n**Verdict**: {" ".join(verdict_emojis)}{qoc_text}'
                     return_message += f'\n-# React {DEFAULT_CHECK} if this is resolved.'
+
 
         await send_and_if_errors(return_message, "Warning: Pining QoC rip returned errors.", error_strings, channel)
 
