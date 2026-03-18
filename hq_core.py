@@ -1913,7 +1913,7 @@ async def on_message(message: Message):
         return
 
     args = message.content.split(' ')
-    command_name = args[0][1:].lower()
+    command_name = args[0][len(prefix):].lower()
     command_info = find_command_info(command_name)
 
     if not command_info:
