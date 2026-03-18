@@ -1354,14 +1354,17 @@ async def run_blocking(blocking_func: typing.Callable, *args, **kwargs) -> typin
 class VetRipDesc(NamedTuple):
     rip: Rip | None = None
     message: Message | None = None
-    full_feedback: bool = False
     use_youtube_api: bool = False
-    is_new_pinned_message: bool = False
-    skip_link_qoc: bool = False
-    is_message_update: bool = False
 
-async def vet_rip_or_url(rip_text_or_url: str, desc: VetRipDesc) -> str:
-    return_message = ""
+class VetRipResult(NamedTuple):
+    qoced_url: str
+    qoc_checks_dict: dict[QoCCheckType, QoCCheck]
+    metadata_checks: list[QoCCheck] 
+    rip_message_link: str
+    everything_passed: bool
+    error_strings: list[str]
+
+async def vet_rip_or_url(rip_text_or_url: str, desc: VetRipDesc) -> VetRipResult:
 
     rip_text = ""
     urls = [] 
@@ -1382,52 +1385,23 @@ async def vet_rip_or_url(rip_text_or_url: str, desc: VetRipDesc) -> str:
     if not len(urls):
         urls = [rip_text_or_url]
 
-    qoc_checks = {} 
+    qoc_checks_dict = {} 
     qoced_url = "" 
-    is_qoc_pass_all = True 
-    verdict_emojis: List[str] = [] 
-    qoc_text = ""
-    if not desc.skip_link_qoc:
-        for url in urls:
-            qoc_checks = await run_blocking(performQoC, url)
-            if QoCCheckType.LINK in qoc_checks and qoc_checks[QoCCheckType.LINK].result != CheckResultType.ERROR:
-                qoced_url = url
-                break
-        if not len(qoced_url):
-            return_message += "\n:warning: No rip links detected."
+    for url in urls:
+        qoc_checks_dict = await run_blocking(performQoC, url)
+        if QoCCheckType.LINK in qoc_checks_dict and qoc_checks_dict[QoCCheckType.LINK].result != CheckResultType.ERROR:
+            qoced_url = url
+            break
 
-        link_error = QoCCheckType.LINK in qoc_checks and qoc_checks[QoCCheckType.LINK].result == CheckResultType.ERROR
-        if link_error and desc.is_new_pinned_message and desc.message:
-            return_message += "\n:warning: **Rip link not Auto-QoCed**\n-# Remove :link: reaction when link is fixed and properly vetted."
-            await desc.message.add_reaction(QOC_DEFAULT_LINKERR)
-
-        is_qoc_pass_all = len(qoc_checks) > 0
-        for qoc_check in qoc_checks.values():
-            if qoc_check.result != CheckResultType.PASS:
-                is_qoc_pass_all = False
-                break
-
-        if link_error: 
-            verdict_emojis.append(QOC_DEFAULT_LINKERR)
-        else:
-            for qoc_check_type, qoc_check in qoc_checks.items():
-                if len(qoc_check.msg) and (desc.full_feedback or qoc_check.result != CheckResultType.PASS):
-                    qoc_text += f'\n- {qoc_check.msg}'
-
-                if qoc_check.result == CheckResultType.FAIL and DEFAULT_FIX not in verdict_emojis:
-                    verdict_emojis.append(DEFAULT_FIX)
-                    if qoc_check_type == QoCCheckType.BITRATE:
-                        verdict_emojis.append(QOC_DEFAULT_BITRATE)
-                    if qoc_check_type == QoCCheckType.CLIPPING:
-                        verdict_emojis.append(QOC_DEFAULT_CLIPPING)
-
-                if qoc_check.result == CheckResultType.ERROR and DEFAULT_ERROR not in verdict_emojis:
-                    verdict_emojis += DEFAULT_ERROR
+    is_qoc_pass_all = len(qoc_checks_dict) > 0
+    for qoc_check in qoc_checks_dict.values():
+        if qoc_check.result != CheckResultType.PASS:
+            is_qoc_pass_all = False
+            break
 
     error_strings = []
-    metadata_msgs = []
-    vetted_message_link = ""
-    message_author_name = ""
+    metadata_checks = []
+    rip_message_link = "" 
     if len(rip_text):
         description = get_rip_description(rip_text)
         is_unusual_metadata = "unusual metadata" in rip_text.lower()
@@ -1437,9 +1411,11 @@ async def vet_rip_or_url(rip_text_or_url: str, desc: VetRipDesc) -> str:
                 api_key = YOUTUBE_API_KEY 
             playlistId = extract_playlist_id('\n'.join(rip_text.splitlines()[1:])) # ignore author line
             advancedCheck = get_config('metadata')
-            mtCode, metadata_msgs = await run_blocking(checkMetadata, description, YOUTUBE_CHANNEL_NAME, playlistId, api_key, advancedCheck)
+            metadata_checks = await run_blocking(checkMetadata, description, YOUTUBE_CHANNEL_NAME, playlistId, api_key, advancedCheck)
 
         message_id = 0
+        vetted_message_link = ""
+        message_author_name = ""
         if desc.rip:
             vetted_message_link = format_message_link(desc.rip.guild_id, desc.rip.channel_id, desc.rip.message_id)
             message_author_name = desc.rip.message_author_name
@@ -1449,8 +1425,11 @@ async def vet_rip_or_url(rip_text_or_url: str, desc: VetRipDesc) -> str:
             message_author_name = str(desc.message.author)
             message_id = desc.message.id
 
-        if not len(metadata_msgs) and "[Unusual Pin Format]" in get_rip_author(rip_text, message_author_name):
-            metadata_msgs.append("Rip author is missing.")
+        if len(vetted_message_link):
+            rip_message_link = f'[{get_rip_title(rip_text)}]({vetted_message_link})' 
+
+        if not len(metadata_checks) and "[Unusual Pin Format]" in get_rip_author(rip_text, message_author_name):
+            metadata_checks.append(QoCCheck(CheckResultType.FAIL, "Rip author is missing."))
 
         if not is_unusual_metadata:
             rips = []
@@ -1468,10 +1447,10 @@ async def vet_rip_or_url(rip_text_or_url: str, desc: VetRipDesc) -> str:
                     rip_title = get_raw_rip_title(rip.text)
                     if title == rip_title:
                         link = format_message_link(channel.guild.id, channel.id, rip.message_id)
-                        metadata_msgs.append(f"Video title already exists in <#{rip.channel_id}>: [{rip_title}]({link}).")
+                        metadata_checks.append(QoCCheck(CheckResultType.FAIL, f"Video title already exists in <#{rip.channel_id}>: [{rip_title}]({link})."))
                     if isDupe(description, get_rip_description(rip.text), True):
                         link = format_message_link(channel.guild.id, channel.id, rip.message_id)
-                        metadata_msgs.append(f"Main mix detected in <#{rip.channel_id}>: [{rip_title}]({link}). Add something on the author line to avoid uploading this early.")
+                        metadata_checks.append(QoCCheck(CheckResultType.FAIL, f"Main mix detected in <#{rip.channel_id}>: [{rip_title}]({link}). Add something on the author line to avoid uploading this early."))
 
             # Check for lines between the rip description and link - if it does not start with "Joke", add a warning
             # in order to minimize accidental joke lines when uploading
@@ -1482,43 +1461,74 @@ async def vet_rip_or_url(rip_text_or_url: str, desc: VetRipDesc) -> str:
                         if qoced_url in line:
                             break
                         elif len(line) > 0 and not line.startswith('Joke') and not line == '||':
-                            metadata_msgs.append("Line not starting with ``Joke`` detected between description and rip URL. Recommend putting the URL directly under description to avoid accidentally uploading joke lines.")
+                            metadata_checks.append("Line not starting with ``Joke`` detected between description and rip URL. Recommend putting the URL directly under description to avoid accidentally uploading joke lines.")
                             break
                 except IndexError:
                     pass
 
-        if len(metadata_msgs):
-            verdict_emojis.append(DEFAULT_METADATA)
-            qoc_text += '\n' + '\n'.join(["- " + m for m in metadata_msgs]) if len(metadata_msgs) > 0 else ("- Metadata is OK." if desc.full_feedback else "")
-        elif desc.full_feedback:
-            qoc_text += "\n- Metadata is OK."
+    everything_passed = is_qoc_pass_all and not len(metadata_checks)
 
-    everything_passed = is_qoc_pass_all and not len(metadata_msgs)
-    if everything_passed:
+    return VetRipResult(qoced_url, qoc_checks_dict, metadata_checks, rip_message_link, everything_passed, error_strings) 
+
+class FormatVetRipResultDesc(NamedTuple):
+    full_feedback: bool = False
+    is_message_update: bool = False
+    is_new_pinned_message: bool = False
+
+def format_vet_rip_result(desc: FormatVetRipResultDesc, vet_rip_result: VetRipResult) -> str:
+
+    return_message = ""
+
+    if not len(vet_rip_result.qoced_url):
+        return_message += "\n:warning: No rip links detected."
+
+    verdict_emojis: List[str] = [] 
+
+    link_error = QoCCheckType.LINK in vet_rip_result.qoc_checks_dict and \
+        vet_rip_result.qoc_checks_dict[QoCCheckType.LINK].result == CheckResultType.ERROR
+
+    qoc_text = ""
+    if link_error: 
+        verdict_emojis.append(QOC_DEFAULT_LINKERR)
+    else:
+        for qoc_check_type, qoc_check in vet_rip_result.qoc_checks_dict.items():
+            if len(qoc_check.msg) and (desc.full_feedback or qoc_check.result != CheckResultType.PASS):
+                qoc_text += f'\n- {qoc_check.msg}'
+
+            if qoc_check.result == CheckResultType.FAIL and DEFAULT_FIX not in verdict_emojis:
+                verdict_emojis.append(DEFAULT_FIX)
+                if qoc_check_type == QoCCheckType.BITRATE:
+                    verdict_emojis.append(QOC_DEFAULT_BITRATE)
+                if qoc_check_type == QoCCheckType.CLIPPING:
+                    verdict_emojis.append(QOC_DEFAULT_CLIPPING)
+
+            if qoc_check.result == CheckResultType.ERROR and DEFAULT_ERROR not in verdict_emojis:
+                verdict_emojis += DEFAULT_ERROR
+
+    if len(vet_rip_result.metadata_checks):
+        verdict_emojis.append(DEFAULT_METADATA)
+        qoc_text += '\n' + '\n'.join(["- " + m.msg for m in vet_rip_result.metadata_checks]) if len(vet_rip_result.metadata_checks) > 0 else ("- Metadata is OK." if desc.full_feedback else "")
+    elif desc.full_feedback:
+        qoc_text += "\n- Metadata is OK."
+
+    if vet_rip_result.everything_passed:
         verdict_emojis.append(DEFAULT_CHECK)
 
     return_header = ""
-    if len(rip_text) and len(vetted_message_link):
-        rip_title = get_rip_title(rip_text)
-        rip_link = f'[{rip_title}]({vetted_message_link})' 
+    if len(vet_rip_result.rip_message_link):
         if desc.is_message_update:
-            if desc.skip_link_qoc:
-                return_header += f'\n{DEFAULT_METADATA} **Metadata updated: {rip_link} **'
-            else:
-                return_header += f'\n{DEFAULT_METADATA} **Link updated: {rip_link} **'
+            return_header += f'\n{DEFAULT_METADATA} **Metadata updated: {vet_rip_result.rip_message_link} **'
+            # return_header += f'\n{DEFAULT_METADATA} **Link updated: {vet_rip_result.rip_message_link} **'
         else:
-            return_header += f'\n**Rip**: **{rip_link}**'
+            return_header += f'\n**Rip**: **{vet_rip_result.rip_message_link}**'
 
-    if desc.full_feedback or not everything_passed: 
+    if desc.full_feedback or not vet_rip_result.everything_passed: 
         return_message += f'\n{return_header}\n**Verdict**: {" ".join(verdict_emojis)}{qoc_text}'
         if desc.is_new_pinned_message:
             return_message += f'\n-# React {DEFAULT_CHECK} if this is resolved.'
-    elif desc.is_message_update and everything_passed: 
-        return_message += f'\n{return_header}\n- :white_check_mark: Everything is resolved!'
-
-    if len(error_strings):
-        return_message += '\n' + parse_errors(f'Errors occured during vetting:', error_strings)
-
+    elif desc.is_message_update and vet_rip_result.everything_passed: 
+        return_message += f'\n{return_header}\n- :white_check_mark: All Metadata and QoC issues resolved!'
+    
     return return_message
 
 

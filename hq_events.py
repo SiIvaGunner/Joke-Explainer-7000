@@ -203,8 +203,20 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
                     rip = cache_rip_in_message(message)
                     unlock_message(message.id)
 
-                    vet_desc = VetRipDesc(message=message, is_new_pinned_message=True, use_youtube_api=True)
-                    return_message += await vet_rip_or_url(rip.text, vet_desc)
+                    vet_desc = VetRipDesc(message=message, use_youtube_api=True)
+                    vet_rip_result = await vet_rip_or_url(rip.text, vet_desc)
+                    error_strings.extend(vet_rip_result.error_strings)
+
+                    link_error = QoCCheckType.LINK in vet_rip_result.qoc_checks_dict and \
+                        vet_rip_result.qoc_checks_dict[QoCCheckType.LINK].result == CheckResultType.ERROR
+
+                    if link_error:
+                        return_message += "\n:warning: **Rip link not Auto-QoCed**\n-# Remove :link: reaction when link is fixed and properly vetted."
+                        #TODO: (Ahmayk) needs to be wrapped for errors
+                        await message.add_reaction(QOC_DEFAULT_LINKERR)
+
+                    format_desc = FormatVetRipResultDesc(is_new_pinned_message=True)
+                    return_message += format_vet_rip_result(format_desc, vet_rip_result)
 
             await send_and_if_errors(return_message, "Warning: Pining QoC rip returned errors.", error_strings, channel)
 
@@ -322,9 +334,9 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
 
         if channel_is_types(payload.message.channel, ['QOC']):
             async with payload.message.channel.typing():
-                old_link = extract_rip_link(old_text)
-                new_link = extract_rip_link(payload.message.content)
-                skip_link_qoc = old_link == new_link
+                # old_link = extract_rip_link(old_text)
+                # new_link = extract_rip_link(payload.message.content)
+                # skip_link_qoc = old_link == new_link
                 edited_message_link = format_message_link(payload.guild_id, payload.channel_id, payload.message.id)
                 rip_title = get_rip_title(payload.message.content)
                 rip_link = f'[{rip_title}]({edited_message_link})' 
@@ -339,9 +351,11 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
                         past_qoc_result_message = message
                         break
 
-                desc = VetRipDesc(message=payload.message, use_youtube_api=True, \
-                                skip_link_qoc=skip_link_qoc, is_message_update=True, is_new_pinned_message=True)
-                text = await vet_rip_or_url(payload.message.content, desc)
+                desc = VetRipDesc(message=payload.message, use_youtube_api=True)
+                vet_rip_result = await vet_rip_or_url(payload.message.content, desc)
+                error_strings.extend(vet_rip_result.error_strings)
+                format_desc = FormatVetRipResultDesc(is_message_update=True)
+                text = format_vet_rip_result(format_desc, vet_rip_result)
 
                 if past_qoc_result_message:
                     errors = await discord_edit_message(past_qoc_result_message, text)

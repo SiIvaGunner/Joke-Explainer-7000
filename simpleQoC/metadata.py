@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 from inspect import getsourcefile
+from simpleQoC.qoc import CheckResultType, QoCCheck
 
 PATTERNS_FILE = Path(os.path.abspath(getsourcefile(lambda:0))).parent / 'patterns.json'
 
@@ -132,7 +133,7 @@ def crosscheck_description_key(key: str, video_descs: List[str], threshold: floa
         return any([key in desc for desc in video_descs])
 
 
-def checkMetadata(description: str, channel_name: str, playlist_id: str, api_key: str, advanced: bool) -> Tuple[int, List[str]]:
+def checkMetadata(description: str, channel_name: str, playlist_id: str, api_key: str, advanced: bool) -> List[QoCCheck]:
     """
     Perform metadata checking.
 
@@ -145,13 +146,14 @@ def checkMetadata(description: str, channel_name: str, playlist_id: str, api_key
     - [Advanced] Title does not match any regex patterns in `patterns.json` under "TITLE", given the track name in description
     - [Advanced] Game name does not match playlist name, or any videos in playlist
     """
-    messages = set()
+    fail_messages = set() 
+    error_messages = set() 
     desc_lines = description.splitlines()
     title = desc_lines[0]
 
     # Title limit check
     if len(title) > 100:
-        messages.add('Title has more than 100 characters.')
+        fail_messages.add('Title has more than 100 characters.')
 
     # Parse description for more in-depth metadata checking
     desc, adv_messages = desc_to_dict(description, 1)
@@ -172,7 +174,7 @@ def checkMetadata(description: str, channel_name: str, playlist_id: str, api_key
     playlist_name = "" 
     videos = []
     if not len(api_key):
-        messages.add(":warning: YouTube API Key not defined. No YouTube videos or playlists checked.")
+        error_messages.add(":warning: YouTube API Key not defined. No YouTube videos or playlists checked.")
 
     if len(playlist_id) > 0 and len(api_key):
         channel = "" 
@@ -191,15 +193,15 @@ def checkMetadata(description: str, channel_name: str, playlist_id: str, api_key
                 raise MetadataException('Unknown URL error. {}'.format(e))
             
         except MetadataException as e:
-            messages.add(remove_links(e.message))
+            error_messages.add(remove_links(e.message))
 
         if len(channel_name) and len(channel) and channel_name != channel:
             # Playlist source check
-            messages.add("Playlist is not from {} (found playlist from {})".format(channel_name, channel))
+            fail_messages.add("Playlist is not from {} (found playlist from {})".format(channel_name, channel))
         else:
             # Duplicate title check
             if len(videos) and title in [video['title'] for video in videos]:
-                messages.add("Video title already exists in playlist.")
+                fail_messages.add("Video title already exists in playlist.")
 
     # Check metadata by patterns
     with open(PATTERNS_FILE, 'r', encoding='utf-8') as file:
@@ -208,16 +210,15 @@ def checkMetadata(description: str, channel_name: str, playlist_id: str, api_key
         # Common mistake patterns
         for p in patterns["MISTAKE"]:
             if "pattern" in p.keys() and p["pattern"] in description:
-                if "message" in p.keys(): messages.add(p["message"])
+                if "message" in p.keys(): fail_messages.add(p["message"])
                 if "adv_message" in p.keys(): adv_messages.add(p["adv_message"])
             elif "reg_pattern" in p.keys() and re.search(p["reg_pattern"], description) is not None:
-                if "message" in p.keys(): messages.add(p["message"])
+                if "message" in p.keys(): fail_messages.add(p["message"])
                 if "adv_message" in p.keys(): adv_messages.add(p["adv_message"])
 
         if len(desc) == 0 or 'music' not in list(desc.keys())[0].lower():
             # If the first description line is not "Music:", assume the metadata is intentionally unusual
-            # just return nothing?
-            return 0, []
+            pass
         else:
             # Compare desc with existing videos
             existing_descs = [video['description'] for video in videos]
@@ -282,8 +283,15 @@ def checkMetadata(description: str, channel_name: str, playlist_id: str, api_key
                 if game is None and title != track:
                     adv_messages.add('Title format does not match {}, or Music line is incorrect (e.g. missing mixname).'.format('existing videos in playlist' if len(videos) > 0 else 'any known pattern'))
     
-    if advanced: messages = messages.union(adv_messages)
-    return int(len(messages) > 0), list(messages)
+    if advanced: fail_messages = fail_messages.union(adv_messages)
+
+    qoc_checks = []
+    for message in error_messages:
+        qoc_checks.append(QoCCheck(CheckResultType.ERROR, message))
+    for message in fail_messages:
+        qoc_checks.append(QoCCheck(CheckResultType.FAIL, message))
+
+    return qoc_checks 
 
 
 def isDupe(desc1: str, desc2: str, desc2_is_main: bool = False) -> bool:
@@ -366,7 +374,6 @@ if __name__ == "__main__":
     match = re.search(r'(?:https?://)?(?:www\.)?(?:youtube\.com/|youtu\.be/)playlist\?list=([a-zA-Z0-9_-]+)', DESC)
     playlist = match.group(1) if match else ""
 
-    code, msgs = checkMetadata(DESC, CHANNEL_NAME, playlist, API_KEY, True)
-    print(f"Code: {code}")
-    for msg in msgs:
-        print(msg)
+    qoc_checks = checkMetadata(DESC, CHANNEL_NAME, playlist, API_KEY, True)
+    for qoc_check in qoc_checks:
+        print(qoc_check)
