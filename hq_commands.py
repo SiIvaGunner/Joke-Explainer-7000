@@ -1301,14 +1301,9 @@ async def vet_from(args: list[str], command_context: CommandContext):
         for rip in rips_and_errors.rips:
             if not vet_all_pins and rip.created_at < from_timestamp:
                 continue
-            #TODO: (Ahmayk) return errors 
-            qcCode, qcMsg, _ = await check_qoc(rip.text, False)
-
-            if qcCode != 0:
-                rip_title = get_rip_title(rip.text)
-                verdict = code_to_verdict(qcCode, qcMsg)
-                link = format_message_link(channel.guild.id, channel.id, rip.message_id)
-                await send("**Rip**: **[{}]({})**\n**Verdict**: {}\n{}\n-# React {} if this is resolved.".format(rip_title, link, verdict, qcMsg, DEFAULT_CHECK), command_context.channel)
+            desc = VetRipDesc(rip=rip)
+            text = await vet_rip_or_url(rip.text, desc)
+            await send(text, command_context.channel)
 
         if len(rips_and_errors.rips) == 0:
             await send_and_if_errors("No pinned rips found to QoC.", "There were errors though.", error_strings, command_context.channel)
@@ -1346,10 +1341,9 @@ async def vet_msg(args: list[str], command_context: CommandContext):
         if message is None:
             return await send(status, command_context.channel)
 
-        verdict, msg = await check_qoc_and_metadata(message.content, message.id, str(message.author), True)
-        rip_title = get_rip_title(message.content)
-
-        await send("**Rip**: **{}**\n**Verdict**: {}\n**Comments**:\n{}".format(rip_title, verdict, msg), command_context.channel)
+        desc = VetRipDesc(message=message, use_youtube_api=True, full_feedback=True)
+        text = await vet_rip_or_url(message.content, desc)
+        await send(text, command_context.channel)
 
 
 @command(
@@ -1368,9 +1362,9 @@ async def vet_url(args: list[str], command_context: CommandContext):
         return await send(f'Error: no url found in {args[0]}', command_context.channel)
 
     async with command_context.channel.typing():
-        code, msg = await run_blocking(performQoC, urls[0])
-        verdict = code_to_verdict(code, msg)
-        await command_context.channel.send("**Verdict**: {}\n**Comments**:\n{}".format(verdict, msg))
+        desc = VetRipDesc(use_youtube_api=True, full_feedback=True)
+        text = await vet_rip_or_url(urls[0], desc)
+        await send(text, command_context.channel)
 
 
 @command(
