@@ -159,6 +159,16 @@ async def discord_get_channel_messages(limit: int | None, channel: TextChannel |
     return MessagesAndErrors(messages, error_strings) 
 
 
+async def discord_get_channel_messages_after(message: Message, limit: int | None, channel: TextChannel | Thread) -> MessagesAndErrors: 
+    messages = [] 
+    error_strings: List[str] = [] 
+    try:
+        messages = [message async for message in channel.history(limit=limit, after=message)]
+    except Exception as error:
+        await log_exception(f'Discord API call failed to fetch channel messages from {channel.name} after message {message.jump_url}', error, error_strings, True)
+    return MessagesAndErrors(messages, error_strings) 
+
+
 async def discord_get_channel_pins(limit: int | None, channel: TextChannel | Thread) -> MessagesAndErrors: 
     messages: List[Message] = [] 
     error_strings: List[str] = [] 
@@ -214,6 +224,16 @@ async def discord_add_reaction(reaction_string: str, message: Message) -> List[s
         await message.add_reaction(reaction_string)
     except Exception as error:
         await log_exception(f'Discord API call failed to add reaction {reaction_string} to {message.id}', error, error_strings, True)
+    return error_strings
+
+
+async def discord_edit_message(message: Message, text: str) -> List[str]: 
+    error_strings: List[str] = [] 
+    try:
+        #NOTE: (Ahmayk) if message has attachments, components, or embeds they will disappear
+        await message.edit(content=text)
+    except Exception as error:
+        await log_exception(f'Discord API call failed to edit message: {message.id}', error, error_strings, True)
     return error_strings
 
 #===============================================#
@@ -1337,6 +1357,8 @@ class VetRipDesc(NamedTuple):
     full_feedback: bool = False
     use_youtube_api: bool = False
     is_new_pinned_message: bool = False
+    skip_link_qoc: bool = False
+    is_message_update: bool = False
 
 async def vet_rip_or_url(rip_text_or_url: str, desc: VetRipDesc) -> str:
     return_message = ""
@@ -1362,43 +1384,45 @@ async def vet_rip_or_url(rip_text_or_url: str, desc: VetRipDesc) -> str:
 
     qoc_checks = {} 
     qoced_url = "" 
-    for url in urls:
-        qoc_checks = await run_blocking(performQoC, url)
-        if QoCCheckType.LINK in qoc_checks and qoc_checks[QoCCheckType.LINK].result != CheckResultType.ERROR:
-            qoced_url = url
-            break
-    if not len(qoced_url):
-        return_message += "\n:warning: No rip links detected."
-
-    link_error = QoCCheckType.LINK in qoc_checks and qoc_checks[QoCCheckType.LINK].result == CheckResultType.ERROR
-    if link_error and desc.is_new_pinned_message and desc.message:
-        return_message += "\n:warning: **Rip link not Auto-QoCed**\n-# Remove :link: reaction when link is fixed and properly vetted."
-        await desc.message.add_reaction(QOC_DEFAULT_LINKERR)
-
-    is_qoc_pass_all = len(qoc_checks) 
-    for qoc_check in qoc_checks.values():
-        if qoc_check.result != CheckResultType.PASS:
-            is_qoc_pass_all = False
-            break
-
+    is_qoc_pass_all = True 
     verdict_emojis: List[str] = [] 
     qoc_text = ""
-    if link_error: 
-        verdict_emojis.append(QOC_DEFAULT_LINKERR)
-    else:
-        for qoc_check_type, qoc_check in qoc_checks.items():
-            if len(qoc_check.msg) and (desc.full_feedback or qoc_check.result != CheckResultType.PASS):
-                qoc_text += f'\n- {qoc_check.msg}'
+    if not desc.skip_link_qoc:
+        for url in urls:
+            qoc_checks = await run_blocking(performQoC, url)
+            if QoCCheckType.LINK in qoc_checks and qoc_checks[QoCCheckType.LINK].result != CheckResultType.ERROR:
+                qoced_url = url
+                break
+        if not len(qoced_url):
+            return_message += "\n:warning: No rip links detected."
 
-            if qoc_check.result == CheckResultType.FAIL and DEFAULT_FIX not in verdict_emojis:
-                verdict_emojis.append(DEFAULT_FIX)
-                if qoc_check_type == QoCCheckType.BITRATE:
-                    verdict_emojis.append(QOC_DEFAULT_BITRATE)
-                if qoc_check_type == QoCCheckType.CLIPPING:
-                    verdict_emojis.append(QOC_DEFAULT_CLIPPING)
+        link_error = QoCCheckType.LINK in qoc_checks and qoc_checks[QoCCheckType.LINK].result == CheckResultType.ERROR
+        if link_error and desc.is_new_pinned_message and desc.message:
+            return_message += "\n:warning: **Rip link not Auto-QoCed**\n-# Remove :link: reaction when link is fixed and properly vetted."
+            await desc.message.add_reaction(QOC_DEFAULT_LINKERR)
 
-            if qoc_check.result == CheckResultType.ERROR and DEFAULT_ERROR not in verdict_emojis:
-                verdict_emojis += DEFAULT_ERROR
+        is_qoc_pass_all = len(qoc_checks) > 0
+        for qoc_check in qoc_checks.values():
+            if qoc_check.result != CheckResultType.PASS:
+                is_qoc_pass_all = False
+                break
+
+        if link_error: 
+            verdict_emojis.append(QOC_DEFAULT_LINKERR)
+        else:
+            for qoc_check_type, qoc_check in qoc_checks.items():
+                if len(qoc_check.msg) and (desc.full_feedback or qoc_check.result != CheckResultType.PASS):
+                    qoc_text += f'\n- {qoc_check.msg}'
+
+                if qoc_check.result == CheckResultType.FAIL and DEFAULT_FIX not in verdict_emojis:
+                    verdict_emojis.append(DEFAULT_FIX)
+                    if qoc_check_type == QoCCheckType.BITRATE:
+                        verdict_emojis.append(QOC_DEFAULT_BITRATE)
+                    if qoc_check_type == QoCCheckType.CLIPPING:
+                        verdict_emojis.append(QOC_DEFAULT_CLIPPING)
+
+                if qoc_check.result == CheckResultType.ERROR and DEFAULT_ERROR not in verdict_emojis:
+                    verdict_emojis += DEFAULT_ERROR
 
     error_strings = []
     metadata_msgs = []
@@ -1473,13 +1497,24 @@ async def vet_rip_or_url(rip_text_or_url: str, desc: VetRipDesc) -> str:
     if everything_passed:
         verdict_emojis.append(DEFAULT_CHECK)
 
+    return_header = ""
+    if len(rip_text) and len(vetted_message_link):
+        rip_title = get_rip_title(rip_text)
+        rip_link = f'[{rip_title}]({vetted_message_link})' 
+        if desc.is_message_update:
+            if desc.skip_link_qoc:
+                return_header += f'\n{DEFAULT_METADATA} **Metadata updated: {rip_link} **'
+            else:
+                return_header += f'\n{DEFAULT_METADATA} **Link updated: {rip_link} **'
+        else:
+            return_header += f'\n**Rip**: **{rip_link}**'
+
     if desc.full_feedback or not everything_passed: 
-        if len(rip_text) and len(vetted_message_link):
-            rip_title = get_rip_title(rip_text)
-            return_message += f'\n**Rip**: **[{rip_title}]({vetted_message_link})**'
-        return_message += f'\n**Verdict**: {" ".join(verdict_emojis)}{qoc_text}'
+        return_message += f'\n{return_header}\n**Verdict**: {" ".join(verdict_emojis)}{qoc_text}'
         if desc.is_new_pinned_message:
             return_message += f'\n-# React {DEFAULT_CHECK} if this is resolved.'
+    elif desc.is_message_update and everything_passed: 
+        return_message += f'\n{return_header}\n- :white_check_mark: Everything is resolved!'
 
     if len(error_strings):
         return_message += '\n' + parse_errors(f'Errors occured during vetting:', error_strings)

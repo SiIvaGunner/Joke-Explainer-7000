@@ -8,8 +8,6 @@ from datetime import datetime, timezone, timedelta, time
 import typing
 from typing import List
 
-from contextlib import asynccontextmanager
-
 import discord
 from discord.abc import GuildChannel
 from hq_config import *
@@ -107,104 +105,108 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
 
         if channel_info.rip_fetch_type == RipFetchType.PINS: 
 
-            txt = "" 
-            error_strings = []
+            async with channel.typing():
 
-            await lock_channel(channel.id, channel)
+                txt = "" 
+                error_strings = []
 
-            current_message_ids: list[int] = []
-            messages_and_errors = await discord_get_channel_pins(None, channel)
-            error_strings.extend(messages_and_errors.error_strings)
-            for message in messages_and_errors.messages: 
-                current_message_ids.append(message.id)
+                await lock_channel(channel.id, channel)
 
-            rips_to_remove: List[Rip] = []
-            if channel.id in RIP_CACHE:
-                for message_id, rip in RIP_CACHE[channel.id].items():
-                    if message_id not in current_message_ids:
-                        rips_to_remove.append(rip)
+                current_message_ids: list[int] = []
+                messages_and_errors = await discord_get_channel_pins(None, channel)
+                error_strings.extend(messages_and_errors.error_strings)
+                for message in messages_and_errors.messages: 
+                    current_message_ids.append(message.id)
 
-            if len(rips_to_remove):
-                audit_log_entries_and_errors = await discord_get_audit_log_entries(discord.AuditLogAction.message_unpin, 10, channel.guild) 
-                error_strings.extend(audit_log_entries_and_errors.error_strings)
-                spec_overdue_days = get_config('spec_overdue_days')
-                overdue_days = get_config('overdue_days')
+                rips_to_remove: List[Rip] = []
+                if channel.id in RIP_CACHE:
+                    for message_id, rip in RIP_CACHE[channel.id].items():
+                        if message_id not in current_message_ids:
+                            rips_to_remove.append(rip)
 
-                for rip in rips_to_remove:
-                    await remove_rip_from_cache(rip.message_id, channel.id)
+                if len(rips_to_remove):
+                    audit_log_entries_and_errors = await discord_get_audit_log_entries(discord.AuditLogAction.message_unpin, 10, channel.guild) 
+                    error_strings.extend(audit_log_entries_and_errors.error_strings)
+                    spec_overdue_days = get_config('spec_overdue_days')
+                    overdue_days = get_config('overdue_days')
 
-                    user_string = 'Someone' 
-                    for entry in audit_log_entries_and_errors.audit_log_entires:
-                        if entry.extra and entry.user and entry.extra.message_id == rip.message_id:
-                            user_string = entry.user.name
-                            break
+                    for rip in rips_to_remove:
+                        await remove_rip_from_cache(rip.message_id, channel.id)
 
-                    formatted_rip = format_rip(rip, channel.guild, True, spec_overdue_days, overdue_days)
-                    txt += f'\n-# :pushpin::x: **{user_string}** unpinned\n{formatted_rip}'
+                        user_string = 'Someone' 
+                        for entry in audit_log_entries_and_errors.audit_log_entires:
+                            if entry.extra and entry.user and entry.extra.message_id == rip.message_id:
+                                user_string = entry.user.name
+                                break
 
-                rips_and_errors = await get_rips_fast(channel, GetRipsDesc())
-                error_strings.extend(rips_and_errors.error_strings)
-                new_count = len(rips_and_errors.rips)
-                soft_pin_limit = get_config('soft_pin_limit')
-                txt += f'-# Rip Count: {new_count}/{soft_pin_limit}'
+                        formatted_rip = format_rip(rip, channel.guild, True, spec_overdue_days, overdue_days)
+                        txt += f'\n-# :pushpin::x: **{user_string}** unpinned\n{formatted_rip}'
 
-            unlock_channel(channel.id)
+                    rips_and_errors = await get_rips_fast(channel, GetRipsDesc())
+                    error_strings.extend(rips_and_errors.error_strings)
+                    new_count = len(rips_and_errors.rips)
+                    soft_pin_limit = get_config('soft_pin_limit')
+                    txt += f'-# Rip Count: {new_count}/{soft_pin_limit}'
 
-            await send_and_if_errors(txt, "Errors during unpin.", error_strings, channel)
+                unlock_channel(channel.id)
+
+                await send_and_if_errors(txt, "Errors during unpin.", error_strings, channel)
 
     else:
 
-        return_message = ""
+        async with channel.typing():
 
-        messages_and_errors = await discord_get_channel_pins(1, channel)
-        if len(messages_and_errors.error_strings):
-            return await send_if_errors("Error: Failed to vet pinned message.", messages_and_errors.error_strings, channel)
-        
-        assert(len(messages_and_errors.messages))
-        message = messages_and_errors.messages[0]
+            return_message = ""
 
-        error_strings: List[str] = []
+            messages_and_errors = await discord_get_channel_pins(1, channel)
+            if len(messages_and_errors.error_strings):
+                return await send_if_errors("Error: Failed to vet pinned message.", messages_and_errors.error_strings, channel)
+            
+            assert(len(messages_and_errors.messages))
+            message = messages_and_errors.messages[0]
 
-        if is_message_rip(message):
+            error_strings: List[str] = []
 
-            latest_pin_time = last_pin
+            if is_message_rip(message):
 
-            rips_and_errors = await get_rips_fast(channel, GetRipsDesc())
-            error_strings.extend(rips_and_errors.error_strings)
+                latest_pin_time = last_pin
 
-            new_count = len(rips_and_errors.rips) + 1
-            is_pinlimit_must_die = get_channel_config(channel.id).pinlimit_must_die_mode
-            SOFT_PIN_LIMIT = get_config('soft_pin_limit')
+                rips_and_errors = await get_rips_fast(channel, GetRipsDesc())
+                error_strings.extend(rips_and_errors.error_strings)
 
-            if is_pinlimit_must_die and new_count > SOFT_PIN_LIMIT:
-                error_strings.extend(await discord_unpin_message(message))
-                error_strings.extend(await discord_add_reaction('📌', message))
-                await send(f":bangbang: **Error**: {len(rips_and_errors.rips)}/{SOFT_PIN_LIMIT} rips in pins. Unpinned.\n-# Remove the 📌 reaction when this is resolved.", channel)
-            else:
+                new_count = len(rips_and_errors.rips) + 1
+                is_pinlimit_must_die = get_channel_config(channel.id).pinlimit_must_die_mode
+                SOFT_PIN_LIMIT = get_config('soft_pin_limit')
 
-                if new_count > SOFT_PIN_LIMIT:
-                    await send(f":warning: **Warning: {new_count}/{SOFT_PIN_LIMIT}** rips pinned. Please handle other rips first :(", channel)
-                elif new_count == SOFT_PIN_LIMIT:
-                    if is_pinlimit_must_die:
-                        await send(f"-# Warning: **Pinlimit is reached!** Pinlimit must die is **on**, so if you pin another rip, *prepare to die!*\n-# Rip Count: {new_count}/{SOFT_PIN_LIMIT}", channel)
-                    else:
-                        await send(f"-# Warning: **Pinlimit is reached!** Pinlimit must die is **off**, but please handle other rips first before pinning more.\n-# Rip Count: {new_count}/{SOFT_PIN_LIMIT}", channel)
-                elif new_count < SOFT_PIN_LIMIT and new_count >= max(0, SOFT_PIN_LIMIT - 10):
-                    await send(f"-# Warning: **{SOFT_PIN_LIMIT - new_count} rips** until pinlimit is reached.\n-# Rip Count: {new_count}/{SOFT_PIN_LIMIT}", channel)
+                if is_pinlimit_must_die and new_count > SOFT_PIN_LIMIT:
+                    error_strings.extend(await discord_unpin_message(message))
+                    error_strings.extend(await discord_add_reaction('📌', message))
+                    await send(f":bangbang: **Error**: {len(rips_and_errors.rips)}/{SOFT_PIN_LIMIT} rips in pins. Unpinned.\n-# Remove the 📌 reaction when this is resolved.", channel)
+                else:
 
-                await lock_message(message.id, None)
-                #NOTE: (Ahmayk) have to fetch message to get reaction data for cache
-                message_and_errors = await discord_fetch_message(message.id, channel)
-                error_strings.extend(message_and_errors.error_strings)
-                if message_and_errors.message:
-                    message = message_and_errors.message
-                rip = cache_rip_in_message(message)
-                unlock_message(message.id)
+                    if new_count > SOFT_PIN_LIMIT:
+                        await send(f":warning: **Warning: {new_count}/{SOFT_PIN_LIMIT}** rips pinned. Please handle other rips first :(", channel)
+                    elif new_count == SOFT_PIN_LIMIT:
+                        if is_pinlimit_must_die:
+                            await send(f"-# Warning: **Pinlimit is reached!** Pinlimit must die is **on**, so if you pin another rip, *prepare to die!*\n-# Rip Count: {new_count}/{SOFT_PIN_LIMIT}", channel)
+                        else:
+                            await send(f"-# Warning: **Pinlimit is reached!** Pinlimit must die is **off**, but please handle other rips first before pinning more.\n-# Rip Count: {new_count}/{SOFT_PIN_LIMIT}", channel)
+                    elif new_count < SOFT_PIN_LIMIT and new_count >= max(0, SOFT_PIN_LIMIT - 10):
+                        await send(f"-# Warning: **{SOFT_PIN_LIMIT - new_count} rips** until pinlimit is reached.\n-# Rip Count: {new_count}/{SOFT_PIN_LIMIT}", channel)
 
-                vet_desc = VetRipDesc(message=message, is_new_pinned_message=True, use_youtube_api=True)
-                return_message += await vet_rip_or_url(rip.text, vet_desc)
+                    await lock_message(message.id, None)
+                    #NOTE: (Ahmayk) have to fetch message to get reaction data for cache
+                    message_and_errors = await discord_fetch_message(message.id, channel)
+                    error_strings.extend(message_and_errors.error_strings)
+                    if message_and_errors.message:
+                        message = message_and_errors.message
+                    rip = cache_rip_in_message(message)
+                    unlock_message(message.id)
 
-        await send_and_if_errors(return_message, "Warning: Pining QoC rip returned errors.", error_strings, channel)
+                    vet_desc = VetRipDesc(message=message, is_new_pinned_message=True, use_youtube_api=True)
+                    return_message += await vet_rip_or_url(rip.text, vet_desc)
+
+            await send_and_if_errors(return_message, "Warning: Pining QoC rip returned errors.", error_strings, channel)
 
 
 @bot.event
@@ -313,9 +315,40 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
     if payload.channel_id in RIP_CACHE and payload.message_id in RIP_CACHE[payload.channel_id]: 
         await lock_message(payload.message_id, None)
         rip = RIP_CACHE[payload.channel_id][payload.message_id]
+        old_text = rip.text
         rip = rip._replace(text = payload.message.content)
         RIP_CACHE[payload.channel_id][payload.message_id] = rip
         unlock_message(payload.message_id)
+
+        if channel_is_types(payload.message.channel, ['QOC']):
+            async with payload.message.channel.typing():
+                old_link = extract_rip_link(old_text)
+                new_link = extract_rip_link(payload.message.content)
+                skip_link_qoc = old_link == new_link
+                edited_message_link = format_message_link(payload.guild_id, payload.channel_id, payload.message.id)
+                rip_title = get_rip_title(payload.message.content)
+                rip_link = f'[{rip_title}]({edited_message_link})' 
+
+                error_strings = []
+                after_messages_and_errors = await discord_get_channel_messages_after(payload.message, 50, payload.message.channel)
+                error_strings.extend(after_messages_and_errors.error_strings)
+                past_qoc_result_message = None
+                assert bot.user
+                for message in after_messages_and_errors.messages:
+                    if message.author.id == bot.user.id and edited_message_link in message.content: 
+                        past_qoc_result_message = message
+                        break
+
+                desc = VetRipDesc(message=payload.message, use_youtube_api=True, \
+                                skip_link_qoc=skip_link_qoc, is_message_update=True, is_new_pinned_message=True)
+                text = await vet_rip_or_url(payload.message.content, desc)
+
+                if past_qoc_result_message:
+                    errors = await discord_edit_message(past_qoc_result_message, text)
+                    error_strings.extend(errors)
+                    await send_and_if_errors(f'**{rip_link} message updated.**', "Errors while re-qocing:", error_strings, payload.message.channel)
+                else:
+                    await send_and_if_errors(text, "Errors while re-qocing:", after_messages_and_errors.error_strings, payload.message.channel)
 
 
 @bot.event
