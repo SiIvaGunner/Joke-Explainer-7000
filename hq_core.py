@@ -1424,6 +1424,7 @@ async def vet_rip_or_url(rip_text_or_url: str, desc: VetRipDesc) -> str:
             if qoc_check.result == CheckResultType.ERROR and DEFAULT_ERROR not in verdict_emojis:
                 verdict_emojis += DEFAULT_ERROR
 
+    error_strings = []
     metadata_msgs = []
     vetted_message_link = ""
     message_author_name = ""
@@ -1459,7 +1460,7 @@ async def vet_rip_or_url(rip_text_or_url: str, desc: VetRipDesc) -> str:
                 if channel:
                     rips_and_errors = await get_rips_fast(channel, GetRipsDesc())
                     rips = rips_and_errors.rips
-                    #TODO: (Ahmayk) handle errors
+                    error_strings.extend(rips_and_errors.error_strings)
 
             title = get_raw_rip_title(rip_text)
             for rip in rips:
@@ -1503,6 +1504,9 @@ async def vet_rip_or_url(rip_text_or_url: str, desc: VetRipDesc) -> str:
         return_message += f'\n**Verdict**: {" ".join(verdict_emojis)}{qoc_text}'
         if desc.is_new_pinned_message:
             return_message += f'\n-# React {DEFAULT_CHECK} if this is resolved.'
+
+    if len(error_strings):
+        return_message += '\n' + parse_errors(f'Errors occured during vetting:', error_strings)
 
     return return_message
 
