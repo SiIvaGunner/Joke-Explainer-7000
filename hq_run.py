@@ -1,5 +1,6 @@
 from hq_config import *
 from hq_core import *
+from hq_events import *
 from hq_commands import *
 from hq_fun import *
 
