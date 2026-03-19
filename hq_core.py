@@ -902,6 +902,269 @@ def find_command_info(input: str) -> CommandInfo | None:
     return command_info 
 
 #===============================================#
+#                  RIP VETTING                  #
+#===============================================#
+
+class VetRipDesc(NamedTuple):
+    rip: Rip | None = None
+    message: Message | None = None
+    use_youtube_api: bool = False
+    past_rip_message_content: str = ""
+
+class VetRipResult(NamedTuple):
+    qoced_url: str
+    qoc_checks_dict: dict[QoCCheckType, QoCCheck]
+    metadata_checks: list[QoCCheck] 
+    rip_message_text: str
+    rip_message_link: str
+    everything_passed: bool
+    link_error: bool
+    past_rip_message_content: str
+    past_vet_message: Message | None 
+    past_vet_message_was_checked: bool
+    error_strings: list[str]
+
+async def vet_rip_or_url(rip_text_or_url: str, desc: VetRipDesc) -> VetRipResult:
+
+    rip_message_text = ""
+    urls = [] 
+
+    if '```' in rip_text_or_url:
+        rip_message_text = rip_text_or_url
+        urls = extract_rip_link(rip_text_or_url)
+    
+    if not len(urls) and desc.rip:
+        rip_message_text = desc.rip.text
+        urls = extract_rip_link(desc.rip.text)
+
+    if not len(urls) and desc.message:
+        rip_message_text = desc.message.content
+        urls = extract_rip_link(desc.message.content)
+        #TODO: (Ahmayk) extract link from message attachment
+
+    if not len(urls):
+        urls = [rip_text_or_url]
+
+    qoc_checks_dict = {} 
+    qoced_url = "" 
+    for url in urls:
+        qoc_checks_dict = await run_blocking(performQoC, url)
+        if QoCCheckType.LINK in qoc_checks_dict and qoc_checks_dict[QoCCheckType.LINK].result != CheckResultType.ERROR:
+            qoced_url = url
+            break
+
+    link_error = QoCCheckType.LINK in qoc_checks_dict and \
+        qoc_checks_dict[QoCCheckType.LINK].result == CheckResultType.ERROR
+
+    is_qoc_pass_all = len(qoc_checks_dict) > 0
+    for qoc_check in qoc_checks_dict.values():
+        if qoc_check.result != CheckResultType.PASS:
+            is_qoc_pass_all = False
+            break
+
+    error_strings = []
+    metadata_checks: List[QoCCheck] = []
+    rip_message_link = "" 
+    if len(rip_message_text):
+        description = get_rip_description(rip_message_text)
+        is_unusual_metadata = "unusual metadata" in rip_message_text.lower()
+        if not is_unusual_metadata and len(description) > 0:
+            api_key = "" 
+            if desc.use_youtube_api:
+                api_key = YOUTUBE_API_KEY 
+            playlistId = extract_playlist_id('\n'.join(rip_message_text.splitlines()[1:])) # ignore author line
+            advancedCheck = get_config('metadata')
+            metadata_checks = await run_blocking(checkMetadata, description, YOUTUBE_CHANNEL_NAME, playlistId, api_key, advancedCheck)
+
+        message_id = 0
+        vetted_message_link = ""
+        message_author_name = ""
+        if desc.rip:
+            vetted_message_link = format_message_link(desc.rip.guild_id, desc.rip.channel_id, desc.rip.message_id)
+            message_author_name = desc.rip.message_author_name
+            message_id = desc.rip.message_id
+        if desc.message:
+            vetted_message_link = desc.message.jump_url
+            message_author_name = str(desc.message.author)
+            message_id = desc.message.id
+
+        if len(vetted_message_link):
+            rip_message_link = f'[{get_rip_title(rip_message_text)}]({vetted_message_link})' 
+
+        if not len(metadata_checks) and "[Unusual Pin Format]" in get_rip_author(rip_message_text, message_author_name):
+            metadata_checks.append(QoCCheck(CheckResultType.FAIL, "Rip author is missing."))
+
+        if not is_unusual_metadata:
+            rips = []
+            channel_ids = get_channel_ids_of_types(['QUEUE', 'QOC'])
+            for channel_id in channel_ids:
+                channel = bot.get_channel(channel_id)
+                if channel:
+                    rips_and_errors = await get_rips_fast(channel, GetRipsDesc())
+                    rips = rips_and_errors.rips
+                    error_strings.extend(rips_and_errors.error_strings)
+
+            title = get_raw_rip_title(rip_message_text)
+            for rip in rips:
+                if rip.message_id != message_id:
+                    rip_title = get_raw_rip_title(rip.text)
+                    if title == rip_title:
+                        link = format_message_link(channel.guild.id, channel.id, rip.message_id)
+                        metadata_checks.append(QoCCheck(CheckResultType.FAIL, f"Video title already exists in <#{rip.channel_id}>: [{rip_title}]({link})."))
+                    if isDupe(description, get_rip_description(rip.text), True):
+                        link = format_message_link(channel.guild.id, channel.id, rip.message_id)
+                        metadata_checks.append(QoCCheck(CheckResultType.FAIL, f"Main mix detected in <#{rip.channel_id}>: [{rip_title}]({link}). Add something on the author line to avoid uploading this early."))
+
+            # Check for lines between the rip description and link - if it does not start with "Joke", add a warning
+            # in order to minimize accidental joke lines when uploading
+            if len(qoced_url):
+                try:
+                    for line in rip_message_text.split('```', 2)[2].splitlines():
+                        line = "".join(c for c in line if c.isprintable())
+                        if qoced_url in line:
+                            break
+                        elif len(line) > 0 and not line.startswith('Joke') and not line == '||':
+                            metadata_checks.append(QoCCheck(CheckResultType.FAIL, "Line not starting with ``Joke`` detected between description and rip URL. Recommend putting the URL directly under description to avoid accidentally uploading joke lines."))
+                            break
+                except IndexError:
+                    pass
+
+    everything_passed = is_qoc_pass_all and not len(metadata_checks)
+
+    past_vet_message = None 
+    past_vet_message_was_checked = False
+    if desc.message and channel_is_types(desc.message.channel, ['QOC']):
+        if link_error:
+            #TODO: (Ahmayk) needs to be wrapped for errors
+            await desc.message.add_reaction(QOC_DEFAULT_LINKERR)
+        elif message_has_react(QOC_DEFAULT_LINKERR, desc.message):
+            #TODO: (Ahmayk) needs to be wrapped for errors
+            await desc.message.clear_reaction(QOC_DEFAULT_LINKERR)
+
+        after_messages_and_errors = await discord_get_channel_messages_after(desc.message, 15, desc.message.channel)
+        error_strings.extend(after_messages_and_errors.error_strings)
+        assert bot.user
+        for message in after_messages_and_errors.messages:
+            if message.author.id == bot.user.id and desc.message.jump_url in message.content: 
+                past_vet_message = message
+                if message_has_react(DEFAULT_CHECK, past_vet_message):
+                    past_vet_message_was_checked = True
+                    #TODO: (Ahmayk) needs to be wrapped for errors
+                    past_vet_message.clear_reaction(DEFAULT_CHECK)
+                break
+
+    vet_rip_result = VetRipResult(qoced_url, qoc_checks_dict, metadata_checks, rip_message_text, \
+                                  rip_message_link, everything_passed, link_error, \
+                                  desc.past_rip_message_content, past_vet_message, \
+                                  past_vet_message_was_checked, error_strings) 
+
+    if past_vet_message:
+        format_desc_past = FormatVetRipResultDesc(is_new_pinned_message=True)
+        past_text = format_vet_rip_result(format_desc_past, vet_rip_result)
+        #TODO: (Ahmayk) needs to be wrapped for errors
+        errors = await discord_edit_message(past_vet_message, past_text)
+        error_strings.extend(errors)
+
+    return vet_rip_result
+
+
+class FormatVetRipResultDesc(NamedTuple):
+    full_feedback: bool = False
+    is_new_pinned_message: bool = False
+    smol_update: bool = False
+
+def format_vet_rip_result(desc: FormatVetRipResultDesc, vet_rip_result: VetRipResult) -> str:
+
+    return_message = ""
+    if desc.full_feedback or desc.smol_update or not vet_rip_result.everything_passed:
+
+        intro_warnings = [] 
+        if not len(vet_rip_result.qoced_url) and not vet_rip_result.link_error:
+            intro_warnings.append(":warning: No rip links detected.")
+
+        verdict_emojis: List[str] = [] 
+
+        if vet_rip_result.link_error: 
+            verdict_emojis.append(QOC_DEFAULT_LINKERR)
+            intro_warnings.append(":warning: **Rip link not Auto-QoCed**")
+
+        qoc_text = ""
+        for qoc_check_type, qoc_check in vet_rip_result.qoc_checks_dict.items():
+            if len(qoc_check.msg) and (desc.full_feedback or qoc_check.result != CheckResultType.PASS):
+                qoc_text += f'\n- {qoc_check.msg}'
+
+            if qoc_check.result == CheckResultType.FAIL and DEFAULT_FIX not in verdict_emojis:
+                verdict_emojis.append(DEFAULT_FIX)
+                if qoc_check_type == QoCCheckType.BITRATE:
+                    verdict_emojis.append(QOC_DEFAULT_BITRATE)
+                if qoc_check_type == QoCCheckType.CLIPPING:
+                    verdict_emojis.append(QOC_DEFAULT_CLIPPING)
+
+            if qoc_check.result == CheckResultType.ERROR and DEFAULT_ERROR not in verdict_emojis:
+                verdict_emojis += DEFAULT_ERROR
+
+        if len(vet_rip_result.metadata_checks):
+            verdict_emojis.append(DEFAULT_METADATA)
+            qoc_text += '\n' + '\n'.join(["- " + m.msg for m in vet_rip_result.metadata_checks])
+        elif desc.full_feedback:
+            qoc_text += "\n- Metadata is OK."
+
+        if vet_rip_result.everything_passed:
+            verdict_emojis.append(DEFAULT_CHECK)
+
+        return_header = "" 
+        if len(vet_rip_result.rip_message_link):
+            return_header_title = "Rip"
+            if vet_rip_result.past_rip_message_content:
+
+                old_rip_links = extract_rip_link(vet_rip_result.past_rip_message_content)
+                old_rip_link = ""
+                if len(old_rip_links):
+                    old_rip_link = old_rip_links[0]
+                is_link_updated = vet_rip_result.qoced_url and old_rip_link != vet_rip_result.qoced_url
+
+                #NOTE: (Ahmayk) assumes that "metadata" is everything before the audio rip link
+                linkless_metadata_old = vet_rip_result.past_rip_message_content 
+                if len(old_rip_link):
+                    linkless_metadata_old = vet_rip_result.past_rip_message_content.split(old_rip_link)[0]
+                linkless_metadata_new = vet_rip_result.rip_message_text
+                if len(vet_rip_result.qoced_url):
+                    linkless_metadata_new = vet_rip_result.rip_message_text.split(vet_rip_result.qoced_url)[0]
+                is_metadata_updated = linkless_metadata_old != linkless_metadata_new 
+
+                if is_link_updated and is_metadata_updated:
+                    return_header_title = f'{QOC_DEFAULT_LINKERR}{DEFAULT_METADATA} Link and Metadata Updated'
+                elif is_link_updated:
+                    return_header_title = f'{QOC_DEFAULT_LINKERR} Link Updated'
+                elif is_metadata_updated:
+                    return_header_title = f'{DEFAULT_METADATA} Metadata Updated'
+                else:
+                    return_header_title = f'Message Updated'
+
+            return_header = f'**{return_header_title}: {vet_rip_result.rip_message_link}**'
+
+        crossed_out_lines = ""
+        if vet_rip_result.past_vet_message:
+            old_lines = vet_rip_result.past_vet_message.content.splitlines()
+            for old_line in old_lines:
+                if old_line.startswith('- ') and (old_line not in qoc_text or vet_rip_result.past_vet_message_was_checked):
+                    crossed_out_lines += f'\n-# ~~{old_line}~~'
+                if old_line.startswith('-# ~~'):
+                    crossed_out_lines += "\n" + old_line
+
+        if desc.smol_update:
+            return_message = f'-# {return_header} {" ".join(verdict_emojis)}'
+        else:
+            return_message = f'{"\n".join(intro_warnings)}{return_header}\n**Verdict**: {" ".join(verdict_emojis)}'
+            return_message += crossed_out_lines 
+            return_message += qoc_text
+            if not vet_rip_result.everything_passed and desc.is_new_pinned_message:
+                return_message += f'\n-# React {DEFAULT_CHECK} if this is resolved or should be ignored.'
+
+    return return_message
+
+
+#===============================================#
 #                    HELPERS                    #
 #===============================================#
 
@@ -1359,265 +1622,6 @@ async def run_blocking(blocking_func: typing.Callable, *args, **kwargs) -> typin
     """
     func = functools.partial(blocking_func, *args, **kwargs) # `run_in_executor` doesn't support kwargs, `functools.partial` does
     return await bot.loop.run_in_executor(None, func)
-
-class VetRipDesc(NamedTuple):
-    rip: Rip | None = None
-    message: Message | None = None
-    use_youtube_api: bool = False
-    past_rip_message_content: str = ""
-
-class VetRipResult(NamedTuple):
-    qoced_url: str
-    qoc_checks_dict: dict[QoCCheckType, QoCCheck]
-    metadata_checks: list[QoCCheck] 
-    rip_message_text: str
-    rip_message_link: str
-    everything_passed: bool
-    link_error: bool
-    past_rip_message_content: str
-    past_vet_message: Message | None 
-    past_vet_message_was_checked: bool
-    error_strings: list[str]
-
-async def vet_rip_or_url(rip_text_or_url: str, desc: VetRipDesc) -> VetRipResult:
-
-    rip_message_text = ""
-    urls = [] 
-
-    if '```' in rip_text_or_url:
-        rip_message_text = rip_text_or_url
-        urls = extract_rip_link(rip_text_or_url)
-    
-    if not len(urls) and desc.rip:
-        rip_message_text = desc.rip.text
-        urls = extract_rip_link(desc.rip.text)
-
-    if not len(urls) and desc.message:
-        rip_message_text = desc.message.content
-        urls = extract_rip_link(desc.message.content)
-        #TODO: (Ahmayk) extract link from message attachment
-
-    if not len(urls):
-        urls = [rip_text_or_url]
-
-    qoc_checks_dict = {} 
-    qoced_url = "" 
-    for url in urls:
-        qoc_checks_dict = await run_blocking(performQoC, url)
-        if QoCCheckType.LINK in qoc_checks_dict and qoc_checks_dict[QoCCheckType.LINK].result != CheckResultType.ERROR:
-            qoced_url = url
-            break
-
-    link_error = QoCCheckType.LINK in qoc_checks_dict and \
-        qoc_checks_dict[QoCCheckType.LINK].result == CheckResultType.ERROR
-
-    is_qoc_pass_all = len(qoc_checks_dict) > 0
-    for qoc_check in qoc_checks_dict.values():
-        if qoc_check.result != CheckResultType.PASS:
-            is_qoc_pass_all = False
-            break
-
-    error_strings = []
-    metadata_checks: List[QoCCheck] = []
-    rip_message_link = "" 
-    if len(rip_message_text):
-        description = get_rip_description(rip_message_text)
-        is_unusual_metadata = "unusual metadata" in rip_message_text.lower()
-        if not is_unusual_metadata and len(description) > 0:
-            api_key = "" 
-            if desc.use_youtube_api:
-                api_key = YOUTUBE_API_KEY 
-            playlistId = extract_playlist_id('\n'.join(rip_message_text.splitlines()[1:])) # ignore author line
-            advancedCheck = get_config('metadata')
-            metadata_checks = await run_blocking(checkMetadata, description, YOUTUBE_CHANNEL_NAME, playlistId, api_key, advancedCheck)
-
-        message_id = 0
-        vetted_message_link = ""
-        message_author_name = ""
-        if desc.rip:
-            vetted_message_link = format_message_link(desc.rip.guild_id, desc.rip.channel_id, desc.rip.message_id)
-            message_author_name = desc.rip.message_author_name
-            message_id = desc.rip.message_id
-        if desc.message:
-            vetted_message_link = desc.message.jump_url
-            message_author_name = str(desc.message.author)
-            message_id = desc.message.id
-
-        if len(vetted_message_link):
-            rip_message_link = f'[{get_rip_title(rip_message_text)}]({vetted_message_link})' 
-
-        if not len(metadata_checks) and "[Unusual Pin Format]" in get_rip_author(rip_message_text, message_author_name):
-            metadata_checks.append(QoCCheck(CheckResultType.FAIL, "Rip author is missing."))
-
-        if not is_unusual_metadata:
-            rips = []
-            channel_ids = get_channel_ids_of_types(['QUEUE', 'QOC'])
-            for channel_id in channel_ids:
-                channel = bot.get_channel(channel_id)
-                if channel:
-                    rips_and_errors = await get_rips_fast(channel, GetRipsDesc())
-                    rips = rips_and_errors.rips
-                    error_strings.extend(rips_and_errors.error_strings)
-
-            title = get_raw_rip_title(rip_message_text)
-            for rip in rips:
-                if rip.message_id != message_id:
-                    rip_title = get_raw_rip_title(rip.text)
-                    if title == rip_title:
-                        link = format_message_link(channel.guild.id, channel.id, rip.message_id)
-                        metadata_checks.append(QoCCheck(CheckResultType.FAIL, f"Video title already exists in <#{rip.channel_id}>: [{rip_title}]({link})."))
-                    if isDupe(description, get_rip_description(rip.text), True):
-                        link = format_message_link(channel.guild.id, channel.id, rip.message_id)
-                        metadata_checks.append(QoCCheck(CheckResultType.FAIL, f"Main mix detected in <#{rip.channel_id}>: [{rip_title}]({link}). Add something on the author line to avoid uploading this early."))
-
-            # Check for lines between the rip description and link - if it does not start with "Joke", add a warning
-            # in order to minimize accidental joke lines when uploading
-            if len(qoced_url):
-                try:
-                    for line in rip_message_text.split('```', 2)[2].splitlines():
-                        line = "".join(c for c in line if c.isprintable())
-                        if qoced_url in line:
-                            break
-                        elif len(line) > 0 and not line.startswith('Joke') and not line == '||':
-                            metadata_checks.append(QoCCheck(CheckResultType.FAIL, "Line not starting with ``Joke`` detected between description and rip URL. Recommend putting the URL directly under description to avoid accidentally uploading joke lines."))
-                            break
-                except IndexError:
-                    pass
-
-    everything_passed = is_qoc_pass_all and not len(metadata_checks)
-
-    past_vet_message = None 
-    past_vet_message_was_checked = False
-    if desc.message and channel_is_types(desc.message.channel, ['QOC']):
-        if link_error:
-            #TODO: (Ahmayk) needs to be wrapped for errors
-            await desc.message.add_reaction(QOC_DEFAULT_LINKERR)
-        elif message_has_react(QOC_DEFAULT_LINKERR, desc.message):
-            #TODO: (Ahmayk) needs to be wrapped for errors
-            await desc.message.clear_reaction(QOC_DEFAULT_LINKERR)
-
-        after_messages_and_errors = await discord_get_channel_messages_after(desc.message, 15, desc.message.channel)
-        error_strings.extend(after_messages_and_errors.error_strings)
-        assert bot.user
-        for message in after_messages_and_errors.messages:
-            if message.author.id == bot.user.id and desc.message.jump_url in message.content: 
-                past_vet_message = message
-                if message_has_react(DEFAULT_CHECK, past_vet_message):
-                    past_vet_message_was_checked = True
-                    #TODO: (Ahmayk) needs to be wrapped for errors
-                    past_vet_message.clear_reaction(DEFAULT_CHECK)
-                break
-
-    vet_rip_result = VetRipResult(qoced_url, qoc_checks_dict, metadata_checks, rip_message_text, \
-                                  rip_message_link, everything_passed, link_error, \
-                                  desc.past_rip_message_content, past_vet_message, \
-                                  past_vet_message_was_checked, error_strings) 
-
-    if past_vet_message:
-        format_desc_past = FormatVetRipResultDesc(is_new_pinned_message=True)
-        past_text = format_vet_rip_result(format_desc_past, vet_rip_result)
-        #TODO: (Ahmayk) needs to be wrapped for errors
-        errors = await discord_edit_message(past_vet_message, past_text)
-        error_strings.extend(errors)
-
-    return vet_rip_result
-
-
-class FormatVetRipResultDesc(NamedTuple):
-    full_feedback: bool = False
-    is_new_pinned_message: bool = False
-    smol_update: bool = False
-
-def format_vet_rip_result(desc: FormatVetRipResultDesc, vet_rip_result: VetRipResult) -> str:
-
-    return_message = ""
-    if desc.full_feedback or desc.smol_update or not vet_rip_result.everything_passed:
-
-        intro_warnings = [] 
-        if not len(vet_rip_result.qoced_url) and not vet_rip_result.link_error:
-            intro_warnings.append(":warning: No rip links detected.")
-
-        verdict_emojis: List[str] = [] 
-
-        if vet_rip_result.link_error: 
-            verdict_emojis.append(QOC_DEFAULT_LINKERR)
-            intro_warnings.append(":warning: **Rip link not Auto-QoCed**")
-
-        qoc_text = ""
-        for qoc_check_type, qoc_check in vet_rip_result.qoc_checks_dict.items():
-            if len(qoc_check.msg) and (desc.full_feedback or qoc_check.result != CheckResultType.PASS):
-                qoc_text += f'\n- {qoc_check.msg}'
-
-            if qoc_check.result == CheckResultType.FAIL and DEFAULT_FIX not in verdict_emojis:
-                verdict_emojis.append(DEFAULT_FIX)
-                if qoc_check_type == QoCCheckType.BITRATE:
-                    verdict_emojis.append(QOC_DEFAULT_BITRATE)
-                if qoc_check_type == QoCCheckType.CLIPPING:
-                    verdict_emojis.append(QOC_DEFAULT_CLIPPING)
-
-            if qoc_check.result == CheckResultType.ERROR and DEFAULT_ERROR not in verdict_emojis:
-                verdict_emojis += DEFAULT_ERROR
-
-        if len(vet_rip_result.metadata_checks):
-            verdict_emojis.append(DEFAULT_METADATA)
-            qoc_text += '\n' + '\n'.join(["- " + m.msg for m in vet_rip_result.metadata_checks])
-        elif desc.full_feedback:
-            qoc_text += "\n- Metadata is OK."
-
-        if vet_rip_result.everything_passed:
-            verdict_emojis.append(DEFAULT_CHECK)
-
-        return_header = "" 
-        if len(vet_rip_result.rip_message_link):
-            return_header_title = "Rip"
-            if vet_rip_result.past_rip_message_content:
-
-                old_rip_links = extract_rip_link(vet_rip_result.past_rip_message_content)
-                old_rip_link = ""
-                if len(old_rip_links):
-                    old_rip_link = old_rip_links[0]
-                is_link_updated = vet_rip_result.qoced_url and old_rip_link != vet_rip_result.qoced_url
-
-                #NOTE: (Ahmayk) assumes that "metadata" is everything before the audio rip link
-                linkless_metadata_old = vet_rip_result.past_rip_message_content 
-                if len(old_rip_link):
-                    linkless_metadata_old = vet_rip_result.past_rip_message_content.split(old_rip_link)[0]
-                linkless_metadata_new = vet_rip_result.rip_message_text
-                if len(vet_rip_result.qoced_url):
-                    linkless_metadata_new = vet_rip_result.rip_message_text.split(vet_rip_result.qoced_url)[0]
-                is_metadata_updated = linkless_metadata_old != linkless_metadata_new 
-
-                if is_link_updated and is_metadata_updated:
-                    return_header_title = f'{QOC_DEFAULT_LINKERR}{DEFAULT_METADATA} Link and Metadata Updated'
-                elif is_link_updated:
-                    return_header_title = f'{QOC_DEFAULT_LINKERR} Link Updated'
-                elif is_metadata_updated:
-                    return_header_title = f'{DEFAULT_METADATA} Metadata Updated'
-                else:
-                    return_header_title = f'Message Updated'
-
-            return_header = f'**{return_header_title}: {vet_rip_result.rip_message_link}**'
-
-        crossed_out_lines = ""
-        if vet_rip_result.past_vet_message:
-            old_lines = vet_rip_result.past_vet_message.content.splitlines()
-            for old_line in old_lines:
-                if old_line.startswith('- ') and (old_line not in qoc_text or vet_rip_result.past_vet_message_was_checked):
-                    crossed_out_lines += f'\n-# ~~{old_line}~~'
-                if old_line.startswith('-# ~~'):
-                    crossed_out_lines += "\n" + old_line
-
-        if desc.smol_update:
-            return_message = f'-# {return_header} {" ".join(verdict_emojis)}'
-        else:
-            return_message = f'{"\n".join(intro_warnings)}{return_header}\n**Verdict**: {" ".join(verdict_emojis)}'
-            return_message += crossed_out_lines 
-            return_message += qoc_text
-            if not vet_rip_result.everything_passed and desc.is_new_pinned_message:
-                return_message += f'\n-# React {DEFAULT_CHECK} if this is resolved or should be ignored.'
-
-    return return_message
-
 
 def format_rip(rip: Rip, guild: discord.Guild, make_smol: bool, spec_overdue_days: int, overdue_days: int) -> str:
 
