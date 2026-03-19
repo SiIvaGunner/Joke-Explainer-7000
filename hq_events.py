@@ -156,7 +156,6 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
 
         async with channel.typing():
 
-            return_message = ""
 
             messages_and_errors = await discord_get_channel_pins(1, channel)
             if len(messages_and_errors.error_strings):
@@ -166,6 +165,9 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
             message = messages_and_errors.messages[0]
 
             error_strings: List[str] = []
+
+            return_message = ""
+            delete_afterwards_time = 0
 
             if is_message_rip(message):
 
@@ -208,9 +210,16 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
                     error_strings.extend(vet_rip_result.error_strings)
 
                     format_desc = FormatVetRipResultDesc(is_new_pinned_message=True)
-                    return_message += format_vet_rip_result(format_desc, vet_rip_result)
+                    return_message = format_vet_rip_result(format_desc, vet_rip_result)
 
-            await send_and_if_errors(return_message, "Warning: Pining QoC rip returned errors.", error_strings, channel)
+                    if not len(return_message):
+                        delete_afterwards_time = 2 
+                        confirm_emoji = random.choice(['👍', '😚', '😀 ', '🙃 ', '😎 ', '👌 ', '❤️ ', '🔥 ', '✅ ', '🥰'])
+                        if random.random() < (1.0 / 20.0):
+                            confirm_emoji = random.choice(['🐟 ', '😂 ', '😳 ', '🐒 ', '💯 ', '🌈 ', '🍔 ', '🫶', '👁️👄👁️ ', '🏳️‍⚧️ ', '🏳️‍🌈 ', '🐴 ', '🇧🇷'])
+                        return_message = confirm_emoji 
+
+            await send_and_if_errors(return_message, "Warning: Pining QoC rip returned errors.", error_strings, channel, delete_afterwards_time)
 
 
 @bot.event
@@ -324,7 +333,7 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
         RIP_CACHE[payload.channel_id][payload.message_id] = rip
         unlock_message(payload.message_id)
 
-        if channel_is_types(payload.message.channel, ['QOC']):
+        if channel_is_types(payload.message.channel, ['QOC']) and payload.message.pinned:
             async with payload.message.channel.typing():
                 try:
                     desc = VetRipDesc(message=payload.message, use_youtube_api=True, \

@@ -1304,13 +1304,16 @@ def split_long_message(a_message: str, character_limit) -> list[str]:  # avoid D
     result.append(wall_of_text[:-1])  # add anything remaining
     return result
 
-async def send(text: str, channel: TextChannel | Thread):
+async def send(text: str, channel: TextChannel | Thread, delete_after: int = 0):
     limit = get_config("character_limit")
     split_message = split_long_message(text, limit)
     for line in split_message:
         if len(line):
             try:
-                await channel.send(line)
+                if delete_after:
+                    await channel.send(line, delete_after=delete_after)
+                else:
+                    await channel.send(line)
             except Exception as error:
                 #NOTE: (Ahmayk) write_log here could cause infinite error loops so just stay quiet about this one 
                 txt = f'Failed to send message to {channel.jump_url}: {type(error).__name__}: {error}'
@@ -1440,10 +1443,10 @@ async def send_if_errors(if_errors_txt: str, error_strings: List[str], channel: 
     return_text = parse_errors(if_errors_txt, error_strings) 
     await send(return_text, channel)
 
-async def send_and_if_errors(txt: str, if_errors_txt: str, error_strings: List[str], channel: TextChannel | Thread):
+async def send_and_if_errors(txt: str, if_errors_txt: str, error_strings: List[str], channel: TextChannel | Thread, delete_after: float = 0):
     error_text = parse_errors(if_errors_txt, error_strings) 
     if len(txt) or len(error_text):
-        await send(f'{txt}\n{error_text}', channel)
+        await send(f'{txt}\n{error_text}', channel, delete_after)
 
 async def write_log(msg: str = "Placeholder message", embed: bool = False):
     """
