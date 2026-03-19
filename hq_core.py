@@ -227,6 +227,15 @@ async def discord_add_reaction(reaction_string: str, message: Message) -> List[s
     return error_strings
 
 
+async def discord_clear_reaction(reaction_string: str, message: Message) -> List[str]: 
+    error_strings: List[str] = [] 
+    try:
+        await message.clear_reaction(reaction_string)
+    except Exception as error:
+        await log_exception(f'Discord API call failed to clear reaction {reaction_string} from {message.id}', error, error_strings, True)
+    return error_strings
+
+
 async def discord_edit_message(message: Message, text: str) -> List[str]: 
     error_strings: List[str] = [] 
     try:
@@ -1035,11 +1044,11 @@ async def vet_rip_or_url(rip_text_or_url: str, desc: VetRipDesc) -> VetRipResult
     past_vet_message_was_checked = False
     if desc.message and channel_is_types(desc.message.channel, ['QOC']):
         if link_error:
-            #TODO: (Ahmayk) needs to be wrapped for errors
-            await desc.message.add_reaction(QOC_DEFAULT_LINKERR)
+            errors = await discord_add_reaction(QOC_DEFAULT_LINKERR, desc.message)
+            error_strings.extend(errors)
         elif message_has_react(QOC_DEFAULT_LINKERR, desc.message):
-            #TODO: (Ahmayk) needs to be wrapped for errors
-            await desc.message.clear_reaction(QOC_DEFAULT_LINKERR)
+            errors = await discord_clear_reaction(QOC_DEFAULT_LINKERR, desc.message)
+            error_strings.extend(errors)
 
         after_messages_and_errors = await discord_get_channel_messages_after(desc.message, 15, desc.message.channel)
         error_strings.extend(after_messages_and_errors.error_strings)
@@ -1049,8 +1058,8 @@ async def vet_rip_or_url(rip_text_or_url: str, desc: VetRipDesc) -> VetRipResult
                 past_vet_message = message
                 if message_has_react(DEFAULT_CHECK, past_vet_message):
                     past_vet_message_was_checked = True
-                    #TODO: (Ahmayk) needs to be wrapped for errors
-                    await past_vet_message.clear_reaction(DEFAULT_CHECK)
+                    errors = await discord_clear_reaction(DEFAULT_CHECK, desc.message)
+                    error_strings.extend(errors)
                 break
 
     vet_rip_result = VetRipResult(qoced_url, qoc_checks_dict, metadata_checks, rip_message_text, \
@@ -1154,7 +1163,7 @@ def format_vet_rip_result(desc: FormatVetRipResultDesc, vet_rip_result: VetRipRe
         if desc.smol_update:
             return_message = f'-# {return_header} {" ".join(verdict_emojis)}'
         else:
-            return_message = f'{"\n".join(intro_warnings)}{return_header}\n**Verdict**: {" ".join(verdict_emojis)}'
+            return_message = f'{"\n".join(intro_warnings)}\n{return_header}\n**Verdict**: {" ".join(verdict_emojis)}'
             return_message += crossed_out_lines 
             return_message += qoc_text
             if not vet_rip_result.everything_passed and desc.is_new_pinned_message:
