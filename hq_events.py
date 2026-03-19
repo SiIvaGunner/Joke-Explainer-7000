@@ -207,14 +207,6 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
                     vet_rip_result = await vet_rip_or_url(rip.text, vet_desc)
                     error_strings.extend(vet_rip_result.error_strings)
 
-                    link_error = QoCCheckType.LINK in vet_rip_result.qoc_checks_dict and \
-                        vet_rip_result.qoc_checks_dict[QoCCheckType.LINK].result == CheckResultType.ERROR
-
-                    if link_error:
-                        return_message += "\n:warning: **Rip link not Auto-QoCed**\n-# Remove :link: reaction when link is fixed and properly vetted."
-                        #TODO: (Ahmayk) needs to be wrapped for errors
-                        await message.add_reaction(QOC_DEFAULT_LINKERR)
-
                     format_desc = FormatVetRipResultDesc(is_new_pinned_message=True)
                     return_message += format_vet_rip_result(format_desc, vet_rip_result)
 
@@ -334,34 +326,16 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
 
         if channel_is_types(payload.message.channel, ['QOC']):
             async with payload.message.channel.typing():
+                try:
+                    desc = VetRipDesc(message=payload.message, use_youtube_api=True, \
+                                    past_rip_message_content=old_text)
+                    vet_rip_result = await vet_rip_or_url(payload.message.content, desc)
 
-                error_strings = []
-
-                desc = VetRipDesc(message=payload.message, use_youtube_api=True)
-                vet_rip_result = await vet_rip_or_url(payload.message.content, desc)
-                error_strings.extend(vet_rip_result.error_strings)
-
-                after_messages_and_errors = await discord_get_channel_messages_after(payload.message, 50, payload.message.channel)
-                error_strings.extend(after_messages_and_errors.error_strings)
-                past_qoc_result_message = None
-                assert bot.user
-                for message in after_messages_and_errors.messages:
-                    if message.author.id == bot.user.id and vet_rip_result.rip_message_link in message.content: 
-                        past_qoc_result_message = message
-                        break
-
-                if past_qoc_result_message:
-                    format_desc_past = FormatVetRipResultDesc(past_rip_message_content=old_text,\
-                                                              past_qoc_message=past_qoc_result_message,\
-                                                              is_new_pinned_message=True)
-                    past_text = format_vet_rip_result(format_desc_past, vet_rip_result)
-                    errors = await discord_edit_message(past_qoc_result_message, past_text)
-                    error_strings.extend(errors)
-
-                format_desc = FormatVetRipResultDesc(past_rip_message_content=old_text, \
-                                                     past_qoc_message=past_qoc_result_message)
-                text = format_vet_rip_result(format_desc, vet_rip_result)
-                await send_and_if_errors(text, "Errors while re-qocing:", after_messages_and_errors.error_strings, payload.message.channel)
+                    format_desc = FormatVetRipResultDesc(smol_update=True)
+                    text = format_vet_rip_result(format_desc, vet_rip_result)
+                    await send_and_if_errors(text, "Errors while re-qocing:", vet_rip_result.error_strings, payload.message.channel)
+                except Exception as error:
+                    await send_crash(f'ERROR on rip vet after pin:', error, payload.message.channel)
 
 
 @bot.event

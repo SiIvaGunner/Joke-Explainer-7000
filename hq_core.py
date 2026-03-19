@@ -1342,6 +1342,15 @@ def is_message_rip(message: Message) -> bool:
     return result
 
 
+def message_has_react(emoji: str, message: Message) -> bool:
+    result = False
+    for reaction in message.reactions:
+        if reaction.emoji == emoji:
+            result = True
+            break
+    return result
+
+
 # https://stackoverflow.com/a/65882269
 async def run_blocking(blocking_func: typing.Callable, *args, **kwargs) -> typing.Any:
     """
@@ -1355,6 +1364,7 @@ class VetRipDesc(NamedTuple):
     rip: Rip | None = None
     message: Message | None = None
     use_youtube_api: bool = False
+    past_rip_message_content: str = ""
 
 class VetRipResult(NamedTuple):
     qoced_url: str
@@ -1363,6 +1373,10 @@ class VetRipResult(NamedTuple):
     rip_message_text: str
     rip_message_link: str
     everything_passed: bool
+    link_error: bool
+    past_rip_message_content: str
+    past_vet_message: Message | None 
+    past_vet_message_was_checked: bool
     error_strings: list[str]
 
 async def vet_rip_or_url(rip_text_or_url: str, desc: VetRipDesc) -> VetRipResult:
@@ -1393,6 +1407,9 @@ async def vet_rip_or_url(rip_text_or_url: str, desc: VetRipDesc) -> VetRipResult
         if QoCCheckType.LINK in qoc_checks_dict and qoc_checks_dict[QoCCheckType.LINK].result != CheckResultType.ERROR:
             qoced_url = url
             break
+
+    link_error = QoCCheckType.LINK in qoc_checks_dict and \
+        qoc_checks_dict[QoCCheckType.LINK].result == CheckResultType.ERROR
 
     is_qoc_pass_all = len(qoc_checks_dict) > 0
     for qoc_check in qoc_checks_dict.values():
@@ -1469,45 +1486,77 @@ async def vet_rip_or_url(rip_text_or_url: str, desc: VetRipDesc) -> VetRipResult
 
     everything_passed = is_qoc_pass_all and not len(metadata_checks)
 
-    return VetRipResult(qoced_url, qoc_checks_dict, metadata_checks, rip_message_text, rip_message_link, everything_passed, error_strings) 
+    past_vet_message = None 
+    past_vet_message_was_checked = False
+    if desc.message and channel_is_types(desc.message.channel, ['QOC']):
+        if link_error:
+            #TODO: (Ahmayk) needs to be wrapped for errors
+            await desc.message.add_reaction(QOC_DEFAULT_LINKERR)
+        elif message_has_react(QOC_DEFAULT_LINKERR, desc.message):
+            #TODO: (Ahmayk) needs to be wrapped for errors
+            await desc.message.clear_reaction(QOC_DEFAULT_LINKERR)
+
+        after_messages_and_errors = await discord_get_channel_messages_after(desc.message, 15, desc.message.channel)
+        error_strings.extend(after_messages_and_errors.error_strings)
+        assert bot.user
+        for message in after_messages_and_errors.messages:
+            if message.author.id == bot.user.id and desc.message.jump_url in message.content: 
+                past_vet_message = message
+                if message_has_react(DEFAULT_CHECK, past_vet_message):
+                    past_vet_message_was_checked = True
+                    #TODO: (Ahmayk) needs to be wrapped for errors
+                    past_vet_message.clear_reaction(DEFAULT_CHECK)
+                break
+
+    vet_rip_result = VetRipResult(qoced_url, qoc_checks_dict, metadata_checks, rip_message_text, \
+                                  rip_message_link, everything_passed, link_error, \
+                                  desc.past_rip_message_content, past_vet_message, \
+                                  past_vet_message_was_checked, error_strings) 
+
+    if past_vet_message:
+        format_desc_past = FormatVetRipResultDesc(is_new_pinned_message=True)
+        past_text = format_vet_rip_result(format_desc_past, vet_rip_result)
+        #TODO: (Ahmayk) needs to be wrapped for errors
+        errors = await discord_edit_message(past_vet_message, past_text)
+        error_strings.extend(errors)
+
+    return vet_rip_result
+
 
 class FormatVetRipResultDesc(NamedTuple):
     full_feedback: bool = False
     is_new_pinned_message: bool = False
-    past_rip_message_content: str = ""
-    past_qoc_message: Message | None = None 
+    smol_update: bool = False
 
 def format_vet_rip_result(desc: FormatVetRipResultDesc, vet_rip_result: VetRipResult) -> str:
 
     return_message = ""
+    if desc.full_feedback or desc.smol_update or not vet_rip_result.everything_passed:
 
-    if desc.full_feedback or desc.past_qoc_message or desc.past_rip_message_content or not vet_rip_result.everything_passed:
-
-        if not len(vet_rip_result.qoced_url):
-            return_message += "\n:warning: No rip links detected."
+        intro_warnings = [] 
+        if not len(vet_rip_result.qoced_url) and not vet_rip_result.link_error:
+            intro_warnings.append(":warning: No rip links detected.")
 
         verdict_emojis: List[str] = [] 
 
-        link_error = QoCCheckType.LINK in vet_rip_result.qoc_checks_dict and \
-            vet_rip_result.qoc_checks_dict[QoCCheckType.LINK].result == CheckResultType.ERROR
+        if vet_rip_result.link_error: 
+            verdict_emojis.append(QOC_DEFAULT_LINKERR)
+            intro_warnings.append(":warning: **Rip link not Auto-QoCed**")
 
         qoc_text = ""
-        if link_error: 
-            verdict_emojis.append(QOC_DEFAULT_LINKERR)
-        else:
-            for qoc_check_type, qoc_check in vet_rip_result.qoc_checks_dict.items():
-                if len(qoc_check.msg) and (desc.full_feedback or qoc_check.result != CheckResultType.PASS):
-                    qoc_text += f'\n- {qoc_check.msg}'
+        for qoc_check_type, qoc_check in vet_rip_result.qoc_checks_dict.items():
+            if len(qoc_check.msg) and (desc.full_feedback or qoc_check.result != CheckResultType.PASS):
+                qoc_text += f'\n- {qoc_check.msg}'
 
-                if qoc_check.result == CheckResultType.FAIL and DEFAULT_FIX not in verdict_emojis:
-                    verdict_emojis.append(DEFAULT_FIX)
-                    if qoc_check_type == QoCCheckType.BITRATE:
-                        verdict_emojis.append(QOC_DEFAULT_BITRATE)
-                    if qoc_check_type == QoCCheckType.CLIPPING:
-                        verdict_emojis.append(QOC_DEFAULT_CLIPPING)
+            if qoc_check.result == CheckResultType.FAIL and DEFAULT_FIX not in verdict_emojis:
+                verdict_emojis.append(DEFAULT_FIX)
+                if qoc_check_type == QoCCheckType.BITRATE:
+                    verdict_emojis.append(QOC_DEFAULT_BITRATE)
+                if qoc_check_type == QoCCheckType.CLIPPING:
+                    verdict_emojis.append(QOC_DEFAULT_CLIPPING)
 
-                if qoc_check.result == CheckResultType.ERROR and DEFAULT_ERROR not in verdict_emojis:
-                    verdict_emojis += DEFAULT_ERROR
+            if qoc_check.result == CheckResultType.ERROR and DEFAULT_ERROR not in verdict_emojis:
+                verdict_emojis += DEFAULT_ERROR
 
         if len(vet_rip_result.metadata_checks):
             verdict_emojis.append(DEFAULT_METADATA)
@@ -1521,18 +1570,18 @@ def format_vet_rip_result(desc: FormatVetRipResultDesc, vet_rip_result: VetRipRe
         return_header = "" 
         if len(vet_rip_result.rip_message_link):
             return_header_title = "Rip"
-            if desc.past_rip_message_content:
+            if vet_rip_result.past_rip_message_content:
 
-                old_rip_links = extract_rip_link(desc.past_rip_message_content)
+                old_rip_links = extract_rip_link(vet_rip_result.past_rip_message_content)
                 old_rip_link = ""
                 if len(old_rip_links):
                     old_rip_link = old_rip_links[0]
-                is_link_updated = vet_rip_result.qoced_url and len(old_rip_link) and old_rip_link != vet_rip_result.qoced_url
+                is_link_updated = vet_rip_result.qoced_url and old_rip_link != vet_rip_result.qoced_url
 
                 #NOTE: (Ahmayk) assumes that "metadata" is everything before the audio rip link
-                linkless_metadata_old = desc.past_rip_message_content 
+                linkless_metadata_old = vet_rip_result.past_rip_message_content 
                 if len(old_rip_link):
-                    linkless_metadata_old = desc.past_rip_message_content.split(old_rip_link)[0]
+                    linkless_metadata_old = vet_rip_result.past_rip_message_content.split(old_rip_link)[0]
                 linkless_metadata_new = vet_rip_result.rip_message_text
                 if len(vet_rip_result.qoced_url):
                     linkless_metadata_new = vet_rip_result.rip_message_text.split(vet_rip_result.qoced_url)[0]
@@ -1550,21 +1599,23 @@ def format_vet_rip_result(desc: FormatVetRipResultDesc, vet_rip_result: VetRipRe
             return_header = f'**{return_header_title}: {vet_rip_result.rip_message_link}**'
 
         crossed_out_lines = ""
-        if desc.past_qoc_message:
-            old_lines = desc.past_qoc_message.content.splitlines()
+        if vet_rip_result.past_vet_message:
+            old_lines = vet_rip_result.past_vet_message.content.splitlines()
             for old_line in old_lines:
-                if old_line.startswith('- ') and old_line not in qoc_text:
+                if old_line.startswith('- ') and (old_line not in qoc_text or vet_rip_result.past_vet_message_was_checked):
                     crossed_out_lines += f'\n-# ~~{old_line}~~'
                 if old_line.startswith('-# ~~'):
                     crossed_out_lines += "\n" + old_line
 
-        return_message += f'\n{return_header}\n**Verdict**: {" ".join(verdict_emojis)}'
-        return_message += crossed_out_lines 
-        return_message += qoc_text
+        if desc.smol_update:
+            return_message = f'-# {return_header} {" ".join(verdict_emojis)}'
+        else:
+            return_message = f'{"\n".join(intro_warnings)}{return_header}\n**Verdict**: {" ".join(verdict_emojis)}'
+            return_message += crossed_out_lines 
+            return_message += qoc_text
+            if not vet_rip_result.everything_passed and desc.is_new_pinned_message:
+                return_message += f'\n-# React {DEFAULT_CHECK} if this is resolved or should be ignored.'
 
-        if not vet_rip_result.everything_passed and desc.is_new_pinned_message:
-            return_message += f'\n-# React {DEFAULT_CHECK} if this is resolved or should be ignored.'
-    
     return return_message
 
 
