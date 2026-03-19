@@ -1050,7 +1050,7 @@ async def vet_rip_or_url(rip_text_or_url: str, desc: VetRipDesc) -> VetRipResult
                 if message_has_react(DEFAULT_CHECK, past_vet_message):
                     past_vet_message_was_checked = True
                     #TODO: (Ahmayk) needs to be wrapped for errors
-                    past_vet_message.clear_reaction(DEFAULT_CHECK)
+                    await past_vet_message.clear_reaction(DEFAULT_CHECK)
                 break
 
     vet_rip_result = VetRipResult(qoced_url, qoc_checks_dict, metadata_checks, rip_message_text, \
@@ -1061,7 +1061,6 @@ async def vet_rip_or_url(rip_text_or_url: str, desc: VetRipDesc) -> VetRipResult
     if past_vet_message:
         format_desc_past = FormatVetRipResultDesc(is_new_pinned_message=True)
         past_text = format_vet_rip_result(format_desc_past, vet_rip_result)
-        #TODO: (Ahmayk) needs to be wrapped for errors
         errors = await discord_edit_message(past_vet_message, past_text)
         error_strings.extend(errors)
 
@@ -1076,7 +1075,7 @@ class FormatVetRipResultDesc(NamedTuple):
 def format_vet_rip_result(desc: FormatVetRipResultDesc, vet_rip_result: VetRipResult) -> str:
 
     return_message = ""
-    if desc.full_feedback or desc.smol_update or not vet_rip_result.everything_passed:
+    if desc.full_feedback or desc.smol_update or not vet_rip_result.everything_passed or vet_rip_result.past_vet_message:
 
         intro_warnings = [] 
         if not len(vet_rip_result.qoced_url) and not vet_rip_result.link_error:

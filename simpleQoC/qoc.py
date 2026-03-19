@@ -6,6 +6,7 @@ import requests
 from email.message import EmailMessage
 import re
 import json
+import time
 
 from mutagen import File, FileType, flac, wave
 from scipy.io import wavfile
@@ -208,7 +209,7 @@ def getHeadFromUrl(validUrl: str):
     return getResponseFromUrl(validUrl, True).headers
 
 def downloadAudioFromUrl(validUrl: str) -> str:
-    filename = "" 
+    filename = str(time.time_ns())
     response = getResponseFromUrl(validUrl)
     try:
         msg = EmailMessage()
@@ -216,7 +217,7 @@ def downloadAudioFromUrl(validUrl: str) -> str:
         content_filename = msg.get_filename()
         if content_filename is None:
             raise KeyError
-        filename = content_filename
+        filename += content_filename 
     except KeyError:
         if not ('audio' in response.headers['Content-Type'] or 'video' in response.headers['Content-Type']):
             if 'html' in response.headers['Content-Type']:
@@ -232,7 +233,7 @@ def downloadAudioFromUrl(validUrl: str) -> str:
     save_response_content(response, filepath)
     
     DEBUG('Downloaded filepath: {}'.format(filepath))
-    return filepath
+    return str(filepath)
 
 
 def parseAudio(filepath: str) -> FileType:
