@@ -262,52 +262,6 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                 unlock_message(payload.message_id)
 
             unlock_channel(payload.channel_id)
-        
-        #NOTE: (Ahmayk) update post-pin qoc messages, transforming checks into the message itself 
-        if not in_cache and is_qoc_channel and payload.emoji.name == DEFAULT_CHECK:
-            errors = []
-            message_and_errors = await discord_fetch_message(payload.message_id, channel)
-            jump_url = f'message id {payload.message_id}'
-            message = message_and_errors.message
-            if message:
-                jump_url = message.jump_url
-            errors.extend(message_and_errors.error_strings)
-            if message and message.author == bot.user:
-                discord_message_link = extract_discord_link(message.content)
-                if len(discord_message_link):
-                    message_id = int(discord_message_link.split("/")[-1])
-                    if message_id and message_id in RIP_CACHE[payload.channel_id]:
-                        message_and_errors = await discord_fetch_message(payload.message_id, channel)
-                        errors.extend(message_and_errors.error_strings)
-                        rip_message = message_and_errors.message
-                        if rip_message:
-                            new_text = ""
-                            user = bot.get_user(payload.user_id)
-                            username = "[error on username]"
-                            if user:
-                                username = user.name
-
-                            vet_report = parse_string_to_vet_report(rip_message.content)
-                            print(vet_report)
-                            modified_qoc_issues = []
-                            for qoc_issue in vet_report.qoc_issues:
-                                if qoc_issue.marked_type == QoCIssueMarkedType.NOT_MARKED:
-                                    new_issue = QoCIssue(qoc_issue.issue_string, QoCIssueMarkedType.IGNORED, username)
-                                    modified_qoc_issues.append(new_issue)
-                                else:
-                                    modified_qoc_issues.append(qoc_issue)
-                            vet_report = vet_report._replace(qoc_issues=modified_qoc_issues)
-                            desc = FormatVetReportDesc(is_under_pin=True)
-                            new_text = format_vet_report(desc, vet_report)
-
-                            if new_text != rip_message.content:
-                                edit_errors = await discord_edit_message(message, new_text)
-                                errors.extend(edit_errors)
-                                if not len(errors):
-                                    react_errors = await discord_clear_reaction(DEFAULT_CHECK, message) 
-                                    errors.extend(react_errors)
-
-            await send_if_errors(f'Error on {jump_url} :check:', errors, channel)
 
 
 async def process_suborqueue_rip_caching(message: Message):
@@ -389,10 +343,7 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
                     desc = VetRipDesc(message=payload.message, use_youtube_api=True, \
                                     past_rip_message_content=old_text)
                     vet_rip_result = await vet_rip_or_url(payload.message.content, desc)
-
-                    format_desc = FormatVetRipResultDesc(smol_update=True)
-                    text = format_vet_rip_result(format_desc, vet_rip_result)
-                    await send_and_if_errors(text, "Errors while re-qocing:", vet_rip_result.error_strings, payload.message.channel)
+                    await send_if_errors("Errors while vetting:", vet_rip_result.error_strings, payload.message.channel)
                 except Exception as error:
                     await send_crash(f'ERROR on rip vet after pin:', error, payload.message.channel)
 
