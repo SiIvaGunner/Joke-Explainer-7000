@@ -1074,6 +1074,102 @@ async def vet_rip_or_url(rip_text_or_url: str, desc: VetRipDesc) -> VetRipResult
 
 REACT_CHECK_TO_IGNORE_STRING = f'-# React {DEFAULT_CHECK} to mark all as ignored.'
 
+class QoCIssueMarkedType(Enum):
+    NULL = auto()
+    NOT_MARKED = auto()
+    IGNORED = auto()
+    FIXED = auto()
+
+class QoCIssue(NamedTuple):
+    issue_string: str
+    marked_type: QoCIssueMarkedType
+    username: str 
+
+class VetReport(NamedTuple):
+    intro_warnings: list[str]
+    rip_message_link: str
+    verdict_emojis: list[str] 
+    qoc_issues: list[QoCIssue]
+
+def parse_string_to_vet_report(text: str) -> VetReport:
+    intro_warnings: List[str] = []
+    rip_message_link = ""
+    verdict_emojis: List[str] = []
+    qoc_issues: List[QoCIssue] = []
+
+    pre_qoc_checks = True 
+    lines = text.splitlines()
+    for line in lines:
+
+        if pre_qoc_checks:
+            if line.startswith(":warning:"):
+                intro_warnings.append(line)
+            else:
+                regex = r'**[.+]\((https://discord\.com/channels/\d+/\d+/\d+)\)**'
+                match = re.search(regex, line)
+                if match:
+                    rip_message_link = match.group(1)
+
+                regex = r'**Verdict**: (.+)$'
+                match = re.search(regex, line)
+                if match:
+                    verdict_emojis = match.group(1).split()
+
+        if line.startswith('-# - '):
+            pre_qoc_checks = False
+            line = line[3:]
+        if line.startswith('- '):
+            pre_qoc_checks = False
+            issue_string = line[2:] 
+            username = ""
+            marked_type = QoCIssueMarkedType.NOT_MARKED
+            if line.startswith('- (Fixed'):
+                marked_type = QoCIssueMarkedType.FIXED
+                matches = re.findall(r'^- \(Fixed by (\w+)\)', line)
+                if len(matches):
+                    username = matches[0]
+            elif line.startswith('- (Marked as ignored by '):
+                marked_type = QoCIssueMarkedType.IGNORED
+                matches = re.findall(r'^- \(Marked as ignord by (\w+)\)', line)
+                if len(matches):
+                    username = matches[0]
+            qoc_issues.append(QoCIssue(issue_string, marked_type, username))
+
+    return VetReport(intro_warnings, rip_message_link, verdict_emojis, qoc_issues) 
+
+class FormatVetReportDesc(NamedTuple):
+    is_under_pin: bool = False
+
+def format_vet_report(desc: FormatVetReportDesc, vet_report: VetReport) -> str: 
+
+    return_header = "" 
+    if len(vet_report.rip_message_link):
+        return_header_title = "Rip"
+        return_header = f'**{return_header_title}: {vet_report.rip_message_link}**'
+
+    intro_warnings_string = "\n".join(vet_report.intro_warnings)
+    return_message = f'{intro_warnings_string}\n{return_header}\n**Verdict**: {" ".join(vet_report.verdict_emojis)}'
+
+    has_not_marked_issue = False
+    for qoc_issue in vet_report.qoc_issues:
+        match qoc_issue.marked_type:
+            case QoCIssueMarkedType.NOT_MARKED:
+                has_not_marked_issue = True
+                return_message += f"\n- {qoc_issue.issue_string}"
+            case QoCIssueMarkedType.IGNORED:
+                return_message += f'\n-# - (Marked as ignored by {qoc_issue.username}) ~~{qoc_issue.issue_string}~~'
+            case QoCIssueMarkedType.FIXED:
+                return_message += f'\n-# - (Fixed) ~~{qoc_issue.issue_string}~~'
+                if len(qoc_issue.username):
+                    return_message += f'\n-# - (Fixed by {qoc_issue.username}) ~~{qoc_issue.issue_string}~~'
+
+    if desc.is_under_pin and has_not_marked_issue:
+        return_message += f'\n{REACT_CHECK_TO_IGNORE_STRING}'
+
+    return_message = return_message.strip()
+
+    return return_message
+
 class FormatVetRipResultDesc(NamedTuple):
     full_feedback: bool = False
     is_new_pinned_message: bool = False

@@ -287,20 +287,19 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                             if user:
                                 username = user.name
 
-                            #NOTE: (Ahmayk) mark everything to be ignored, but only the things that are 
-                            # in a list and not already marked as fixed or ignored
-                            lines = rip_message.content.splitlines()
-                            for old_line in lines:
-                                if (
-                                    old_line.startswith('- ')
-                                    and not old_line.startswith('-# - (Fixed')
-                                    and not old_line.startswith('-# - (Marked as ignored by ')
-                                ):
-                                    new_text += f'\n-# - (Marked as ignored by {username}) ~~{old_line}~~'
-                                elif old_line != REACT_CHECK_TO_IGNORE_STRING:
-                                    new_text += f'\n{old_line}'
+                            vet_report = parse_string_to_vet_report(rip_message.content)
+                            print(vet_report)
+                            modified_qoc_issues = []
+                            for qoc_issue in vet_report.qoc_issues:
+                                if qoc_issue.marked_type == QoCIssueMarkedType.NOT_MARKED:
+                                    new_issue = QoCIssue(qoc_issue.issue_string, QoCIssueMarkedType.IGNORED, username)
+                                    modified_qoc_issues.append(new_issue)
+                                else:
+                                    modified_qoc_issues.append(qoc_issue)
+                            vet_report = vet_report._replace(qoc_issues=modified_qoc_issues)
+                            desc = FormatVetReportDesc(is_under_pin=True)
+                            new_text = format_vet_report(desc, vet_report)
 
-                            new_text = new_text.strip()
                             if new_text != rip_message.content:
                                 edit_errors = await discord_edit_message(message, new_text)
                                 errors.extend(edit_errors)
