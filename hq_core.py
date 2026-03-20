@@ -1151,52 +1151,93 @@ def format_vet_rip_result(desc: FormatVetRipResultDesc, vet_rip_result: VetRipRe
 
             return_header = f'**{return_header_title}: {vet_rip_result.rip_message_link}**'
 
+        crossed_out_lines: List[str] = []
+        new_lines: List[str] = []
+
+        if vet_rip_result.past_vet_message:
+            old_lines = vet_rip_result.past_vet_message.content.splitlines()
+            ignored_issues_from_result: List[str] = []
+            for old_line in old_lines:
+
+                reparsed_line = ""
+                is_crossed_out = False
+                is_new_line = False
+
+                matching_issue_string = ""
+                match_found = False
+                for issue_string in issue_list:
+                    if issue_string in old_line:
+                        matching_issue_string = issue_string
+                        match_found = True
+
+                is_ignored = old_line.startswith('-# - (Marked as ignored by ')
+                is_fixed = old_line.startswith('-# - (Fixed')
+
+                #NOTE: (Ahmayk) if a previously current issue doesn't exist anymore, assume it's fixed!
+                change_to_fixed = not is_ignored and not is_fixed and \
+                    old_line.startswith('- ') and not len(matching_issue_string)
+
+                #NOTE: (Ahmayk) filter out ignored issues.
+                # if the ignored issue doesn't exist anymore, convert it to fixed
+                if is_ignored: 
+                    if match_found:
+                        ignored_issues_from_result.append(matching_issue_string)
+                    else:
+                        matches = re.findall(r'~~(.+)~~', old_line)
+                        if len(matches):
+                            old_line = matches[0]
+                        change_to_fixed = True
+
+                if is_ignored or is_fixed:
+                    matches = re.findall(r'^-# - (.+)', old_line)
+                    if len(matches):
+                        old_line = matches[0]
+                else:
+                    matches = re.findall(r'^- (.+)', old_line)
+                    if len(matches):
+                        old_line = matches[0]
+
+                if change_to_fixed:
+                    is_crossed_out = True
+                    is_new_line = True
+                    reparsed_line = f'(Fixed) ~~{old_line}~~'
+                    if len(vet_rip_result.message_editor_name):
+                        reparsed_line = f'(Fixed by {vet_rip_result.message_editor_name}) ~~{old_line}~~'
+                elif is_ignored or is_fixed:
+                    is_crossed_out = True
+                    reparsed_line = old_line
+
+                if len(reparsed_line):
+                    if is_crossed_out:
+                        crossed_out_lines.append(reparsed_line)
+                    if is_new_line:
+                        new_lines.append(reparsed_line)
+
+            for issue_string in issue_list:
+                is_matched = False 
+                for old_line in old_lines:
+                    if issue_string == old_line:
+                        is_matched = True
+                        break
+                if not is_matched:
+                    new_lines.append(issue_string)
+
+            for ignored in ignored_issues_from_result:
+                assert ignored in issue_list
+                issue_list.remove(ignored)
+            
+        else:
+            new_lines = issue_list
 
         if desc.smol_update:
             return_message = f'-# {return_header} {" ".join(verdict_emojis)}'
+            if len(new_lines):
+                return_message += "\n-# - " + "\n-# - ".join(new_lines)
         else:
-            crossed_out_lines = ""
-            if vet_rip_result.past_vet_message:
-                old_lines = vet_rip_result.past_vet_message.content.splitlines()
-                for old_line in old_lines:
-
-                    matching_issue_string = ""
-                    match_found = False
-                    for issue_string in issue_list:
-                        if issue_string in old_line:
-                            matching_issue_string = issue_string
-                            match_found = True
-
-                    is_ignored = old_line.startswith('-# - (Marked as ignored by ')
-                    is_fixed = old_line.startswith('-# - (Fixed')
-
-                    #NOTE: (Ahmayk) if a previously current issue doesn't exist anymore, assume it's fixed!
-                    change_to_fixed = not is_ignored and not is_fixed and \
-                        old_line.startswith('- ') and not len(matching_issue_string)
-
-                    #NOTE: (Ahmayk) filter out ignored issues.
-                    # if the ignored issue doesn't exist anymore, convert it to fixed
-                    if is_ignored: 
-                        if match_found:
-                            issue_list.remove(matching_issue_string)
-                            matching_issue_string = ""
-                        else:
-                            matches = re.findall(r'~~(.+?)~~', old_line)
-                            if len(matches):
-                                old_line = matches[0]
-                            change_to_fixed = True
-
-                    if change_to_fixed:
-                        if len(vet_rip_result.message_editor_name):
-                            crossed_out_lines += f'\n-# - (Fixed by {vet_rip_result.message_editor_name}) ~~{old_line}~~'
-                        else:
-                            crossed_out_lines += f'\n-# - (Fixed) ~~{old_line}~~'
-                    elif is_ignored or is_fixed:
-                        crossed_out_lines += "\n" + old_line
-
             intro_warnings_string = "\n".join(intro_warnings)
             return_message = f'{intro_warnings_string}\n{return_header}\n**Verdict**: {" ".join(verdict_emojis)}'
-            return_message += crossed_out_lines 
+            if len(crossed_out_lines):
+                return_message += "\n-# - " + "\n-# - ".join(crossed_out_lines)
             if len(issue_list):
                 return_message += "\n- " + "\n- ".join(issue_list)
             if not vet_rip_result.everything_passed and desc.is_new_pinned_message and len(issue_list):
