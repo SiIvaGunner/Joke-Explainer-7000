@@ -159,13 +159,13 @@ async def discord_get_channel_messages(limit: int | None, channel: TextChannel |
     return MessagesAndErrors(messages, error_strings) 
 
 
-async def discord_get_channel_messages_after(message: Message, limit: int | None, channel: TextChannel | Thread) -> MessagesAndErrors: 
+async def discord_get_channel_messages_after(message: Message, limit: int | None) -> MessagesAndErrors: 
     messages = [] 
     error_strings: List[str] = [] 
     try:
-        messages = [message async for message in channel.history(limit=limit, after=message)]
+        messages = [message async for message in message.channel.history(limit=limit, after=message)]
     except Exception as error:
-        await log_exception(f'Discord API call failed to fetch channel messages from {channel.name} after message {message.jump_url}', error, error_strings, True)
+        await log_exception(f'Discord API call failed to fetch channel messages from {message.channel.name} after message {message.jump_url}', error, error_strings, True)
     return MessagesAndErrors(messages, error_strings) 
 
 
@@ -930,7 +930,7 @@ class VetRipResult(NamedTuple):
     link_error: bool
     past_rip_message_content: str
     past_vet_message: Message | None 
-    past_vet_message_was_checked: bool
+    message_editor_name: str
     error_strings: list[str]
 
 async def vet_rip_or_url(rip_text_or_url: str, desc: VetRipDesc) -> VetRipResult:
@@ -974,6 +974,7 @@ async def vet_rip_or_url(rip_text_or_url: str, desc: VetRipDesc) -> VetRipResult
     error_strings = []
     metadata_checks: List[QoCCheck] = []
     rip_message_link = "" 
+    message_editor_name = ""
     if len(rip_message_text):
         description = get_rip_description(rip_message_text)
         is_unusual_metadata = "unusual metadata" in rip_message_text.lower()
@@ -995,6 +996,7 @@ async def vet_rip_or_url(rip_text_or_url: str, desc: VetRipDesc) -> VetRipResult
         if desc.message:
             vetted_message_link = desc.message.jump_url
             message_author_name = str(desc.message.author)
+            message_editor_name = message_author_name
             message_id = desc.message.id
 
         if len(vetted_message_link):
@@ -1041,7 +1043,6 @@ async def vet_rip_or_url(rip_text_or_url: str, desc: VetRipDesc) -> VetRipResult
     everything_passed = is_qoc_pass_all and not len(metadata_checks)
 
     past_vet_message = None 
-    past_vet_message_was_checked = False
     if desc.message and channel_is_types(desc.message.channel, ['QOC']):
         if link_error:
             errors = await discord_add_reaction(QOC_DEFAULT_LINKERR, desc.message)
@@ -1050,22 +1051,18 @@ async def vet_rip_or_url(rip_text_or_url: str, desc: VetRipDesc) -> VetRipResult
             errors = await discord_clear_reaction(QOC_DEFAULT_LINKERR, desc.message)
             error_strings.extend(errors)
 
-        after_messages_and_errors = await discord_get_channel_messages_after(desc.message, 15, desc.message.channel)
+        after_messages_and_errors = await discord_get_channel_messages_after(desc.message, 15)
         error_strings.extend(after_messages_and_errors.error_strings)
         assert bot.user
         for message in after_messages_and_errors.messages:
             if message.author.id == bot.user.id and desc.message.jump_url in message.content: 
                 past_vet_message = message
-                if message_has_react(DEFAULT_CHECK, past_vet_message):
-                    past_vet_message_was_checked = True
-                    errors = await discord_clear_reaction(DEFAULT_CHECK, desc.message)
-                    error_strings.extend(errors)
                 break
 
     vet_rip_result = VetRipResult(qoced_url, qoc_checks_dict, metadata_checks, rip_message_text, \
                                   rip_message_link, everything_passed, link_error, \
                                   desc.past_rip_message_content, past_vet_message, \
-                                  past_vet_message_was_checked, error_strings) 
+                                  message_editor_name, error_strings) 
 
     if past_vet_message:
         format_desc_past = FormatVetRipResultDesc(is_new_pinned_message=True)
@@ -1075,6 +1072,7 @@ async def vet_rip_or_url(rip_text_or_url: str, desc: VetRipDesc) -> VetRipResult
 
     return vet_rip_result
 
+REACT_CHECK_TO_IGNORE_STRING = f'-# React {DEFAULT_CHECK} to mark all as ignored.'
 
 class FormatVetRipResultDesc(NamedTuple):
     full_feedback: bool = False
@@ -1096,10 +1094,10 @@ def format_vet_rip_result(desc: FormatVetRipResultDesc, vet_rip_result: VetRipRe
             verdict_emojis.append(QOC_DEFAULT_LINKERR)
             intro_warnings.append(":warning: **Rip link not Auto-QoCed**")
 
-        qoc_text = ""
+        issue_list = []
         for qoc_check_type, qoc_check in vet_rip_result.qoc_checks_dict.items():
             if len(qoc_check.msg) and (desc.full_feedback or qoc_check.result != CheckResultType.PASS):
-                qoc_text += f'\n- {qoc_check.msg}'
+                issue_list.append(qoc_check.msg)
 
             if qoc_check.result == CheckResultType.FAIL and DEFAULT_FIX not in verdict_emojis:
                 verdict_emojis.append(DEFAULT_FIX)
@@ -1113,9 +1111,11 @@ def format_vet_rip_result(desc: FormatVetRipResultDesc, vet_rip_result: VetRipRe
 
         if len(vet_rip_result.metadata_checks):
             verdict_emojis.append(DEFAULT_METADATA)
-            qoc_text += '\n' + '\n'.join(["- " + m.msg for m in vet_rip_result.metadata_checks])
+            for qoc_check in vet_rip_result.metadata_checks:
+                if len(qoc_check.msg):
+                    issue_list.append(qoc_check.msg)
         elif desc.full_feedback:
-            qoc_text += "\n- Metadata is OK."
+            issue_list.append('Metadata is OK.')
 
         if vet_rip_result.everything_passed:
             verdict_emojis.append(DEFAULT_CHECK)
@@ -1151,23 +1151,56 @@ def format_vet_rip_result(desc: FormatVetRipResultDesc, vet_rip_result: VetRipRe
 
             return_header = f'**{return_header_title}: {vet_rip_result.rip_message_link}**'
 
-        crossed_out_lines = ""
-        if vet_rip_result.past_vet_message:
-            old_lines = vet_rip_result.past_vet_message.content.splitlines()
-            for old_line in old_lines:
-                if old_line.startswith('- ') and (old_line not in qoc_text or vet_rip_result.past_vet_message_was_checked):
-                    crossed_out_lines += f'\n-# ~~{old_line}~~'
-                if old_line.startswith('-# ~~'):
-                    crossed_out_lines += "\n" + old_line
 
         if desc.smol_update:
             return_message = f'-# {return_header} {" ".join(verdict_emojis)}'
         else:
-            return_message = f'{"\n".join(intro_warnings)}\n{return_header}\n**Verdict**: {" ".join(verdict_emojis)}'
+            crossed_out_lines = ""
+            if vet_rip_result.past_vet_message:
+                old_lines = vet_rip_result.past_vet_message.content.splitlines()
+                for old_line in old_lines:
+
+                    matching_issue_string = ""
+                    match_found = False
+                    for issue_string in issue_list:
+                        if issue_string in old_line:
+                            matching_issue_string = issue_string
+                            match_found = True
+
+                    is_ignored = old_line.startswith('-# - (Marked as ignored by ')
+                    is_fixed = old_line.startswith('-# - (Fixed')
+
+                    #NOTE: (Ahmayk) if a previously current issue doesn't exist anymore, assume it's fixed!
+                    change_to_fixed = not is_ignored and not is_fixed and \
+                        old_line.startswith('- ') and not len(matching_issue_string)
+
+                    #NOTE: (Ahmayk) filter out ignored issues.
+                    # if the ignored issue doesn't exist anymore, convert it to fixed
+                    if is_ignored: 
+                        if match_found:
+                            issue_list.remove(matching_issue_string)
+                            matching_issue_string = ""
+                        else:
+                            matches = re.findall(r'~~(.+?)~~', old_line)
+                            if len(matches):
+                                old_line = matches[0]
+                            change_to_fixed = True
+
+                    if change_to_fixed:
+                        if len(vet_rip_result.message_editor_name):
+                            crossed_out_lines += f'\n-# - (Fixed by {vet_rip_result.message_editor_name}) ~~{old_line}~~'
+                        else:
+                            crossed_out_lines += f'\n-# - (Fixed) ~~{old_line}~~'
+                    elif is_ignored or is_fixed:
+                        crossed_out_lines += "\n" + old_line
+
+            intro_warnings_string = "\n".join(intro_warnings)
+            return_message = f'{intro_warnings_string}\n{return_header}\n**Verdict**: {" ".join(verdict_emojis)}'
             return_message += crossed_out_lines 
-            return_message += qoc_text
-            if not vet_rip_result.everything_passed and desc.is_new_pinned_message:
-                return_message += f'\n-# React {DEFAULT_CHECK} if this is resolved or should be ignored.'
+            if len(issue_list):
+                return_message += "\n- " + "\n- ".join(issue_list)
+            if not vet_rip_result.everything_passed and desc.is_new_pinned_message and len(issue_list):
+                return_message += f'\n{REACT_CHECK_TO_IGNORE_STRING}'
 
     return return_message
 
@@ -1592,7 +1625,16 @@ def get_rip_description(text: str) -> str:
 
 
 def format_message_link(guild_id: int, channel_id: int, message_id: int):
-    return  f"<https://discordapp.com/channels/{str(guild_id)}/{str(channel_id)}/{str(message_id)}>"
+    return  f"<https://discord.com/channels/{str(guild_id)}/{str(channel_id)}/{str(message_id)}>"
+
+
+def extract_discord_link(text: str) -> str:
+    regex = r'(https://discord\.com/channels/\d+/\d+/\d+)'
+    match = re.search(regex, text)
+    if match:
+        return match.group(1)
+    else:
+        return ""
 
 
 def line_contains_substring(line: str, substring: str) -> bool:

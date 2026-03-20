@@ -230,10 +230,13 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         is_qoc_channel = channel_is_types(channel, ['QOC'])
         is_suborqueue_channel = channel_is_types(channel, ['QUEUE', 'SUBS', 'SUBS_THREAD', 'SUBS_PIN'])
 
+        message = None 
+        in_cache = False
         if is_qoc_channel or is_suborqueue_channel:
 
             await lock_channel(payload.channel_id, None)
-            if payload.channel_id in RIP_CACHE and payload.message_id in RIP_CACHE[payload.channel_id]:
+            in_cache = payload.channel_id in RIP_CACHE and payload.message_id in RIP_CACHE[payload.channel_id]
+            if in_cache: 
 
                 await lock_message(payload.message_id, None)
 
@@ -241,10 +244,11 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                 ##we don't really lose much from doing a fetch here.
                 ##It guarentees that all reactions are accurate 
                 message_and_errors = await discord_fetch_message(payload.message_id, channel)
+                message = message_and_errors.message
 
-                if message_and_errors.message:
-                    rip = cache_rip_in_message(message_and_errors.message)
-                    if is_qoc_channel and message_and_errors.message.pinned:
+                if message:
+                    rip = cache_rip_in_message(message)
+                    if is_qoc_channel and message.pinned:
 
                         if rip.message_id not in USER_REACT_CACHE: 
                             USER_REACT_CACHE[rip.message_id] = {} 
@@ -258,6 +262,53 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                 unlock_message(payload.message_id)
 
             unlock_channel(payload.channel_id)
+        
+        #NOTE: (Ahmayk) update post-pin qoc messages, transforming checks into the message itself 
+        if not in_cache and is_qoc_channel and payload.emoji.name == DEFAULT_CHECK:
+            errors = []
+            message_and_errors = await discord_fetch_message(payload.message_id, channel)
+            jump_url = f'message id {payload.message_id}'
+            message = message_and_errors.message
+            if message:
+                jump_url = message.jump_url
+            errors.extend(message_and_errors.error_strings)
+            if message and message.author == bot.user:
+                discord_message_link = extract_discord_link(message.content)
+                if len(discord_message_link):
+                    message_id = int(discord_message_link.split("/")[-1])
+                    if message_id and message_id in RIP_CACHE[payload.channel_id]:
+                        message_and_errors = await discord_fetch_message(payload.message_id, channel)
+                        errors.extend(message_and_errors.error_strings)
+                        rip_message = message_and_errors.message
+                        if rip_message:
+                            new_text = ""
+                            user = bot.get_user(payload.user_id)
+                            username = "[error on username]"
+                            if user:
+                                username = user.name
+
+                            #NOTE: (Ahmayk) mark everything to be ignored, but only the things that are 
+                            # in a list and not already marked as fixed or ignored
+                            lines = rip_message.content.splitlines()
+                            for old_line in lines:
+                                if (
+                                    old_line.startswith('- ')
+                                    and not old_line.startswith('-# - (Fixed')
+                                    and not old_line.startswith('-# - (Marked as ignored by ')
+                                ):
+                                    new_text += f'\n-# - (Marked as ignored by {username}) ~~{old_line}~~'
+                                elif old_line != REACT_CHECK_TO_IGNORE_STRING:
+                                    new_text += f'\n{old_line}'
+
+                            new_text = new_text.strip()
+                            if new_text != rip_message.content:
+                                edit_errors = await discord_edit_message(message, new_text)
+                                errors.extend(edit_errors)
+                                if not len(errors):
+                                    react_errors = await discord_clear_reaction(DEFAULT_CHECK, message) 
+                                    errors.extend(react_errors)
+
+            await send_if_errors(f'Error on {jump_url} :check:', errors, channel)
 
 
 async def process_suborqueue_rip_caching(message: Message):
