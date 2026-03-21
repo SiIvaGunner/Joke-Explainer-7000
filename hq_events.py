@@ -181,9 +181,9 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
                 SOFT_PIN_LIMIT = get_config('soft_pin_limit')
 
                 if is_pinlimit_must_die and new_count > SOFT_PIN_LIMIT:
+                    error_strings.extend(await discord_add_reaction(DEFAULT_PIN, message))
                     error_strings.extend(await discord_unpin_message(message))
-                    error_strings.extend(await discord_add_reaction('📌', message))
-                    await send(f":bangbang: **Error**: {len(rips_and_errors.rips)}/{SOFT_PIN_LIMIT} rips in pins. Unpinned.\n-# Remove the 📌 reaction when this is resolved.", channel)
+                    await send(f":bangbang: **Error**: {len(rips_and_errors.rips)}/{SOFT_PIN_LIMIT} rips in pins. Unpinned.", channel)
                 else:
 
                     if new_count > SOFT_PIN_LIMIT:
@@ -207,10 +207,9 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
 
                     vet_desc = VetRipDesc(message=message, use_youtube_api=True, is_new_pinned_message=True)
                     vet_report_and_errors = await vet_rip_or_url(rip.text, vet_desc)
-                    return_message = vet_report_and_errors.string
                     error_strings.extend(vet_report_and_errors.error_strings)
 
-                    if not len(return_message):
+                    if not len(vet_report_and_errors.string):
                         delete_afterwards_time = 2 
                         confirm_emoji = random.choice(['👍', '😚', '😀 ', '🙃 ', '😎 ', '👌 ', '❤️ ', '🔥 ', '✅ ', '🥰'])
                         if random.random() < (1.0 / 20.0):

@@ -934,11 +934,15 @@ async def vet_rip_or_url(rip_text_or_url: str, desc: VetRipDesc) -> StringAndErr
     if not len(urls) and desc.rip:
         rip_message_text = desc.rip.text
         urls = extract_rip_link(desc.rip.text)
+        #TODO: (Ahmayk) if the rip audio is an attachment, it won't be found!
+        #this codepath and situation is too rare to refactor how links are handled
+        #to fix this though lol
 
     if not len(urls) and desc.message:
         rip_message_text = desc.message.content
         urls = extract_rip_link(desc.message.content)
-        #TODO: (Ahmayk) extract link from message attachment
+        if not len(urls) and len(desc.message.attachments):
+            urls = [desc.message.attachments[0].url]
 
     if not len(urls):
         urls = [rip_text_or_url]
@@ -1040,15 +1044,16 @@ async def vet_rip_or_url(rip_text_or_url: str, desc: VetRipDesc) -> StringAndErr
                 past_vet_message = message
                 break
 
+        #NOTE: (Ahmayk) remove pin react from unpinned rips from pin must die
+        if message_has_react(DEFAULT_PIN, desc.message) and desc.message.pinned:
+            errors = await discord_clear_reaction(DEFAULT_PIN, desc.message)
+            error_strings.extend(errors)
+
         if link_error:
             errors = await discord_add_reaction(QOC_DEFAULT_LINKERR, desc.message)
             error_strings.extend(errors)
         elif message_has_react(QOC_DEFAULT_LINKERR, desc.message):
             errors = await discord_clear_reaction(QOC_DEFAULT_LINKERR, desc.message)
-            error_strings.extend(errors)
-
-        if past_vet_message and message_has_react(DEFAULT_CHECK, past_vet_message):
-            errors = await discord_clear_reaction(DEFAULT_CHECK, past_vet_message)
             error_strings.extend(errors)
 
     return_message = ""
@@ -1126,17 +1131,30 @@ async def vet_rip_or_url(rip_text_or_url: str, desc: VetRipDesc) -> StringAndErr
         if len(issue_list):
             return_message += "\n- " + "\n- ".join(issue_list)
 
-    react_check_if_resolved_string = f'-# React {DEFAULT_CHECK} if this should be ignored.'
+    react_check_if_resolved_string = f'-# React {DEFAULT_CHECK} if this should be ignored (will be removed if this message updates).'
 
+    vet_report_text = return_message
+    if not everything_passed and len(issue_list):
+        vet_report_text += f'\n{react_check_if_resolved_string}'
+    vet_report_text = vet_report_text.strip()
     if past_vet_message:
-        past_vet_new_text = return_message
-        if not everything_passed and len(issue_list):
-            past_vet_new_text += f'\n{react_check_if_resolved_string}'
-        errors = await discord_edit_message(past_vet_message, past_vet_new_text)
+        errors = await discord_edit_message(past_vet_message, vet_report_text)
         error_strings.extend(errors)
+    elif desc.message and channel_is_types(desc.message.channel, ['QOC']):
+        await send(vet_report_text, desc.message.channel)
 
     if not everything_passed and desc.is_new_pinned_message and len(issue_list):
         return_message += f'\n{react_check_if_resolved_string}'
+
+    return_message = return_message.strip()
+
+    if (
+        past_vet_message 
+        and past_vet_message.content != vet_report_text 
+        and message_has_react(DEFAULT_CHECK, past_vet_message)
+    ):
+        errors = await discord_clear_reaction(DEFAULT_CHECK, past_vet_message)
+        error_strings.extend(errors)
 
     return StringAndErrors(return_message, error_strings) 
 
