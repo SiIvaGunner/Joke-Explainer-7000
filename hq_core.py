@@ -923,6 +923,21 @@ class VetRipDesc(NamedTuple):
     is_new_pinned_message: bool = False
 
 async def vet_rip_or_url(rip_text_or_url: str, desc: VetRipDesc) -> StringAndErrors:
+    """
+    Single function for vetting rip audio. Checks for metadata correctness and auto-QoCs rip audio for common issues.
+    Accepts either the message text or a single URL to the rip audio and auto detects what to analyze.
+    If sourced from a message (!vet_msg or on pin), the message should be included too in VetRipDesc
+    Same as if it is sourced from a rip (!vet_from)
+
+    Any vet command, regardless of source, keeps a message that is found underneath the rip in QoC updated
+    that reports info on the vet. If the message is not found nearby after the rip message, it is posted in the qoc channel.
+    The message is edited with the latest vet info on every command automatically regardless of how it is done.
+    Pass in past_rip_message_content when editing the message to handle this correctly
+
+    Link and Pin emojis are also handled on the rip message, adding or removing them to reflect the state of the rip or pin state. 
+    Any check emojis (used to say that something should be ignored) is removed from the vet message if it is updated
+    to avoid a stale check giving wrong info on what should be ignored.
+    """
 
     rip_message_text = ""
     urls = [] 
