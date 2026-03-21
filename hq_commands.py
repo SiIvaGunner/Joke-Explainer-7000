@@ -1303,11 +1303,9 @@ async def vet_from(args: list[str], command_context: CommandContext):
                 continue
 
             vet_desc = VetRipDesc(rip=rip)
-            vet_rip_result = await vet_rip_or_url(rip.text, vet_desc)
-            error_strings.extend(vet_rip_result.error_strings)
-            format_desc = FormatVetRipResultDesc()
-            text = format_vet_rip_result(format_desc, vet_rip_result)
-            await send(text, command_context.channel)
+            vet_report = await vet_rip_or_url(rip.text, vet_desc)
+            error_strings.extend(vet_report.error_strings)
+            await send(vet_report.string, command_context.channel)
 
         if len(rips_and_errors.rips) == 0:
             await send_and_if_errors("No pinned rips found to QoC.", "There were errors though.", error_strings, command_context.channel)
@@ -1345,11 +1343,9 @@ async def vet_msg(args: list[str], command_context: CommandContext):
         if message is None:
             return await send(status, command_context.channel)
 
-        vet_desc = VetRipDesc(message=message, use_youtube_api=True)
-        vet_rip_result = await vet_rip_or_url(message.content, vet_desc)
-        format_desc = FormatVetRipResultDesc(full_feedback=True)
-        text = format_vet_rip_result(format_desc, vet_rip_result)
-        await send_and_if_errors(text, "Errors during vetting:", vet_rip_result.error_strings, command_context.channel)
+        vet_desc = VetRipDesc(message=message, use_youtube_api=True, full_feedback=True)
+        vet_report = await vet_rip_or_url(message.content, vet_desc)
+        await send_and_if_errors(vet_report.string, "Errors during vetting:", vet_report.error_strings, command_context.channel)
 
 
 @command(
@@ -1368,11 +1364,9 @@ async def vet_url(args: list[str], command_context: CommandContext):
         return await send(f'Error: no url found in {args[0]}', command_context.channel)
 
     async with command_context.channel.typing():
-        vet_desc = VetRipDesc()
-        vet_rip_result = await vet_rip_or_url(urls[0], vet_desc)
-        format_desc = FormatVetRipResultDesc(full_feedback=True)
-        text = format_vet_rip_result(format_desc, vet_rip_result)
-        await send_and_if_errors(text, "Errors during vetting:", vet_rip_result.error_strings, command_context.channel)
+        vet_desc = VetRipDesc(full_feedback=True)
+        vet_report = await vet_rip_or_url(urls[0], vet_desc)
+        await send_and_if_errors(vet_report.string, "Errors during vetting:", vet_report.error_strings, command_context.channel)
 
 
 @command(

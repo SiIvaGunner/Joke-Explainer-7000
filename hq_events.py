@@ -205,12 +205,10 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
                     rip = cache_rip_in_message(message)
                     unlock_message(message.id)
 
-                    vet_desc = VetRipDesc(message=message, use_youtube_api=True)
-                    vet_rip_result = await vet_rip_or_url(rip.text, vet_desc)
-                    error_strings.extend(vet_rip_result.error_strings)
-
-                    format_desc = FormatVetRipResultDesc(is_new_pinned_message=True)
-                    return_message = format_vet_rip_result(format_desc, vet_rip_result)
+                    vet_desc = VetRipDesc(message=message, use_youtube_api=True, is_new_pinned_message=True)
+                    vet_report_and_errors = await vet_rip_or_url(rip.text, vet_desc)
+                    return_message = vet_report_and_errors.string
+                    error_strings.extend(vet_report_and_errors.error_strings)
 
                     if not len(return_message):
                         delete_afterwards_time = 2 
@@ -342,8 +340,8 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
                 try:
                     desc = VetRipDesc(message=payload.message, use_youtube_api=True, \
                                     past_rip_message_content=old_text)
-                    vet_rip_result = await vet_rip_or_url(payload.message.content, desc)
-                    await send_if_errors("Errors while vetting:", vet_rip_result.error_strings, payload.message.channel)
+                    vet_report = await vet_rip_or_url(payload.message.content, desc)
+                    await send_if_errors("Errors while vetting:", vet_report.error_strings, payload.message.channel)
                 except Exception as error:
                     await send_crash(f'ERROR on rip vet after pin:', error, payload.message.channel)
 
