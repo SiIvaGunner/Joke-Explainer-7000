@@ -138,7 +138,6 @@ class RoundupFilterType(Enum):
     NOTHASREACT = auto()
     UNSENTFIXES = auto()
     OVERDUE = auto()
-    VET_ALL = auto()
     RANDOM = auto()
 
 class RoundupDesc(NamedTuple):
@@ -232,12 +231,6 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
             case RoundupFilterType.OVERDUE:
                 is_overdue = (datetime.now(timezone.utc) - rip.created_at) > timedelta(days=overdue_days)
                 is_valid = is_overdue
-            case RoundupFilterType.VET_ALL:
-                ##TODO: (Ahmayk) use error api
-                ##TODO: (Ahmayk) actually move this somewhere else when/if vetting command UX is redesigned lol
-                ##TODO: (Ahmayk) reimplement or get rid of this lol 
-                # vet_reacts, msg = await vet_message(rip.text) 
-                is_valid = True 
             case RoundupFilterType.RANDOM:
                 is_valid = rip.message_id in selected_rip_message_ids
 
@@ -246,10 +239,6 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
             result += readability_line 
 
     if result != "":
-
-        if roundup_desc.roundup_filter_type == RoundupFilterType.VET_ALL:
-            result += f"```\nLEGEND:\n{QOC_DEFAULT_LINKERR}: Link cannot be parsed\n{DEFAULT_CHECK}: Rip is OK\n{DEFAULT_FIX}: Rip has potential issues, see below\n{QOC_DEFAULT_BITRATE}: Bitrate is not 320kbps\n{QOC_DEFAULT_CLIPPING}: Clipping```"
-
         await send_embed(result, command_context.channel, EmbedDesc(expires=True, seperator=readability_line))
         await send_if_errors("Roundup had errors", error_strings, command_context.channel)
     else:
@@ -1255,7 +1244,8 @@ async def queue_all(args: list[str], command_context: CommandContext):
 
 @command(
     command_type=CommandType.ANALYZE,
-    brief='Vet all QoC rips for bitrate and clipping issues',
+    brief='Vet all QoC rips for issues (No YouTube API)',
+    aliases=['vet_all']
 )
 async def vet(args: list[str], command_context: CommandContext):
     prefix = get_config("prefix")
@@ -1271,7 +1261,7 @@ async def vet(args: list[str], command_context: CommandContext):
 @command(
     command_type=CommandType.ANALYZE,
     format='[message link]',
-    brief='Vet rips in a queue starting from message link',
+    brief='Vet rips from any channel starting from message link (No YouTube API)',
     desc='Find rips in pinned messages with bitrate/clipping issues and show their details, only counting messages not older than linked message'
 )
 async def vet_from(args: list[str], command_context: CommandContext):
@@ -1313,19 +1303,6 @@ async def vet_from(args: list[str], command_context: CommandContext):
             txt = "Finished QoC-ing. Please note that these are only automated detections - you should verify the issues in Audacity and react manually." 
             await send_and_if_errors(txt, "Errors during vetting:", error_strings, command_context.channel)
 
-@command(
-    command_type=CommandType.ANALYZE,
-    brief='Vet all QoC rips at once with summary',
-)
-async def vet_all(args: list[str], command_context: CommandContext):
-
-    if not ffmpegExists():
-        return await send("WARNING: ffmpeg command not found on the bot's server. Please contact the developers.", command_context.channel)
-
-    async with command_context.channel.typing():
-        roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.VET_ALL)
-        await send_roundup(roundup_desc, command_context)
-
 
 @command(
     command_type=CommandType.ANALYZE,
@@ -1350,7 +1327,7 @@ async def vet_msg(args: list[str], command_context: CommandContext):
 
 @command(
     command_type=CommandType.ANALYZE,
-    format='<url to rip>',
+    format='<file url>',
     brief='Vet rip in audio url',
 )
 async def vet_url(args: list[str], command_context: CommandContext):
@@ -1536,7 +1513,7 @@ async def peek_msg(args: list[str], command_context: CommandContext):
 
 @command(
     command_type=CommandType.ANALYZE,
-    format='<message url>',
+    format='<file url>',
     brief='Get rip audio metadata from rip url',
     desc='The first non-YouTube link found in the message is treated as the rip URL.'
 )

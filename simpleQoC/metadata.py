@@ -133,7 +133,7 @@ def crosscheck_description_key(key: str, video_descs: List[str], threshold: floa
         return any([key in desc for desc in video_descs])
 
 
-def checkMetadata(description: str, channel_name: str, playlist_id: str, api_key: str, advanced: bool) -> List[QoCCheck]:
+def checkMetadata(description: str, channel_name: str, playlist_id: str, api_key: str, use_youtube_api: bool, advanced: bool) -> List[QoCCheck]:
     """
     Perform metadata checking.
 

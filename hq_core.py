@@ -971,12 +971,10 @@ async def vet_rip_or_url(rip_text_or_url: str, desc: VetRipDesc) -> StringAndErr
         description = get_rip_description(rip_message_text)
         is_unusual_metadata = "unusual metadata" in rip_message_text.lower()
         if not is_unusual_metadata and len(description) > 0:
-            api_key = "" 
-            if desc.use_youtube_api:
-                api_key = YOUTUBE_API_KEY 
             playlistId = extract_playlist_id('\n'.join(rip_message_text.splitlines()[1:])) # ignore author line
             advancedCheck = get_config('metadata')
-            metadata_checks = await run_blocking(checkMetadata, description, YOUTUBE_CHANNEL_NAME, playlistId, api_key, advancedCheck)
+            metadata_checks = await run_blocking(checkMetadata, description, YOUTUBE_CHANNEL_NAME, playlistId, \
+                                                 YOUTUBE_API_KEY, desc.use_youtube_api, advancedCheck)
 
         message_id = 0
         vetted_message_link = ""
