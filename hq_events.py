@@ -108,47 +108,46 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
             async with channel.typing():
 
                 txt = "" 
-                error_strings = []
+                error_strings: list[str] = []
 
-                await lock_channel(channel.id, channel)
+                async with lock_channel(channel.id, error_strings, channel):
 
-                current_message_ids: list[int] = []
-                messages_and_errors = await discord_get_channel_pins(None, channel)
-                error_strings.extend(messages_and_errors.error_strings)
-                for message in messages_and_errors.messages: 
-                    current_message_ids.append(message.id)
+                    current_message_ids: list[int] = []
+                    messages_and_errors = await discord_get_channel_pins(None, channel)
+                    error_strings.extend(messages_and_errors.error_strings)
+                    for message in messages_and_errors.messages: 
+                        current_message_ids.append(message.id)
 
-                rips_to_remove: List[Rip] = []
-                if channel.id in RIP_CACHE:
-                    for message_id, rip in RIP_CACHE[channel.id].items():
-                        if message_id not in current_message_ids:
-                            rips_to_remove.append(rip)
+                    rips_to_remove: List[Rip] = []
+                    if channel.id in RIP_CACHE:
+                        for message_id, rip in RIP_CACHE[channel.id].items():
+                            if message_id not in current_message_ids:
+                                rips_to_remove.append(rip)
 
-                if len(rips_to_remove):
-                    audit_log_entries_and_errors = await discord_get_audit_log_entries(discord.AuditLogAction.message_unpin, 10, channel.guild) 
-                    error_strings.extend(audit_log_entries_and_errors.error_strings)
-                    spec_overdue_days = get_config('spec_overdue_days')
-                    overdue_days = get_config('overdue_days')
+                    if len(rips_to_remove):
+                        audit_log_entries_and_errors = await discord_get_audit_log_entries(discord.AuditLogAction.message_unpin, 10, channel.guild) 
+                        error_strings.extend(audit_log_entries_and_errors.error_strings)
+                        spec_overdue_days = get_config('spec_overdue_days')
+                        overdue_days = get_config('overdue_days')
 
-                    for rip in rips_to_remove:
-                        await remove_rip_from_cache(rip.message_id, channel.id)
+                        for rip in rips_to_remove:
+                            await remove_rip_from_cache(rip.message_id, channel.id)
 
-                        user_string = 'Someone' 
-                        for entry in audit_log_entries_and_errors.audit_log_entires:
-                            if entry.extra and entry.user and entry.extra.message_id == rip.message_id:
-                                user_string = entry.user.name
-                                break
+                            user_string = 'Someone' 
+                            for entry in audit_log_entries_and_errors.audit_log_entires:
+                                if entry.extra and entry.user and entry.extra.message_id == rip.message_id:
+                                    user_string = entry.user.name
+                                    break
 
-                        formatted_rip = format_rip(rip, channel.guild, True, spec_overdue_days, overdue_days)
-                        txt += f'\n-# :pushpin::x: **{user_string}** unpinned\n{formatted_rip}'
+                            formatted_rip = format_rip(rip, channel.guild, True, spec_overdue_days, overdue_days)
+                            txt += f'\n-# :pushpin::x: **{user_string}** unpinned\n{formatted_rip}'
 
-                    rips_and_errors = await get_rips_fast(channel, GetRipsDesc())
-                    error_strings.extend(rips_and_errors.error_strings)
-                    new_count = len(rips_and_errors.rips)
-                    soft_pin_limit = get_config('soft_pin_limit')
-                    txt += f'-# Rip Count: {new_count}/{soft_pin_limit}'
+                        rips_and_errors = await get_rips_fast(channel, GetRipsDesc())
+                        error_strings.extend(rips_and_errors.error_strings)
+                        new_count = len(rips_and_errors.rips)
+                        soft_pin_limit = get_config('soft_pin_limit')
+                        txt += f'-# Rip Count: {new_count}/{soft_pin_limit}'
 
-                unlock_channel(channel.id)
 
                 await send_and_if_errors(txt, "Errors during unpin.", error_strings, channel)
 
@@ -196,14 +195,13 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
                     elif new_count < SOFT_PIN_LIMIT and new_count >= max(0, SOFT_PIN_LIMIT - 10):
                         await send(f"-# Warning: **{SOFT_PIN_LIMIT - new_count} rips** until pinlimit is reached.\n-# Rip Count: {new_count}/{SOFT_PIN_LIMIT}", channel)
 
-                    await lock_message(message.id, None)
-                    #NOTE: (Ahmayk) have to fetch message to get reaction data for cache
-                    message_and_errors = await discord_fetch_message(message.id, channel)
-                    error_strings.extend(message_and_errors.error_strings)
-                    if message_and_errors.message:
-                        message = message_and_errors.message
-                    rip = cache_rip_in_message(message)
-                    unlock_message(message.id)
+                    async with lock_message(message.id, error_strings, None):
+                        #NOTE: (Ahmayk) have to fetch message to get reaction data for cache
+                        message_and_errors = await discord_fetch_message(message.id, channel)
+                        error_strings.extend(message_and_errors.error_strings)
+                        if message_and_errors.message:
+                            message = message_and_errors.message
+                        rip = cache_rip_in_message(message)
 
                     vet_desc = VetRipDesc(message=message, use_youtube_api=True, is_new_pinned_message=True)
                     vet_report_and_errors = await vet_rip_or_url(rip.text, vet_desc)
@@ -222,6 +220,8 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
 @bot.event
 async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
+    error_strings: list[str] = []
+
     channel = bot.get_channel(payload.channel_id)
     if channel:
         is_qoc_channel = channel_is_types(channel, ['QOC'])
@@ -231,34 +231,31 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         in_cache = False
         if is_qoc_channel or is_suborqueue_channel:
 
-            await lock_channel(payload.channel_id, None)
-            in_cache = payload.channel_id in RIP_CACHE and payload.message_id in RIP_CACHE[payload.channel_id]
-            if in_cache: 
+            async with lock_channel(payload.channel_id, error_strings, None):
+                in_cache = payload.channel_id in RIP_CACHE and payload.message_id in RIP_CACHE[payload.channel_id]
+                if in_cache: 
 
-                await lock_message(payload.message_id, None)
+                    async with lock_message(payload.message_id, error_strings, None):
 
-                ##NOTE: (Ahmayk) could skip this if we wanted to, but
-                ##we don't really lose much from doing a fetch here.
-                ##It guarentees that all reactions are accurate 
-                message_and_errors = await discord_fetch_message(payload.message_id, channel)
-                message = message_and_errors.message
+                        ##NOTE: (Ahmayk) could skip this if we wanted to, but
+                        ##we don't really lose much from doing a fetch here.
+                        ##It guarentees that all reactions are accurate 
+                        message_and_errors = await discord_fetch_message(payload.message_id, channel)
+                        message = message_and_errors.message
 
-                if message:
-                    rip = cache_rip_in_message(message)
-                    if is_qoc_channel and message.pinned:
+                        if message:
+                            rip = cache_rip_in_message(message)
+                            if is_qoc_channel and message.pinned:
 
-                        if rip.message_id not in USER_REACT_CACHE: 
-                            USER_REACT_CACHE[rip.message_id] = {} 
+                                if rip.message_id not in USER_REACT_CACHE: 
+                                    USER_REACT_CACHE[rip.message_id] = {} 
 
-                        react = React(payload.emoji.id or 0, payload.emoji.name)
-                        if react not in USER_REACT_CACHE[rip.message_id]: 
-                            USER_REACT_CACHE[rip.message_id][react] = [] 
+                                react = React(payload.emoji.id or 0, payload.emoji.name)
+                                if react not in USER_REACT_CACHE[rip.message_id]: 
+                                    USER_REACT_CACHE[rip.message_id][react] = [] 
 
-                        USER_REACT_CACHE[rip.message_id][react].append(payload.user_id) 
+                                USER_REACT_CACHE[rip.message_id][react].append(payload.user_id) 
 
-                unlock_message(payload.message_id)
-
-            unlock_channel(payload.channel_id)
 
 
 async def process_suborqueue_rip_caching(message: Message):
@@ -271,29 +268,26 @@ async def remove_reaction_from_cache(channel_id: int, message_id: int, emoji: di
     in_rip_cache = channel_id in RIP_CACHE and message_id in RIP_CACHE[channel_id]
     in_user_react_cache = message_id in USER_REACT_CACHE
     if in_rip_cache or in_user_react_cache:
-        await lock_message(message_id, None)
+        async with lock_message(message_id, [], None):
 
-    react = React(emoji.id or 0, emoji.name)
+            react = React(emoji.id or 0, emoji.name)
 
-    if in_rip_cache:
-        rip = RIP_CACHE[channel_id][message_id]
-        for cached_react in rip.reacts:
-            if cached_react == react:
-                rip.reacts.remove(cached_react)
-                if not remove_all:
-                    break
+            if in_rip_cache:
+                rip = RIP_CACHE[channel_id][message_id]
+                for cached_react in rip.reacts:
+                    if cached_react == react:
+                        rip.reacts.remove(cached_react)
+                        if not remove_all:
+                            break
 
-    if in_user_react_cache: 
-        if user_id and \
-            react in USER_REACT_CACHE[message_id] and \
-            user_id in USER_REACT_CACHE[message_id][react]:
-            USER_REACT_CACHE[message_id][react].remove(user_id)
-        
-        if remove_all or not len(USER_REACT_CACHE[message_id]):
-            USER_REACT_CACHE.pop(message_id)
-
-    if in_rip_cache or in_user_react_cache:
-        unlock_message(message_id)
+            if in_user_react_cache: 
+                if user_id and \
+                    react in USER_REACT_CACHE[message_id] and \
+                    user_id in USER_REACT_CACHE[message_id][react]:
+                    USER_REACT_CACHE[message_id][react].remove(user_id)
+                
+                if remove_all or not len(USER_REACT_CACHE[message_id]):
+                    USER_REACT_CACHE.pop(message_id)
 
 @bot.event
 async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
@@ -308,15 +302,11 @@ async def on_raw_reaction_clear(payload: discord.RawReactionClearEvent):
     in_rip_cache = payload.channel_id in RIP_CACHE and payload.message_id in RIP_CACHE[payload.channel_id]
     in_user_react_cache = payload.message_id in USER_REACT_CACHE
     if in_rip_cache or in_user_react_cache:
-        await lock_message(payload.message_id, None)
-
-    if in_rip_cache: 
-        RIP_CACHE[payload.channel_id][payload.message_id].reacts.clear()
-    if in_user_react_cache: 
-        USER_REACT_CACHE.pop(payload.message_id)
-
-    if in_rip_cache or in_user_react_cache:
-        unlock_message(payload.message_id)
+        async with lock_message(payload.message_id, [], None):
+            if in_rip_cache: 
+                RIP_CACHE[payload.channel_id][payload.message_id].reacts.clear()
+            if in_user_react_cache: 
+                USER_REACT_CACHE.pop(payload.message_id)
 
 
 @bot.event
@@ -327,12 +317,14 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
 @bot.event
 async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
     if payload.channel_id in RIP_CACHE and payload.message_id in RIP_CACHE[payload.channel_id]: 
-        await lock_message(payload.message_id, None)
-        rip = RIP_CACHE[payload.channel_id][payload.message_id]
-        old_text = rip.text
-        rip = rip._replace(text = payload.message.content)
-        RIP_CACHE[payload.channel_id][payload.message_id] = rip
-        unlock_message(payload.message_id)
+        error_strings: list[str] = []
+        async with lock_message(payload.message_id, error_strings, None):
+            rip = RIP_CACHE[payload.channel_id][payload.message_id]
+            old_text = rip.text
+            rip = rip._replace(text = payload.message.content)
+            RIP_CACHE[payload.channel_id][payload.message_id] = rip
+        if len(error_strings):
+            await send_if_errors("Error on updating edited rip:", error_strings, payload.message.channel)
 
         if channel_is_types(payload.message.channel, ['QOC']) and payload.message.pinned:
             async with payload.message.channel.typing():

@@ -892,7 +892,7 @@ async def event_q(args: list[str], command_context: CommandContext):
     command_type=CommandType.QUEUE,
     public=True,
     format="<prefix> NOT",
-    brief='Search queued rips startting with prefix',
+    brief='Search queued rips starting with prefix',
     desc='The prefix can contain spaces. Include NOT to search for rips that don\'t start with the input.',
     examples=['e', 'Level', 'deez nuts', 'NOT deez nuts']
 )

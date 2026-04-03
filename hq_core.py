@@ -261,38 +261,50 @@ def init_channel_cache(channel_id: int):
 async def empty_async_context():
     yield
 
+
+CACHE_LOCK_CHANNEL: dict[int, asyncio.Lock] = {}
+CACHE_LOCK_MESSAGE: dict[int, asyncio.Lock] = {}
+
 #NOTE: (Ahmayk) Locking on either a channel or message cache allows us to manage congruent process and commands
 ## without one reading from or writing into the cache with outdated info
-async def _lock(id: int, lock_dict: dict[int, asyncio.Lock], typing_channel: TextChannel | Thread | None):
+@asynccontextmanager
+async def _lock(id: int, lock_dict: dict[int, asyncio.Lock], error_strings: list[str], typing_channel: TextChannel | Thread | None):
     if id not in lock_dict:
         lock_dict[id] = asyncio.Lock()
 
+    dict_name = ''
+    if lock_dict == CACHE_LOCK_CHANNEL:
+        dict_name = "CHANNEL"
+    elif lock_dict == CACHE_LOCK_MESSAGE:
+        dict_name = "MESSAGE"
+
     if lock_dict[id].locked():
-        print(f'LOCKED ON id: {id}. Typing channel: {typing_channel}')
+        print(f'LOCKED ON {dict_name} id: {id}. Typing channel: {typing_channel}')
         async with typing_channel.typing() if typing_channel is not None else empty_async_context():
             await lock_dict[id].acquire()
-            print(f'LOCK AQUIRED ON id: {id}')
+            print(f'LOCK ACQUIRED ON {dict_name} id: {id}')
     else:
         await lock_dict[id].acquire()
 
-##NOTE: (Ahmayk) This will crash if the lock is not locked!
-##This is by design to ensure concurrency
-def _unlock(id: int, lock_dict: dict[int, asyncio.Lock]):
+    try:
+        #NOTE: (Ahmayk) code runs here
+        yield
+    except Exception as error:
+        await log_exception(f'Unhandled error during lock on {dict_name} id: {id}', error, error_strings, True)
+
     lock_dict[id].release()
 
-CACHE_LOCK_MESSAGE: dict[int, asyncio.Lock] = {}
-async def lock_channel(channel_id: int, typing_channel: TextChannel | Thread | None):
-    await _lock(channel_id, CACHE_LOCK_CHANNEL, typing_channel)
 
-def unlock_channel(channel_id: int):
-    _unlock(channel_id, CACHE_LOCK_CHANNEL)
+@asynccontextmanager
+async def lock_channel(channel_id: int, error_strings: list[str], typing_channel: TextChannel | Thread | None):
+    async with _lock(channel_id, CACHE_LOCK_CHANNEL, error_strings, typing_channel):
+        yield
 
-CACHE_LOCK_CHANNEL: dict[int, asyncio.Lock] = {}
-async def lock_message(message_id: int, typing_channel: TextChannel | Thread | None):
-    await _lock(message_id, CACHE_LOCK_MESSAGE, typing_channel)
+@asynccontextmanager
+async def lock_message(message_id: int, error_strings: list[str], typing_channel: TextChannel | Thread | None):
+    async with _lock(message_id, CACHE_LOCK_MESSAGE, error_strings, typing_channel):
+        yield
 
-def unlock_message(message_id: int):
-    _unlock(message_id, CACHE_LOCK_MESSAGE)
 
 class RipFetchType(Enum):
     PINS = auto()
@@ -415,40 +427,39 @@ def cache_user_react_data(user_react_data: dict[React, List[int]], message_id: i
 async def process_rip_message(message: Message, refetch_message: bool, is_validate_message: bool, \
                               typing_channel: TextChannel | Thread | None) -> StringAndErrors:
     return_message = ""
-    error_strings = [] 
+    error_strings: list[str] = [] 
     if is_message_rip(message):
-        await lock_message(message.id, typing_channel)
+        async with lock_message(message.id, error_strings, typing_channel):
 
-        if refetch_message:
-            message_and_errors = await discord_fetch_message(message.id, message.channel)
-            if message_and_errors.message:
-                message = message_and_errors.message
-            error_strings.extend(message_and_errors.error_strings)
+            if refetch_message:
+                message_and_errors = await discord_fetch_message(message.id, message.channel)
+                if message_and_errors.message:
+                    message = message_and_errors.message
+                error_strings.extend(message_and_errors.error_strings)
 
-        user_react_data: dict[React, List[int]] = {}
-        channel_info = get_channel_info(message.channel)
-        if channel_info.is_cache_qoc:
-            react_list = []
-            for enum in UserReactCheckType:
-                reacts_of_check_type = user_react_check_type_to_react_list(enum)
-                for react in reacts_of_check_type:
-                    if react not in react_list:
-                        react_list.append(react)
-            
-            user_react_data_and_errors = await discord_get_user_react_data(react_list, message)
-            user_react_data = user_react_data_and_errors.user_react_dict
-            error_strings.extend(user_react_data_and_errors.error_strings)
+            user_react_data: dict[React, List[int]] = {}
+            channel_info = get_channel_info(message.channel)
+            if channel_info.is_cache_qoc:
+                react_list = []
+                for enum in UserReactCheckType:
+                    reacts_of_check_type = user_react_check_type_to_react_list(enum)
+                    for react in reacts_of_check_type:
+                        if react not in react_list:
+                            react_list.append(react)
+                
+                user_react_data_and_errors = await discord_get_user_react_data(react_list, message)
+                user_react_data = user_react_data_and_errors.user_react_dict
+                error_strings.extend(user_react_data_and_errors.error_strings)
 
-        if is_validate_message:
-            return_message = validate_rip_message(message, user_react_data)
+            if is_validate_message:
+                return_message = validate_rip_message(message, user_react_data)
 
-        cache_rip_in_message(message)
-        if channel_info.is_cache_qoc:
-            cache_user_react_data(user_react_data, message.id)
+            cache_rip_in_message(message)
+            if channel_info.is_cache_qoc:
+                cache_user_react_data(user_react_data, message.id)
 
-        channel_info = get_channel_info(message.channel)
+            channel_info = get_channel_info(message.channel)
 
-        unlock_message(message.id)
     return StringAndErrors(return_message, error_strings) 
 
 async def process_rip_channel(channel: TextChannel | Thread, is_validate_message: bool, typing_channel: TextChannel | Thread | None) -> StringAndErrors:
@@ -470,20 +481,18 @@ async def process_rip_channel(channel: TextChannel | Thread, is_validate_message
             for message in messages_and_error.messages: 
                 if message.thread is not None:
                     init_channel_cache(message.thread.id)
-                    await lock_channel(message.thread.id, typing_channel)
-                    string_and_errors = await process_rip_channel(message.thread, False, typing_channel)
-                    return_message += string_and_errors.string
-                    error_strings.extend(string_and_errors.error_strings)
-                    if len(RIP_CACHE[message.thread.id]):
-                        thread_rips = list(RIP_CACHE[message.thread.id].values())
-                        thread_rips.sort(key = lambda rip: rip.created_at, reverse=True)
-                        #NOTE: (Ahmayk) we insert thread rips also in its parent channel dict so that
-                        #we get all rips in theads when we get the parent channel's rips 
-                        for thread_rip in thread_rips:
-                            await lock_message(thread_rip.message_id, None)
-                            RIP_CACHE[channel.id][thread_rip.message_id] = thread_rip 
-                            unlock_message(thread_rip.message_id)
-                    unlock_channel(message.thread.id)
+                    async with lock_channel(message.thread.id, error_strings, typing_channel):
+                        string_and_errors = await process_rip_channel(message.thread, False, typing_channel)
+                        return_message += string_and_errors.string
+                        error_strings.extend(string_and_errors.error_strings)
+                        if len(RIP_CACHE[message.thread.id]):
+                            thread_rips = list(RIP_CACHE[message.thread.id].values())
+                            thread_rips.sort(key = lambda rip: rip.created_at, reverse=True)
+                            #NOTE: (Ahmayk) we insert thread rips also in its parent channel dict so that
+                            #we get all rips in theads when we get the parent channel's rips 
+                            for thread_rip in thread_rips:
+                                async with lock_message(thread_rip.message_id, error_strings, None):
+                                    RIP_CACHE[channel.id][thread_rip.message_id] = thread_rip 
                 else:
                     string_and_errors = await process_rip_message(message, False, is_validate_message, typing_channel)
                     return_message += string_and_errors.string
@@ -508,23 +517,22 @@ class GetRipsDesc(NamedTuple):
 
 async def get_rips(channel: TextChannel | Thread, desc: GetRipsDesc) -> RipsAndErrors: 
 
-    error_strings = [] 
+    error_strings: list[str] = [] 
 
     init_channel_cache(channel.id)
 
     ##NOTE: (Ahmayk) We need to prevent other processes from accessing the cache 
     ## in the case where we are updating the cache. If we allow access to the cache while
     ## it is being updated, it would likely be incomplete or wrong! 
-    await lock_channel(channel.id, desc.typing_channel)
+    async with lock_channel(channel.id, error_strings, desc.typing_channel):
 
-    if not len(RIP_CACHE[channel.id]) or desc.rebuild_cache:
-        async with desc.typing_channel.typing() if desc.typing_channel is not None else empty_async_context():
-            string_and_errors = await process_rip_channel(channel, False, desc.typing_channel)
-            error_strings.extend(string_and_errors.error_strings)
+        if not len(RIP_CACHE[channel.id]) or desc.rebuild_cache:
+            async with desc.typing_channel.typing() if desc.typing_channel is not None else empty_async_context():
+                string_and_errors = await process_rip_channel(channel, False, desc.typing_channel)
+                error_strings.extend(string_and_errors.error_strings)
 
-    rips = list(RIP_CACHE[channel.id].values())
+        rips = list(RIP_CACHE[channel.id].values())
 
-    unlock_channel(channel.id)
 
     ##NOTE: (Ahmayk) show rips in expected order, newest at top
     rips.sort(key = lambda rip: rip.created_at, reverse=True)
@@ -650,12 +658,13 @@ async def rebuild_cache_all() -> StringAndErrors:
 async def remove_rip_from_cache(message_id: int, channel_id: int):
     ##NOTE: (Ahmayk) if something is processing on the message, we want to wait for that to finish
     ##so that we can then remove whatever was being processed
-    await lock_message(message_id, None)
-    if channel_id in RIP_CACHE and message_id in RIP_CACHE[channel_id]: 
-        RIP_CACHE[channel_id].pop(message_id)
-    if message_id in USER_REACT_CACHE:
-        USER_REACT_CACHE.pop(message_id)
-    unlock_message(message_id)
+    ##TODO: (Ahmayk) return errors (tho do we need to?)
+    async with lock_message(message_id, [], None):
+        if channel_id in RIP_CACHE and message_id in RIP_CACHE[channel_id]: 
+            RIP_CACHE[channel_id].pop(message_id)
+        if message_id in USER_REACT_CACHE:
+            USER_REACT_CACHE.pop(message_id)
+
     CACHE_LOCK_MESSAGE.pop(message_id)
 
 #===============================================#
@@ -742,48 +751,46 @@ def user_react_check_type_to_react_list(user_react_check_type: UserReactCheckTyp
 async def user_is_react(user_react_check_type: UserReactCheckType, user_id: int, rip: Rip,\
                         typing_channel: TextChannel | Thread | None) -> BoolAndErrors:
     result = False
-    error_strings = []
+    error_strings: list[str] = []
 
-    await lock_message(rip.message_id, typing_channel)
+    async with lock_message(rip.message_id, error_strings, typing_channel):
 
-    if rip.message_id not in USER_REACT_CACHE:
-        USER_REACT_CACHE[rip.message_id] = {} 
+        if rip.message_id not in USER_REACT_CACHE:
+            USER_REACT_CACHE[rip.message_id] = {} 
 
-    react_list = user_react_check_type_to_react_list(user_react_check_type)
+        react_list = user_react_check_type_to_react_list(user_react_check_type)
 
-    fetch_user_ids = False 
-    for react in rip.reacts:
-        if react_is_one(react_list, react.name) and react not in USER_REACT_CACHE[rip.message_id]:
-            fetch_user_ids = True
-            break
-
-    if fetch_user_ids: 
-        channel = bot.get_channel(rip.channel_id)
-        if channel:
-            # NOTE: (Ahmayk) this message fetch isn't actually neccessary, but we need the
-            # message react object to call reaction.users().
-            # As far as I can tell this is the only way discord.py exposes this API call.
-            # An optimization here would be to figure out how to do this without the reaction object,
-            # perhaps bypassing discord.py to make the direct api call we need
-            # In pratice we shouldn't be calling this code path too often anyway during regular usage
-            # So isn't the biggest problem
-            message_and_errors = await discord_fetch_message(rip.message_id, channel)
-            error_strings.extend(message_and_errors.error_strings)
-            if message_and_errors.message:
-                user_react_data_and_errors = await discord_get_user_react_data(react_list, message_and_errors.message)
-                error_strings.extend(user_react_data_and_errors.error_strings)
-                cache_user_react_data(user_react_data_and_errors.user_react_dict, message_and_errors.message.id)
-
-    for react in rip.reacts:
-        if react_is_one(react_list, react.name):
-            # NOTE: (Ahmayk) if the react isn't in the cache then we programmed something wrong
-            assert react in USER_REACT_CACHE[rip.message_id]
-            if user_id in USER_REACT_CACHE[rip.message_id][react]:
-                result = True
+        fetch_user_ids = False 
+        for react in rip.reacts:
+            if react_is_one(react_list, react.name) and react not in USER_REACT_CACHE[rip.message_id]:
+                fetch_user_ids = True
                 break
 
+        if fetch_user_ids: 
+            channel = bot.get_channel(rip.channel_id)
+            if channel:
+                # NOTE: (Ahmayk) this message fetch isn't actually neccessary, but we need the
+                # message react object to call reaction.users().
+                # As far as I can tell this is the only way discord.py exposes this API call.
+                # An optimization here would be to figure out how to do this without the reaction object,
+                # perhaps bypassing discord.py to make the direct api call we need
+                # In pratice we shouldn't be calling this code path too often anyway during regular usage
+                # So isn't the biggest problem
+                message_and_errors = await discord_fetch_message(rip.message_id, channel)
+                error_strings.extend(message_and_errors.error_strings)
+                if message_and_errors.message:
+                    user_react_data_and_errors = await discord_get_user_react_data(react_list, message_and_errors.message)
+                    error_strings.extend(user_react_data_and_errors.error_strings)
+                    cache_user_react_data(user_react_data_and_errors.user_react_dict, message_and_errors.message.id)
 
-    unlock_message(rip.message_id)
+        for react in rip.reacts:
+            if react_is_one(react_list, react.name):
+                # NOTE: (Ahmayk) if the react isn't in the cache then we programmed something wrong
+                assert react in USER_REACT_CACHE[rip.message_id]
+                if user_id in USER_REACT_CACHE[rip.message_id][react]:
+                    result = True
+                    break
+
 
     return BoolAndErrors(result, error_strings)
 
