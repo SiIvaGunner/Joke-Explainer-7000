@@ -1153,7 +1153,7 @@ async def vet_rip_or_url(rip_text_or_url: str, desc: VetRipDesc) -> StringAndErr
     if past_vet_message:
         errors = await discord_edit_message(past_vet_message, vet_report_text)
         error_strings.extend(errors)
-    elif desc.message and channel_is_types(desc.message.channel, ['QOC']):
+    elif desc.message and channel_is_types(desc.message.channel, ['QOC']) and desc.past_rip_message_content:
         await send(vet_report_text, desc.message.channel)
 
     if not everything_passed and desc.is_new_pinned_message and len(issue_list):
