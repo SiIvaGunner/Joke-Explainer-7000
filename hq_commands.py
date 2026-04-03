@@ -179,6 +179,7 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
 
     result = ""
 
+    valid_count = 0
     for i, rip in enumerate(rips_and_errors.rips):
 
         vet_reacts = ""
@@ -237,9 +238,11 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
         if is_valid:
             result += format_rip(rip, command_context.channel.guild, False, spec_overdue_days, overdue_days) + vet_reacts
             result += readability_line 
+            valid_count += 1
 
     if result != "":
-        await send_embed(result, command_context.channel, EmbedDesc(expires=True, seperator=readability_line))
+        footer = f'#{channel.name}   -   {valid_count} of {len(rips_and_errors.rips)} Rips'
+        await send_embed(result, command_context.channel, EmbedDesc(expires=True, seperator=readability_line, footer=footer))
         await send_if_errors("Roundup had errors", error_strings, command_context.channel)
     else:
         not_found_message = "No rips."
@@ -658,7 +661,8 @@ async def send_suborqueue_rips(desc: SendSubOrQueueDesc, command_context: Comman
 
     result = ""
     error_strings = []
-    count = 0
+    total_count = 0
+    valid_count = 0
 
     qoc_emote = get_qoc_emoji(command_context.channel.guild)
 
@@ -683,6 +687,8 @@ async def send_suborqueue_rips(desc: SendSubOrQueueDesc, command_context: Comman
             error_strings.extend(rips_and_errors.error_strings)
 
             for rip in rips_and_errors.rips:
+
+                total_count += 1
 
                 rip_title = get_rip_title(rip.text)
                 rip_author = get_raw_rip_author(rip.text)
@@ -716,17 +722,18 @@ async def send_suborqueue_rips(desc: SendSubOrQueueDesc, command_context: Comman
                         result += f"{qoc_emote} "
                     rip_link = format_message_link(channel.guild.id, rip.channel_id, rip.message_id)
                     result += f'**[{rip_title}]({rip_link})**\n'
-                    count += 1
+                    valid_count += 1
 
             result += '------------------------------\n'
 
-    if count == 0:
+    if valid_count == 0:
         not_found_message = "No rips found."
         if len(desc.not_found_message):
             not_found_message = desc.not_found_message
         await send_and_if_errors(not_found_message, "Errors during getting rips:", error_strings, command_context.channel)
     else:
-        await send_embed(result, command_context.channel, EmbedDesc(expires=True))
+        footer = f'{valid_count} of {total_count} Rips'
+        await send_embed(result, command_context.channel, EmbedDesc(expires=True, footer=footer))
         await send_if_errors("Errors during getting rips:", error_strings, command_context.channel)
 
 
