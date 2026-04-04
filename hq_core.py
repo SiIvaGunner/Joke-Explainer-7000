@@ -1520,37 +1520,42 @@ def extract_playlist_id(text: str) -> str:
 
 from dateutil import parser
 
-def extract_date_raw(text: str) -> datetime | None:
-    DATE_PATTERNS = [
+class RipDateType(Enum):
+    NULL = auto()
+    DATE = auto()
+
+class RipDate(NamedTuple):
+    type: RipDateType
+    date: datetime | None
+
+def extract_ripdate_raw(text: str) -> RipDate:
+    rip_date_type = RipDateType.NULL
+    date = None
+    date_pattern = (
         r'\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|'
         r'jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)'
-        r'\s+\d{1,2}(?:st|nd|rd|th)?(?:\s+\d{2,4})?\b',
-    ]
-    result = None
-    for pattern in DATE_PATTERNS:
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            try:
-                return parser.parse(match.group(), fuzzy=True)
-            except:
-                continue
-    return result
+        r'\s+\d{1,2}(?:st|nd|rd|th)?(?:\s+\d{2,4})?\b'
+    )
+    match = re.search(date_pattern, text, re.IGNORECASE)
+    if match:
+        try:
+            date = parser.parse(match.group(), fuzzy=True)
+            rip_date_type = RipDateType.DATE
+        except Exception as error:
+            print(error)
+    return RipDate(rip_date_type, date)
 
 
-def extract_date_rip(rip_text: str) -> datetime | None:
-
+def extract_date_rip(rip_text: str) -> RipDate: 
     author = get_raw_rip_author(rip_text)
-    date = extract_date_raw(author)
-
-    if not date:
+    ripdate = extract_ripdate_raw(author)
+    if ripdate.type == RipDateType.NULL:
         try:
             metadata = rip_text.split('```', 2)[2]
-            date = extract_date_raw(metadata)
+            ripdate = extract_ripdate_raw(metadata)
         except IndexError:
             pass
-
-    return date
-
+    return ripdate 
 
 def get_raw_rip_title(text: str) -> str:
     """

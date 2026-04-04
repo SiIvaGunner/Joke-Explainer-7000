@@ -1244,6 +1244,33 @@ async def queue_all(args: list[str], command_context: CommandContext):
                               channel_types = ['QUEUE'])
     await send_suborqueue_rips(desc, command_context)
 
+READABILITY_LINE = "\n━━━━━━━━━━━━━━━━━━"
+
+def format_rips_of_ripdate(rips: list[Rip], ripdate: RipDate) -> str:
+    result = ""
+    match ripdate.type:
+        case RipDateType.NULL:
+            result += f'\n# **NO DATE FOUND:**'
+        case RipDateType.DATE:
+            assert ripdate.date != None
+            datestring = ripdate.date.strftime('%b %d')
+            if ripdate.date.year != datetime.now().year:
+                datestring = ripdate.date.strftime('%b %d %Y')
+            result += f"\n🗓️ **{datestring}:**" 
+
+    for i, rip in enumerate(rips):
+        rip_author = get_rip_author(rip.text, rip.message_author_name)
+        rip_author = rip_author.replace('*', '').replace('_', '')
+        rip_title = get_rip_title(rip.text)
+        rip_link = format_message_link(rip.guild_id, rip.channel_id, rip.message_id)
+        if i > 0:
+            result += f'\n_ _'
+        result += f'\n**[{rip_title}]({rip_link})**\n{rip_author}'
+    if len(result):
+        result += READABILITY_LINE 
+
+    return result
+
 @command(
     command_type=CommandType.QUEUE,
     brief='Show limbo rip info.',
@@ -1253,51 +1280,30 @@ async def limbo(args: list[str], command_context: CommandContext):
 
     channel_ids = get_channel_ids_of_types(['LIMBO'])
     error_strings = []
-    date_dict: dict[datetime, list[Rip]] = {}
-    no_date_list: list[Rip] = []
+    date_dict: dict[RipDate, list[Rip]] = {}
     for channel_id in channel_ids:
         channel = bot.get_channel(channel_id)
         if channel:
             rips_and_errors = await get_rips(channel, GetRipsDesc(typing_channel=command_context.channel))
             error_strings.extend(rips_and_errors.error_strings)
             for rip in rips_and_errors.rips:
-                date = extract_date_rip(rip.text)
-                if date != None:
-                    if date not in date_dict:
-                        date_dict[date] = []
-                    date_dict[date].append(rip)
-                else:
-                    no_date_list.append(rip)
+                ripdate = extract_date_rip(rip.text)
+                if ripdate not in date_dict:
+                    date_dict[ripdate] = []
+                date_dict[ripdate].append(rip)
 
     result = ""
-    readability_line = "\n━━━━━━━━━━━━━━━━━━"
 
-    for date, rips in sorted(date_dict.items(), key=lambda item: item[0]):
-        datestring = date.strftime('%b %d')
-        if date.year != datetime.now().year:
-            datestring = date.strftime('%b %d %Y')
-        result += f"\n🗓️ **{datestring}:**" 
-        for i, rip in enumerate(rips):
-            rip_author = get_rip_author(rip.text, rip.message_author_name)
-            rip_author = rip_author.replace('*', '').replace('_', '')
-            rip_title = get_rip_title(rip.text)
-            rip_link = format_message_link(rip.guild_id, rip.channel_id, rip.message_id)
-            if i > 0:
-                result += f'\n_ _'
-            result += f'\n**[{rip_title}]({rip_link})**\n{rip_author}'
-        result += readability_line 
+    for ripdate, rips in sorted(date_dict.items(), key=lambda item: item[0].date or datetime.min):
+        if ripdate.type == RipDateType.DATE:
+            result += format_rips_of_ripdate(rips, ripdate) 
 
-    if len(no_date_list):
-        result += f'\n\n**NO DATE FOUND:**'
-        for rip in no_date_list: 
-            rip_author = get_rip_author(rip.text, rip.message_author_name)
-            rip_author = rip_author.replace('*', '').replace('_', '')
-            rip_title = get_rip_title(rip.text)
-            rip_link = format_message_link(rip.guild_id, rip.channel_id, rip.message_id)
-            result += f'\n**[{rip_title}]({rip_link})**\n{rip_author}'
-            result += readability_line 
+    for ripdate, rips in date_dict.items():
+        if ripdate.type == RipDateType.NULL:
+            result += format_rips_of_ripdate(rips, ripdate) 
 
-    await send_embed(result, command_context.channel, EmbedDesc(expires=True, seperator=readability_line))
+    #TODO: (Ahmayk) support seperators that don't guarentee that chunks will be smaller than 1 embed
+    await send_embed(result, command_context.channel, EmbedDesc(expires=True))
     await send_if_errors("Errors during parsing limbo rips", error_strings, command_context.channel)
 
 
