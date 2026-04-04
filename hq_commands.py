@@ -1249,24 +1249,36 @@ from dateutil import parser
 class RipDate(NamedTuple):
     rip: Rip
     dates: list[datetime]
+    day_strings: list[str]
+    when_strings: list[str]
 
 def format_ripdates(ripdates: list[RipDate]) -> str:
     result = ""
     for i_ripdate, ripdate in enumerate(ripdates):
         if i_ripdate > 0:
             result += f'\n_ _'
-        for i_date, date in enumerate(ripdate.dates):
-            datestring = date.strftime('%b %d')
-            if date.year != date.now().year:
-                datestring = date.strftime('%b %d %Y')
-            if i_date == 0:
-                result += '\n'
-            else:
-                result += ' \ '
-            result += f"🗓️ **{datestring}:**" 
+
+        if len(ripdate.dates):
+            for i_date, date in enumerate(ripdate.dates):
+                datestring = date.strftime('%b %d')
+                if date.year != date.now().year:
+                    datestring = date.strftime('%b %d %Y')
+                if i_date == 0:
+                    result += '\n'
+                else:
+                    result += ' \ '
+                result += f"🗓️ **{datestring}:**" 
+
+        else:
+            for day_string in ripdate.day_strings:
+                result += f"\n☀️ **{day_string}:**" 
+
+            for when_string in ripdate.when_strings:
+                result += f"\n➡️️ **{when_string}:**" 
+
         rip = ripdate.rip
         rip_author = get_rip_author(rip.text, rip.message_author_name)
-        rip_author = rip_author.replace('*', '').replace('_', '')
+        rip_author = rip_author.replace('*', '').replace('_', '').replace('|', '').replace('#', '').lower()
         rip_title = get_rip_title(rip.text)
         rip_link = format_message_link(rip.guild_id, rip.channel_id, rip.message_id)
         result += f'\n**[{rip_title}]({rip_link})**\n{rip_author}'
@@ -1316,22 +1328,24 @@ async def limbo(args: list[str], command_context: CommandContext):
                         except:
                             pass
 
-                # day= [] 
-                # match = re.search(r'\b(\w+\s+day)', text, re.IGNORECASE)
-                # if match:
-                #     try:
-                #         date = parser.parse(match.group(), fuzzy=True)
-                #         rip_date_type = RipDateType.DATE
-                #     except:
-                #         pass
+                author_line = get_raw_rip_author(rip.text)
+                day_strings_unclean = re.findall(r'^(.+?\s+day)\b', author_line, re.IGNORECASE | re.MULTILINE)
+                day_strings = clean_strings_markdown(day_strings_unclean)
+
+                when_strings_unclean = re.findall(r'((?:for|if|after|before|needs|awaiting|pending)\s+.+?)(?:\s+by\b|[.(),!?]|$)', author_line, re.IGNORECASE | re.MULTILINE)
+                when_strings = clean_strings_markdown(when_strings_unclean)
     
-                ripdate = RipDate(rip, dates)
+                ripdate = RipDate(rip, dates, day_strings, when_strings)
                 ripdates.append(ripdate)
 
+
     ripdates_date_dict: dict[datetime, list[RipDate]] = {}
+    ripdates_when_dict: dict[str, list[RipDate]] = {}
+    ripdates_day_dict: dict[str, list[RipDate]] = {}
     ripdates_uncategorized: list[RipDate] = []
 
     for ripdate in ripdates: 
+
         if len(ripdate.dates):
             is_inserted = False
             for datetime_key in ripdates_date_dict.keys():
@@ -1342,6 +1356,29 @@ async def limbo(args: list[str], command_context: CommandContext):
             if not is_inserted:
                 ripdates_date_dict[ripdate.dates[0]] = []
                 ripdates_date_dict[ripdate.dates[0]].append(ripdate)
+
+        elif len(ripdate.day_strings):
+            key = 'day'
+            words = ripdate.day_strings[0].split()
+            if len(words) > 1:
+                key = words[-2].lower()
+            if key not in ripdates_day_dict:
+                ripdates_day_dict[key] = []
+            ripdates_day_dict[key].append(ripdate)
+
+        elif len(ripdate.when_strings):
+            is_inserted = False
+            for when_key in ripdates_when_dict.keys():
+                for when_string in ripdate.when_strings:
+                    if when_key in when_string.lower():
+                        ripdates_when_dict[when_key].append(ripdate)
+                        is_inserted = True
+                        break
+            if not is_inserted:
+                key = ripdate.when_strings[0].lower()
+                ripdates_when_dict[key] = []
+                ripdates_when_dict[key].append(ripdate)
+
         else:
             ripdates_uncategorized.append(ripdate)
 
@@ -1350,6 +1387,14 @@ async def limbo(args: list[str], command_context: CommandContext):
     READABILITY_LINE = "\n━━━━━━━━━━━━━━━━━━"
 
     for date, ripdates in sorted(ripdates_date_dict.items(), key=lambda item: item[0]):
+        result += format_ripdates(ripdates)
+        result += READABILITY_LINE 
+
+    for day, ripdates in sorted(ripdates_day_dict.items(), key=lambda item: item[0]):
+        result += format_ripdates(ripdates)
+        result += READABILITY_LINE 
+
+    for when_string, ripdates in sorted(ripdates_when_dict.items(), key=lambda item: item[0]):
         result += format_ripdates(ripdates)
         result += READABILITY_LINE 
 

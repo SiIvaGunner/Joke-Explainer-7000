@@ -1518,6 +1518,13 @@ def extract_playlist_id(text: str) -> str:
     else:
         return ""  # Return empty string if no valid links are found
 
+def clean_strings_markdown(texts: str) -> list[str]:
+    result = []
+    for s in texts:
+        s = s.replace('*', '').replace('_', '').replace('|', '').replace('#', '').lower()
+        result.append(s)
+    return result
+
 def get_raw_rip_title(text: str) -> str:
     """
     Return the rip title line of a Discord message.
