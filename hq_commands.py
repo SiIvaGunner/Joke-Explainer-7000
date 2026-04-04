@@ -1250,6 +1250,28 @@ class RipDate(NamedTuple):
     rip: Rip
     dates: list[datetime]
 
+def format_ripdates(ripdates: list[RipDate]) -> str:
+    result = ""
+    for i_ripdate, ripdate in enumerate(ripdates):
+        if i_ripdate > 0:
+            result += f'\n_ _'
+        for i_date, date in enumerate(ripdate.dates):
+            datestring = date.strftime('%b %d')
+            if date.year != date.now().year:
+                datestring = date.strftime('%b %d %Y')
+            if i_date == 0:
+                result += '\n'
+            else:
+                result += ' \ '
+            result += f"🗓️ **{datestring}:**" 
+        rip = ripdate.rip
+        rip_author = get_rip_author(rip.text, rip.message_author_name)
+        rip_author = rip_author.replace('*', '').replace('_', '')
+        rip_title = get_rip_title(rip.text)
+        rip_link = format_message_link(rip.guild_id, rip.channel_id, rip.message_id)
+        result += f'\n**[{rip_title}]({rip_link})**\n{rip_author}'
+    return result
+
 @command(
     command_type=CommandType.QUEUE,
     brief='Show limbo rip info.',
@@ -1286,9 +1308,9 @@ async def limbo(args: list[str], command_context: CommandContext):
                     r'\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b',
                 ]
                 for date_pattern in DATE_PATTERNS:
-                    for date in re.findall(date_pattern, text_to_parse, re.IGNORECASE):
+                    for date_string in re.findall(date_pattern, text_to_parse, re.IGNORECASE):
                         try:
-                            date = parser.parse(date, fuzzy=True)
+                            date = parser.parse(date_string, fuzzy=True)
                             if date is not None and date not in dates:
                                 dates.append(date)
                         except:
@@ -1306,32 +1328,36 @@ async def limbo(args: list[str], command_context: CommandContext):
                 ripdate = RipDate(rip, dates)
                 ripdates.append(ripdate)
 
+    ripdates_date_dict: dict[datetime, list[RipDate]] = {}
+    ripdates_uncategorized: list[RipDate] = []
+
+    for ripdate in ripdates: 
+        if len(ripdate.dates):
+            is_inserted = False
+            for datetime_key in ripdates_date_dict.keys():
+                if datetime_key in ripdate.dates:
+                    ripdates_date_dict[datetime_key].append(ripdate)
+                    is_inserted = True
+                    break
+            if not is_inserted:
+                ripdates_date_dict[ripdate.dates[0]] = []
+                ripdates_date_dict[ripdate.dates[0]].append(ripdate)
+        else:
+            ripdates_uncategorized.append(ripdate)
+
     result = ""
 
     READABILITY_LINE = "\n━━━━━━━━━━━━━━━━━━"
 
-    #TOOD: (Ahmayk) sort
-    for ripdate in ripdates: 
-        for i, date in enumerate(ripdate.dates):
-            datestring = date.strftime('%b %d')
-            if date.year != datetime.now().year:
-                datestring = date.strftime('%b %d %Y')
-            if i == 0:
-                result += '\n'
-            else:
-                result += ' \ '
-            result += f"🗓️ **{datestring}:**" 
+    for date, ripdates in sorted(ripdates_date_dict.items(), key=lambda item: item[0]):
+        result += format_ripdates(ripdates)
+        result += READABILITY_LINE 
 
-        rip = ripdate.rip
-        rip_author = get_rip_author(rip.text, rip.message_author_name)
-        rip_author = rip_author.replace('*', '').replace('_', '')
-        rip_title = get_rip_title(rip.text)
-        rip_link = format_message_link(rip.guild_id, rip.channel_id, rip.message_id)
-        # if i > 0:
-        #     result += f'\n_ _'
-        result += f'\n**[{rip_title}]({rip_link})**\n{rip_author}'
-        if len(result):
-            result += READABILITY_LINE 
+    if len(ripdates_uncategorized):
+        result += f'\n# **UNCATEGORIZED:**'
+    for ripdate in ripdates_uncategorized: 
+        result += format_ripdates([ripdate])
+        result += '\n' 
 
     #TODO: (Ahmayk) support seperators that don't guarentee that chunks will be smaller than 1 embed
     await send_embed(result, command_context.channel, EmbedDesc(expires=True))
