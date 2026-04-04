@@ -1244,6 +1244,62 @@ async def queue_all(args: list[str], command_context: CommandContext):
                               channel_types = ['QUEUE'])
     await send_suborqueue_rips(desc, command_context)
 
+@command(
+    command_type=CommandType.QUEUE,
+    brief='Show limbo rip info.',
+    public=True
+)
+async def limbo(args: list[str], command_context: CommandContext):
+
+    channel_ids = get_channel_ids_of_types(['LIMBO'])
+    error_strings = []
+    date_dict: dict[datetime, list[Rip]] = {}
+    no_date_list: list[Rip] = []
+    for channel_id in channel_ids:
+        channel = bot.get_channel(channel_id)
+        if channel:
+            rips_and_errors = await get_rips(channel, GetRipsDesc(typing_channel=command_context.channel))
+            error_strings.extend(rips_and_errors.error_strings)
+            for rip in rips_and_errors.rips:
+                date = extract_date_rip(rip.text)
+                if date != None:
+                    if date not in date_dict:
+                        date_dict[date] = []
+                    date_dict[date].append(rip)
+                else:
+                    no_date_list.append(rip)
+
+    result = ""
+    readability_line = "\n━━━━━━━━━━━━━━━━━━"
+
+    for date, rips in sorted(date_dict.items(), key=lambda item: item[0]):
+        datestring = date.strftime('%b %d')
+        if date.year != datetime.now().year:
+            datestring = date.strftime('%b %d %Y')
+        result += f"\n🗓️ **{datestring}:**" 
+        for i, rip in enumerate(rips):
+            rip_author = get_rip_author(rip.text, rip.message_author_name)
+            rip_author = rip_author.replace('*', '').replace('_', '')
+            rip_title = get_rip_title(rip.text)
+            rip_link = format_message_link(rip.guild_id, rip.channel_id, rip.message_id)
+            if i > 0:
+                result += f'\n_ _'
+            result += f'\n**[{rip_title}]({rip_link})**\n{rip_author}'
+        result += readability_line 
+
+    if len(no_date_list):
+        result += f'\n\n**NO DATE FOUND:**'
+        for rip in no_date_list: 
+            rip_author = get_rip_author(rip.text, rip.message_author_name)
+            rip_author = rip_author.replace('*', '').replace('_', '')
+            rip_title = get_rip_title(rip.text)
+            rip_link = format_message_link(rip.guild_id, rip.channel_id, rip.message_id)
+            result += f'\n**[{rip_title}]({rip_link})**\n{rip_author}'
+            result += readability_line 
+
+    await send_embed(result, command_context.channel, EmbedDesc(expires=True, seperator=readability_line))
+    await send_if_errors("Errors during parsing limbo rips", error_strings, command_context.channel)
+
 
 # ============ Basic QoC commands ============== #
 

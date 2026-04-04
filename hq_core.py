@@ -1505,7 +1505,6 @@ def extract_rip_link(text: str) -> typing.List[str]:
     return ret
 
 
-
 def extract_playlist_id(text: str) -> str:
     """
     Extract the YouTube playlist ID from text.
@@ -1518,6 +1517,39 @@ def extract_playlist_id(text: str) -> str:
         return match.group(1)
     else:
         return ""  # Return empty string if no valid links are found
+
+from dateutil import parser
+
+def extract_date_raw(text: str) -> datetime | None:
+    DATE_PATTERNS = [
+        r'\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|'
+        r'jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)'
+        r'\s+\d{1,2}(?:st|nd|rd|th)?(?:\s+\d{2,4})?\b',
+    ]
+    result = None
+    for pattern in DATE_PATTERNS:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            try:
+                return parser.parse(match.group(), fuzzy=True)
+            except:
+                continue
+    return result
+
+
+def extract_date_rip(rip_text: str) -> datetime | None:
+
+    author = get_raw_rip_author(rip_text)
+    date = extract_date_raw(author)
+
+    if not date:
+        try:
+            metadata = rip_text.split('```', 2)[2]
+            date = extract_date_raw(metadata)
+        except IndexError:
+            pass
+
+    return date
 
 
 def get_raw_rip_title(text: str) -> str:
