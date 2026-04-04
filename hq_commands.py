@@ -1264,13 +1264,13 @@ def is_unique_ripdate_string(string: str, ripdate: RipDate) -> bool:
     
     if is_unique: 
         for day_string in ripdate.day_strings:
-            if (day_string is not string and (string in day_string or day_string not in string)):
+            if (day_string is not string and (string in day_string)):
                 is_unique = False
                 break
 
     if is_unique: 
         for when_string in ripdate.when_strings:
-            if (when_string is not string and (string in when_string or when_string not in string)):
+            if (when_string is not string and (string in when_string)):
                 is_unique = False
                 break
 
@@ -1292,6 +1292,8 @@ def format_ripdates(ripdates: list[RipDate]) -> str:
                 else:
                     result += ' \ '
                 result += f"🗓️ **{datestring}:**" 
+        elif rip_has_react([ReactType.CALENDAR], ripdate.rip):
+            result += f"\n🗓️ **???**" 
 
         posted_when_string = False
         when_result = ""
@@ -1317,7 +1319,6 @@ def format_ripdates(ripdates: list[RipDate]) -> str:
 @command(
     command_type=CommandType.QUEUE,
     brief='Show info of non-alerted limbo rips',
-    public=True
 )
 async def limbo(args: list[str], command_context: CommandContext):
 
@@ -1325,6 +1326,7 @@ async def limbo(args: list[str], command_context: CommandContext):
     error_strings = []
 
     ripdates: list[RipDate] = []
+    total_rip_count = 0
 
     for channel_id in channel_ids:
         channel = bot.get_channel(channel_id)
@@ -1332,6 +1334,7 @@ async def limbo(args: list[str], command_context: CommandContext):
             rips_and_errors = await get_rips(channel, GetRipsDesc(typing_channel=command_context.channel))
             error_strings.extend(rips_and_errors.error_strings)
             for rip in rips_and_errors.rips:
+                total_rip_count += 1
                 if not rip_has_react(FIX_REACT_LIST, rip):
                     text_to_parse = rip.text
                     re.sub('(```\n*````)', '', text_to_parse)
@@ -1363,7 +1366,7 @@ async def limbo(args: list[str], command_context: CommandContext):
                     day_strings_unclean = re.findall(r'^(.+?\s+day)\b', author_line, re.IGNORECASE | re.MULTILINE)
                     day_strings = clean_strings_markdown(day_strings_unclean)
 
-                    when_strings_unclean = re.findall(r'((?:for|if|after|before|needs|awaiting|pending)\s+.+?)(?:\s+by\b|[.(),!?]|$)', author_line, re.IGNORECASE | re.MULTILINE)
+                    when_strings_unclean = re.findall(r'((?:for|if|after|before|needs|awaiting|pending|alongside|when|christmas|halloween)\s+.+?)(?:\s+by\b|[.(),!?]|$)', author_line, re.IGNORECASE | re.MULTILINE)
                     when_strings = clean_strings_markdown(when_strings_unclean)
         
                     ripdate = RipDate(rip, dates, day_strings, when_strings)
@@ -1377,16 +1380,13 @@ async def limbo(args: list[str], command_context: CommandContext):
 
     for ripdate in ripdates: 
 
-        if len(ripdate.dates):
-            is_inserted = False
-            for datetime_key in ripdates_date_dict.keys():
-                if datetime_key in ripdate.dates:
-                    ripdates_date_dict[datetime_key].append(ripdate)
-                    is_inserted = True
-                    break
-            if not is_inserted:
-                ripdates_date_dict[ripdate.dates[0]] = []
-                ripdates_date_dict[ripdate.dates[0]].append(ripdate)
+        if len(ripdate.dates) or rip_has_react([ReactType.CALENDAR], ripdate.rip):
+            key = datetime.max 
+            if len(ripdate.dates):
+                key = ripdate.dates[0]
+            if key not in ripdates_date_dict:
+                ripdates_date_dict[key] = []
+            ripdates_date_dict[key].append(ripdate)
 
         elif len(ripdate.day_strings):
             key = 'day'
@@ -1417,26 +1417,33 @@ async def limbo(args: list[str], command_context: CommandContext):
 
     READABILITY_LINE = "\n━━━━━━━━━━━━━━━━━━"
 
+    count = 0
+
     for date, ripdates in sorted(ripdates_date_dict.items(), key=lambda item: item[0]):
+        count += len(ripdates)
         result += format_ripdates(ripdates)
         result += READABILITY_LINE 
 
     for day, ripdates in sorted(ripdates_day_dict.items(), key=lambda item: item[0]):
+        count += len(ripdates)
         result += format_ripdates(ripdates)
         result += READABILITY_LINE 
 
     for when_string, ripdates in sorted(ripdates_when_dict.items(), key=lambda item: item[0]):
+        count += len(ripdates)
         result += format_ripdates(ripdates)
         result += READABILITY_LINE 
 
     if len(ripdates_uncategorized):
         result += f'\n# **UNCATEGORIZED:**'
     for ripdate in ripdates_uncategorized: 
+        count += 1 
         result += format_ripdates([ripdate])
-        result += '\n' 
+        result += READABILITY_LINE 
 
-    #TODO: (Ahmayk) support seperators that don't guarentee that chunks will be smaller than 1 embed
-    await send_embed(result, command_context.channel, EmbedDesc(expires=True))
+    footer = f'{count} of {len(rips_and_errors.rips)} Rips (hiding rips with alert)'
+
+    await send_embed(result, command_context.channel, EmbedDesc(expires=True, footer=footer, seperator=READABILITY_LINE))
     await send_if_errors("Errors during parsing limbo rips", error_strings, command_context.channel)
 
 

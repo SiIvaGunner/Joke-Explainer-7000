@@ -69,6 +69,7 @@ class ReactType(Enum):
     ANTIMAIL = auto()
     SENDBACK = auto()
     NUMBER = auto()
+    CALENDAR = auto()
 
 REVIEW_REACT_LIST = [ReactType.CHECK, ReactType.GOLDCHECK, ReactType.FIX, ReactType.ALERT, ReactType.REJECT]
 FIX_REACT_LIST = [ReactType.FIX, ReactType.ALERT]
@@ -706,6 +707,8 @@ def react_is(reaction_type: ReactType, name: str) -> bool:
             result = name_lower == "sendback" or name_lower == DEFAULT_SENDBACK
         case ReactType.NUMBER:
             result = name in KEYCAP_EMOJIS
+        case ReactType.CALENDAR:
+            result = "calendar" in name_lower or name_lower in [DEFAULT_CALENDAR_1, DEFAULT_CALENDAR_2, DEFAULT_CALENDAR_3] 
         case _:
             assert "Unimplemented ReactionType"
 
@@ -1364,7 +1367,6 @@ async def send_embed(text: str, channel: TextChannel | Thread, desc: EmbedDesc):
     split_messages: List[str] = []
     all_lines = text.split(desc.seperator)
     wall_of_text = ""
-    total_len_added = 0
     for line in all_lines:
         # line = line.replace('@', '')  # pings are fine specifically in embed
         next_length = len(wall_of_text) + len(line)
@@ -1372,13 +1374,13 @@ async def send_embed(text: str, channel: TextChannel | Thread, desc: EmbedDesc):
         desc_limit = embed_character_limit_total 
         if not len(split_messages):
             desc_limit -= len(title) 
-        elif len(text) - total_len_added < embed_character_limit_total:
-            desc_limit -= len(footer) 
+
+        #TODO: (Ahmayk) don't subtract footer if we know we don't need it
+        desc_limit -= len(footer) 
 
         if next_length > desc_limit:
             new_desc = wall_of_text[:-len(desc.seperator)]
             split_messages.append(new_desc)
-            total_len_added = len(new_desc)
             wall_of_text = line + desc.seperator 
         else:
             wall_of_text += line + desc.seperator
@@ -1433,7 +1435,9 @@ async def send_embed(text: str, channel: TextChannel | Thread, desc: EmbedDesc):
         try:
             await channel.send(embeds=embed_group, delete_after=delete_after_seconds)
         except Exception as error:
-            await write_log(f'Failed to send embed to {channel.jump_url}: {type(error).__name__}: {error}')
+            error_strings: list[str] = []
+            await log_exception(f'Failed to send embed to {channel.jump_url}', error, error_strings, False)
+            await send_if_errors("Failed to send embed", error_strings, channel)
 
 def parse_errors(if_errors_txt: str, error_strings: List[str]) -> str:
     max_errors_to_send = 3
