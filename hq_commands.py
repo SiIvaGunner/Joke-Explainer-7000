@@ -1252,6 +1252,30 @@ class RipDate(NamedTuple):
     day_strings: list[str]
     when_strings: list[str]
 
+def is_unique_ripdate_string(string: str, ripdate: RipDate) -> bool:
+    is_unique = True  
+    for date in ripdate.dates: 
+        if (
+            date.strftime('%b %d').lower() in string.lower()
+            or date.strftime('%B %d').lower() in string.lower()
+         ):
+            is_unique = False 
+            break
+    
+    if is_unique: 
+        for day_string in ripdate.day_strings:
+            if (day_string is not string and (string in day_string or day_string not in string)):
+                is_unique = False
+                break
+
+    if is_unique: 
+        for when_string in ripdate.when_strings:
+            if (when_string is not string and (string in when_string or when_string not in string)):
+                is_unique = False
+                break
+
+    return is_unique
+
 def format_ripdates(ripdates: list[RipDate]) -> str:
     result = ""
     for i_ripdate, ripdate in enumerate(ripdates):
@@ -1269,12 +1293,18 @@ def format_ripdates(ripdates: list[RipDate]) -> str:
                     result += ' \ '
                 result += f"🗓️ **{datestring}:**" 
 
-        else:
-            for day_string in ripdate.day_strings:
-                result += f"\n☀️ **{day_string}:**" 
+        posted_when_string = False
+        when_result = ""
+        for when_string in ripdate.when_strings:
+            if is_unique_ripdate_string(when_string, ripdate):
+                posted_when_string = True
+                when_result += f"\n➡️️ **{when_string}:**" 
 
-            for when_string in ripdate.when_strings:
-                result += f"\n➡️️ **{when_string}:**" 
+        for day_string in ripdate.day_strings:
+            if not posted_when_string or is_unique_ripdate_string(day_string, ripdate):
+                result += f"\n☀️ **{day_string}:**" 
+        
+        result += when_result
 
         rip = ripdate.rip
         rip_author = get_rip_author(rip.text, rip.message_author_name)
@@ -1286,7 +1316,7 @@ def format_ripdates(ripdates: list[RipDate]) -> str:
 
 @command(
     command_type=CommandType.QUEUE,
-    brief='Show limbo rip info.',
+    brief='Show info of non-alerted limbo rips',
     public=True
 )
 async def limbo(args: list[str], command_context: CommandContext):
@@ -1302,41 +1332,42 @@ async def limbo(args: list[str], command_context: CommandContext):
             rips_and_errors = await get_rips(channel, GetRipsDesc(typing_channel=command_context.channel))
             error_strings.extend(rips_and_errors.error_strings)
             for rip in rips_and_errors.rips:
-                text_to_parse = rip.text
-                re.sub('(```\n*````)', '', text_to_parse)
+                if not rip_has_react(FIX_REACT_LIST, rip):
+                    text_to_parse = rip.text
+                    re.sub('(```\n*````)', '', text_to_parse)
 
-                dates = [] 
-                DATE_PATTERNS = [
-                    r'\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|'
-                    r'jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)'
-                    r'\s+\d{1,2}(?:st|nd|rd|th)?(?:\s+\d{2,4})?\b',
+                    dates = [] 
+                    DATE_PATTERNS = [
+                        r'\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|'
+                        r'jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)'
+                        r'\s+\d{1,2}(?:st|nd|rd|th)?(?:\s+\d{2,4})?\b',
 
-                    r'\b\d{1,2}(?:st|nd|rd|th)?\s+'
-                    r'(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|'
-                    r'jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)'
-                    r'(?:\s+\d{2,4})?\b',
+                        r'\b\d{1,2}(?:st|nd|rd|th)?\s+'
+                        r'(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|'
+                        r'jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)'
+                        r'(?:\s+\d{2,4})?\b',
 
-                    r'\b\d{4}-\d{2}-\d{2}\b',
-                    r'\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b',
-                ]
-                for date_pattern in DATE_PATTERNS:
-                    for date_string in re.findall(date_pattern, text_to_parse, re.IGNORECASE):
-                        try:
-                            date = parser.parse(date_string, fuzzy=True)
-                            if date is not None and date not in dates:
-                                dates.append(date)
-                        except:
-                            pass
+                        r'\b\d{4}-\d{2}-\d{2}\b',
+                        r'\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b',
+                    ]
+                    for date_pattern in DATE_PATTERNS:
+                        for date_string in re.findall(date_pattern, text_to_parse, re.IGNORECASE):
+                            try:
+                                date = parser.parse(date_string, fuzzy=True)
+                                if date is not None and date not in dates:
+                                    dates.append(date)
+                            except:
+                                pass
 
-                author_line = get_raw_rip_author(rip.text)
-                day_strings_unclean = re.findall(r'^(.+?\s+day)\b', author_line, re.IGNORECASE | re.MULTILINE)
-                day_strings = clean_strings_markdown(day_strings_unclean)
+                    author_line = get_raw_rip_author(rip.text)
+                    day_strings_unclean = re.findall(r'^(.+?\s+day)\b', author_line, re.IGNORECASE | re.MULTILINE)
+                    day_strings = clean_strings_markdown(day_strings_unclean)
 
-                when_strings_unclean = re.findall(r'((?:for|if|after|before|needs|awaiting|pending)\s+.+?)(?:\s+by\b|[.(),!?]|$)', author_line, re.IGNORECASE | re.MULTILINE)
-                when_strings = clean_strings_markdown(when_strings_unclean)
-    
-                ripdate = RipDate(rip, dates, day_strings, when_strings)
-                ripdates.append(ripdate)
+                    when_strings_unclean = re.findall(r'((?:for|if|after|before|needs|awaiting|pending)\s+.+?)(?:\s+by\b|[.(),!?]|$)', author_line, re.IGNORECASE | re.MULTILINE)
+                    when_strings = clean_strings_markdown(when_strings_unclean)
+        
+                    ripdate = RipDate(rip, dates, day_strings, when_strings)
+                    ripdates.append(ripdate)
 
 
     ripdates_date_dict: dict[datetime, list[RipDate]] = {}
