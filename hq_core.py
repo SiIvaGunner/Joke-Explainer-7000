@@ -1518,45 +1518,6 @@ def extract_playlist_id(text: str) -> str:
     else:
         return ""  # Return empty string if no valid links are found
 
-from dateutil import parser
-
-class RipDateType(Enum):
-    NULL = auto()
-    DATE = auto()
-
-class RipDate(NamedTuple):
-    type: RipDateType
-    date: datetime | None
-
-def extract_ripdate_raw(text: str) -> RipDate:
-    rip_date_type = RipDateType.NULL
-    date = None
-    date_pattern = (
-        r'\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|'
-        r'jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)'
-        r'\s+\d{1,2}(?:st|nd|rd|th)?(?:\s+\d{2,4})?\b'
-    )
-    match = re.search(date_pattern, text, re.IGNORECASE)
-    if match:
-        try:
-            date = parser.parse(match.group(), fuzzy=True)
-            rip_date_type = RipDateType.DATE
-        except Exception as error:
-            print(error)
-    return RipDate(rip_date_type, date)
-
-
-def extract_date_rip(rip_text: str) -> RipDate: 
-    author = get_raw_rip_author(rip_text)
-    ripdate = extract_ripdate_raw(author)
-    if ripdate.type == RipDateType.NULL:
-        try:
-            metadata = rip_text.split('```', 2)[2]
-            ripdate = extract_ripdate_raw(metadata)
-        except IndexError:
-            pass
-    return ripdate 
-
 def get_raw_rip_title(text: str) -> str:
     """
     Return the rip title line of a Discord message.
