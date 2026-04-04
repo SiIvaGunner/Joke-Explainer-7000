@@ -1908,8 +1908,19 @@ async def stats(args: list[str], command_context: CommandContext):
     admin=True,
 )
 async def shutdown(args: list[str], command_context: CommandContext):
-    await send("Goodnight!", command_context.channel)
-    await bot.close()
+    await send("WARNING: This command will shut down the bot. Proceed only if I really need to be shut down right now!", command_context.channel)
+    password = "".join(random.choices("abcdefghijklmnopqrstuvwxyz", k=10))
+    await send(f"Type the following to confirm the action: ``{password}``", command_context.channel)
+    try:
+        msg = await bot.wait_for("message", check=lambda m: (m.channel.id == command_context.channel.id) and (m.author.id == command_context.user.id), timeout=60)
+    except asyncio.TimeoutError:
+        await send("Time out. Action aborted.", command_context.channel)
+    else:
+        if msg.content == password:
+            await send("Goodnight!", command_context.channel)
+            await bot.close()
+        else:
+            await send("Incorrect password, please run the command again.", command_context.channel)
 
 @command(
     command_type=CommandType.SECRET,

@@ -361,7 +361,8 @@ async def on_message(message: Message):
         return
 
     if command_info.admin:
-        assert type(message.author) is discord.Member
+        if not type(message.author) is discord.Member:
+            return await send("Error: Admin commands can only be executed within servers.", message.channel)
         if not message.author.guild_permissions.administrator:
             return await send("Error: Only users with admin access in this server can use this command.", message.channel)
 
