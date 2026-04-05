@@ -1441,7 +1441,7 @@ async def limbo(args: list[str], command_context: CommandContext):
         result += format_ripdates([ripdate])
         result += READABILITY_LINE 
 
-    footer = f'{count} of {len(rips_and_errors.rips)} Rips (hiding rips with alert)'
+    footer = f'{count} of {total_rip_count} Rips (hiding rips with alert)'
 
     await send_embed(result, command_context.channel, EmbedDesc(expires=True, footer=footer, seperator=READABILITY_LINE))
     await send_if_errors("Errors during parsing limbo rips", error_strings, command_context.channel)
