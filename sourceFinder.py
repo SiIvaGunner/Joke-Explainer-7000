@@ -161,10 +161,10 @@ def scan_page(base_url: str, target_name: str, pre_href: str, filter: Callable, 
                 if (result and validate_album(result)): page_results.append(result)
 
         if target_name and target_name != "" and should_print:
-            # print(f"Successfully fetched and parsed {target_name}. [{len(page_results)} result(s)]")
+            print(f"Successfully fetched and parsed {target_name}. [{len(page_results)} result(s)]")
             pass
     except (requests.exceptions.RequestException, AssertionError) as e:
-        # print(f"Error fetching data from {target_name}: {e}")
+        print(f"Error fetching data from {target_name}: {e}")
         broken_sites.add(target_name)
 
     return page_results
@@ -380,8 +380,8 @@ def _find_track_for_album_thread(album, track, similarity, game, should_print, t
             cool = f"{track_title} ({full_url}) exists at the album {album.title} ({album.url})"
             thread_results.append(cool)
             track_urls_reported.add(track_url)
-            # if should_print:
-            #     print(f"\nTrack found: {cool}")
+            if should_print:
+                print(f"\nTrack found: {cool}")
 
 def hcs_album_track_finder(album, track, similarity, game, should_print):
     hcs_album_dict = album.get_dict()
@@ -396,7 +396,7 @@ def hcs_album_track_finder(album, track, similarity, game, should_print):
     if (not json is None):
         for file in json["files"]:
             results.append(Result(ResultType.TRACK, file["name"], NO_URL_MSG, "HCS64"))
-            #print(file["name"])
+            print(file["name"])
     return results
 
 
@@ -421,8 +421,8 @@ def find_track(track: str, results: Iterable, similarity: float, depth: int, sho
             if result not in tracks_found:
                 tracks_found.append(result)
 
-    # if (len(tracks_found) == 0 and should_print):
-    #     print(f"\nUnable to find Track '{track}' – it may not be on any of these albums, or it may have a different title.")
+    if (len(tracks_found) == 0 and should_print):
+        print(f"\nUnable to find Track '{track}' – it may not be on any of these albums, or it may have a different title.")
 
     return tracks_found
 
@@ -513,7 +513,7 @@ def find_song(title: str, divider: str, similarity: float):
         for result in thing:
             if not result in track_results:
                 track_results.append(result)
-                # print(result)
+                print(result)
 
     return(track_results, pairs)
 
@@ -540,10 +540,10 @@ def parse_rip(submissionText: str):
     track_results, pairs = find_song(title, ' - ', DEFAULT_SIMILARITY)
     #For each hyphen in title, return pairs of all the text before and after it
     if (len(track_results) > 0):
-        # print("Done finding reference!")
+        print("Done finding reference!")
         pass
     else:
-        # print("Unable to find track. Searching for game album:")
+        print("Unable to find track. Searching for game album:")
         album_results = []
         games_to_search = set()
         for pair in pairs:
@@ -554,10 +554,10 @@ def parse_rip(submissionText: str):
 
         def _search_for_game_in_thread(game_name: str, should_print: bool, show_all: bool, should_search_vgmrips: bool, results_list: list, index: int):
             results = chain.from_iterable(search_sites(game_name, Zophar, KHInsider, VGMRips and should_search_vgmrips, HCS64, should_print))
-            # if(results):
-                # print_results(results, show_all, game_name)
-            # else:
-                # print(NO_RESULTS_MSG)
+            if(results):
+                print_results(results, show_all, game_name)
+            else:
+                print(NO_RESULTS_MSG)
             results_list[index] = list(results)
 
         for i, game_name in enumerate(list(games_to_search)):
@@ -572,16 +572,16 @@ def parse_rip(submissionText: str):
             album_results.extend(result_list)
 
     my_url = YOUTUBE_SEARCH_URL + quote_plus(title)
-    # print(f"Game search results: {my_url}")
+    print(f"Game search results: {my_url}")
 
     joke = get_rip_joke(submissionText)
-    # print(f'JOKE: {joke}')
+    print(f'JOKE: {joke}')
     if len(joke):
         jokes = re.split(f'[{COMMON_JOKE_DELIMITERS}]', joke)
 
         for(joke) in jokes:
             my_url = YOUTUBE_SEARCH_URL + quote_plus(joke)
-            # print(f"Joke search results on YouTube: {my_url}")
+            print(f"Joke search results on YouTube: {my_url}")
 
         joke_results = []
 
@@ -595,7 +595,7 @@ def parse_rip(submissionText: str):
             print(joke_results)
 
     else:
-        # print("Joke not found.")
+        print("Joke not found.")
         pass
 
     print("All done!")
