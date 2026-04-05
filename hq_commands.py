@@ -1324,6 +1324,9 @@ def format_ripdates(ripdates: list[RipDate]) -> str:
 async def limbo(args: list[str], command_context: CommandContext):
 
     channel_ids = get_channel_ids_of_types(['LIMBO'])
+    if not len(channel_ids):
+        return await send("No limbo channels are defined. This needs to be set up in the bot! Contact a bot maintainer.", command_context.channel)
+
     error_strings = []
 
     ripdates: list[RipDate] = []
@@ -1444,8 +1447,12 @@ async def limbo(args: list[str], command_context: CommandContext):
 
     footer = f'{count} of {total_rip_count} Rips (hiding rips with alert)'
 
-    await send_embed(result, command_context.channel, EmbedDesc(expires=True, footer=footer, seperator=READABILITY_LINE))
-    await send_if_errors("Errors during parsing limbo rips", error_strings, command_context.channel)
+    if len(result):
+        await send_embed(result, command_context.channel, EmbedDesc(expires=True, footer=footer, seperator=READABILITY_LINE))
+        await send_if_errors("Errors during parsing limbo rips", error_strings, command_context.channel)
+    else:
+        await send_and_if_errors("No limbo rips!", "Errors during parsing limbo rips", error_strings, command_context.channel)
+
 
 
 # ============ Basic QoC commands ============== #
