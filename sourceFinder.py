@@ -11,6 +11,8 @@ from itertools import chain
 from enum import Enum
 from requests.adapters import HTTPAdapter
 
+from hq_strings import *
+
 Zophar = True
 KHInsider = True
 VGMRips = True
@@ -123,12 +125,7 @@ def validate_album(album: Result):
 HCS64_SET_URL = "https://vgm.hcs64.com/?set="
 
 # Generic link-collecting function
-def scan_page(base_url: str,
-                            target_name: str,
-                            pre_href: str,
-                            filter: Callable,
-                            should_print: bool,
-                            resultType: ResultType):
+def scan_page(base_url: str, target_name: str, pre_href: str, filter: Callable, should_print: bool, resultType: ResultType):
 
     # If this site has thrown errors before, don't even bother searching again.
     if target_name in broken_sites:
@@ -136,38 +133,39 @@ def scan_page(base_url: str,
 
     page_results = []
     try:
-            response: requests.Response = my_session.get(base_url, headers=headers, timeout=10)
-            response.raise_for_status() # Raise an exception for HTTP errors (4xx or 5xx)
-            soup: BeautifulSoup = BeautifulSoup(response.text, 'html.parser')
+        response: requests.Response = my_session.get(base_url, headers=headers, timeout=10)
+        response.raise_for_status() # Raise an exception for HTTP errors (4xx or 5xx)
+        soup: BeautifulSoup = BeautifulSoup(response.text, 'html.parser')
 
-            # get host name of website
+        # get host name of website
 
-            if (response.url.startswith(vgmRipsPackUrl) and response.url != base_url):
-                # get the string contained in the <title> tag in the page
-                title_tag = soup.find('title')
-                assert (title_tag and isinstance(title_tag, Tag))
-                title = title_tag.string
-                assert isinstance(title, str)
-                clean_title = title[0:title.index(" vgm music • VGMRips")]
-                page_results = [Result(resultType, clean_title, response.url,target_name)]
-            else:
-                all_link_tags = soup.find_all('a', href=True)
-                for link_tag in all_link_tags:
-                    assert isinstance(link_tag, Tag)
-                    href = link_tag['href']
-                    assert isinstance(href, str)
-                    parent_tag = link_tag.parent
-                    assert isinstance(parent_tag, Tag)
-                    if "/game-soundtracks/arrangements" in href and parent_tag.name == "b": return []
-                    if (parent_tag.has_attr('class') and "albumIconLarge" in parent_tag['class']): continue
-                    result = parse_link_tag(link_tag, pre_href, target_name, filter, resultType)
-                    if (result and validate_album(result)): page_results.append(result)
+        if (response.url.startswith(vgmRipsPackUrl) and response.url != base_url):
+            # get the string contained in the <title> tag in the page
+            title_tag = soup.find('title')
+            assert (title_tag and isinstance(title_tag, Tag))
+            title = title_tag.string
+            assert isinstance(title, str)
+            clean_title = title[0:title.index(" vgm music • VGMRips")]
+            page_results = [Result(resultType, clean_title, response.url,target_name)]
+        else:
+            all_link_tags = soup.find_all('a', href=True)
+            for link_tag in all_link_tags:
+                assert isinstance(link_tag, Tag)
+                href = link_tag['href']
+                assert isinstance(href, str)
+                parent_tag = link_tag.parent
+                assert isinstance(parent_tag, Tag)
+                if "/game-soundtracks/arrangements" in href and parent_tag.name == "b": return []
+                if (parent_tag.has_attr('class') and "albumIconLarge" in parent_tag['class']): continue
+                result = parse_link_tag(link_tag, pre_href, target_name, filter, resultType)
+                if (result and validate_album(result)): page_results.append(result)
 
-            if target_name and target_name != "" and should_print:
-                print(f"Successfully fetched and parsed {target_name}. [{len(page_results)} result(s)]")
+        if target_name and target_name != "" and should_print:
+            # print(f"Successfully fetched and parsed {target_name}. [{len(page_results)} result(s)]")
+            pass
     except (requests.exceptions.RequestException, AssertionError) as e:
-            print(f"Error fetching data from {target_name}: {e}")
-            broken_sites.add(target_name)
+        # print(f"Error fetching data from {target_name}: {e}")
+        broken_sites.add(target_name)
 
     return page_results
 
@@ -382,8 +380,8 @@ def _find_track_for_album_thread(album, track, similarity, game, should_print, t
             cool = f"{track_title} ({full_url}) exists at the album {album.title} ({album.url})"
             thread_results.append(cool)
             track_urls_reported.add(track_url)
-            if should_print:
-                print(f"\nTrack found: {cool}")
+            # if should_print:
+            #     print(f"\nTrack found: {cool}")
 
 def hcs_album_track_finder(album, track, similarity, game, should_print):
     hcs_album_dict = album.get_dict()
@@ -402,24 +400,15 @@ def hcs_album_track_finder(album, track, similarity, game, should_print):
     return results
 
 
-def find_track(track: str,
-                                     results: Iterable,
-                                     similarity: float,
-                                     depth: int,
-                                     should_print: bool,
-                                     game: str):
+def find_track(track: str, results: Iterable, similarity: float, depth: int, should_print: bool, game: str):
     tracks_found = []
 
-    sorted_all_results = list(reversed(sorted(
-        results,
-        key=lambda album: SequenceMatcher(None, album.title, game).ratio())))
-
+    sorted_all_results = list(reversed(sorted(results, key=lambda album: SequenceMatcher(None, album.title, game).ratio())))
     threads = []
     thread_results_list = [[] for _ in range(len(sorted_all_results[:depth]))]
 
     for i, album in enumerate(sorted_all_results[:depth]):
         thread = None
-
         thread = threading.Thread(target=_find_track_for_album_thread, args=(album, track, similarity, game, should_print, thread_results_list[i]))
         threads.append(thread)
         thread.start()
@@ -432,29 +421,13 @@ def find_track(track: str,
             if result not in tracks_found:
                 tracks_found.append(result)
 
+    # if (len(tracks_found) == 0 and should_print):
+    #     print(f"\nUnable to find Track '{track}' – it may not be on any of these albums, or it may have a different title.")
 
-    if (len(tracks_found) == 0 and should_print):
-        print(f"\nUnable to find Track '{track}' – it may not be on any of these albums, or it may have a different title.")
     return tracks_found
 
 
-def search_for_game(game: str, should_print=True, show_all=True, should_search_vgmrips=True):
-    results = chain.from_iterable(
-            search_sites(game,
-                                     Zophar,
-                                     KHInsider,
-                                     VGMRips and should_search_vgmrips,
-                                     HCS64,
-                                     should_print))
-
-    if(results):
-        print_results(results, show_all, game)
-        return results
-    else:
-        print(NO_RESULTS_MSG)
-        return results
-
-
+#TODO: (Ahamyk) wow [redacted] was coping really hard here lol 
 def clean_title(title: str):
     #if title ends with "Super Smash Bros. UItimate", replace that ending with "Super Smash Bros. Ultimate"
     if title.endswith("Super Smash Bros. UItimate"):
@@ -464,24 +437,7 @@ def clean_title(title: str):
 
 YOUTUBE_SEARCH_URL = "https://www.youtube.com/results?search_query="
 COMMON_JOKE_DELIMITERS = ",."
-def parse_joke(joke_line: str):
-    jokes = re.split(f'[{COMMON_JOKE_DELIMITERS}]', joke_line)
-
-    for(joke) in jokes:
-            my_url = YOUTUBE_SEARCH_URL + quote_plus(joke)
-            print(f"Joke search results on YouTube: {my_url}")
-
-    joke_results = []
-
-    dividers = [' - ', ' from ']
-    for divider in dividers:
-        for joke in jokes:
-            temp_results = find_song(joke, divider, DEFAULT_SIMILARITY)[0]
-            joke_results.extend(temp_results)
-
-    if (len(joke_results) > 0):
-        print(joke_results)
-
+NO_TRACK = "!@#$%^&*()"
 
 def remove_last_mixname(name):
     return name[0:name.rindex("(")]
@@ -500,7 +456,6 @@ def parseTitle(title: str, divider: str):
             beforeStrip = before.strip()
             afterStrip = after.strip()
 
-
             pairs.append([beforeStrip, afterStrip])
             if (beforeStrip.endswith(")") and "(" in beforeStrip):
                 pairs.extend(parseTitle(
@@ -513,40 +468,32 @@ def parseTitle(title: str, divider: str):
     return pairs
 
 
-
-
-def search_for_game_and_track(game: str, track: str, sensitivity: float):
-
-    my_results = None
-    if game in cached_album_results:
-        my_results = cached_album_results[game]
-    else:
-        my_results = list(chain.from_iterable(
-                search_sites(game, Zophar, KHInsider, VGMRips, HCS64, False)))
-        cached_album_results[game] = my_results
-
-
-    track_record = None
-    if (game, track) in cached_track_results:
-        track_record = cached_track_results[(game, track)]
-    else:
-        track_record = find_track(
-                track, my_results, sensitivity, 10, False, game)
-        cached_track_results[(game, track)] = track_record
-    return(track_record)
-
-def search_for_game_and_track_in_thread(game: str, track: str, sensitivity: float, track_results: list, index: int):
-    track_results[index] = search_for_game_and_track(game, track, sensitivity)
-
-NO_TRACK = "!@#$%^&*()"
-
-
 def find_song(title: str, divider: str, similarity: float):
     pairs: list[list[str]] = parseTitle(title, divider)
     track_results = []
     threads = []
     bag = [list()] * (len(pairs) * 2)
     index = 0
+
+    def search_for_game_and_track_in_thread(game: str, track: str, sensitivity: float, track_results: list, index: int):
+        # track_results[index] = search_for_game_and_track(game, track, sensitivity)
+
+        my_results = None
+        if game in cached_album_results:
+            my_results = cached_album_results[game]
+        else:
+            my_results = list(chain.from_iterable(search_sites(game, Zophar, KHInsider, VGMRips, HCS64, False)))
+            cached_album_results[game] = my_results
+
+        track_record = None
+        if (game, track) in cached_track_results:
+            track_record = cached_track_results[(game, track)]
+        else:
+            track_record = find_track(
+                    track, my_results, sensitivity, 10, False, game)
+            cached_track_results[(game, track)] = track_record
+        track_results[index] = track_record
+
     for pair in pairs:
         if(pair[0] == NO_TRACK or pair[1] == NO_TRACK):
             continue
@@ -559,53 +506,17 @@ def find_song(title: str, divider: str, similarity: float):
         firstThread.start()
         index += 1
 
-
-# Wait for all threads to finish
+    # Wait for all threads to finish
     for t in threads:
-            t.join()
+        t.join()
     for thing in bag:
         for result in thing:
             if not result in track_results:
                 track_results.append(result)
-                print(result)
+                # print(result)
 
     return(track_results, pairs)
 
-
-def _search_for_game_in_thread(game_name: str, should_print: bool, show_all: bool, should_search_vgmrips: bool, results_list: list, index: int):
-    results = search_for_game(game_name, should_print, show_all, should_search_vgmrips)
-    results_list[index] = list(results)
-
-
-def handle_title(title: str, should_search_vgmrips=True):
-    track_results, pairs = find_song(title, ' - ', DEFAULT_SIMILARITY)
-    #For each hyphen in title, return pairs of all the text before and after it
-    if (len(track_results) > 0):
-        print("Done finding reference!")
-    else:
-        print("Unable to find track. Searching for game album:")
-        album_results = []
-        games_to_search = set()
-        for pair in pairs:
-                games_to_search.add(pair[1])
-
-        threads = []
-        thread_results_list = [[] for _ in range(len(games_to_search))]
-
-        for i, game_name in enumerate(list(games_to_search)):
-                thread = threading.Thread(target=_search_for_game_in_thread,
-                                                                args=(game_name, False, True, should_search_vgmrips, thread_results_list, i))
-                threads.append(thread)
-                thread.start()
-
-        for t in threads:
-                t.join()
-
-        for result_list in thread_results_list:
-                album_results.extend(result_list)
-
-    my_url = YOUTUBE_SEARCH_URL + quote_plus(title)
-    print(f"Game search results: {my_url}")
 
 
 def parse_rip(submissionText: str):
@@ -618,35 +529,79 @@ def parse_rip(submissionText: str):
     if (len(hcs_index) == 0):
         hcs_index = get_index()
 
-    chunks = submissionText.split('```')
-    if len(chunks) > 1:
-        ripData = chunks[1]
-    else:
-        ripData = submissionText
+    title = get_raw_rip_title(submissionText)
+    if title is None: 
+        title = submissionText
 
-    ripDataToLines = ripData.splitlines()
-    if (ripDataToLines[0] == ""):
-        title = ripDataToLines[1]
-    else:
-        title= ripDataToLines[0]
+    print(f'TITLE: {title}')
 
     print("Searching...")
-    handle_title(title, True)
 
-    found_joke = False
-    if len(chunks) > 2:
-        after_code = chunks[2].splitlines()
+    track_results, pairs = find_song(title, ' - ', DEFAULT_SIMILARITY)
+    #For each hyphen in title, return pairs of all the text before and after it
+    if (len(track_results) > 0):
+        # print("Done finding reference!")
+        pass
+    else:
+        # print("Unable to find track. Searching for game album:")
+        album_results = []
+        games_to_search = set()
+        for pair in pairs:
+            games_to_search.add(pair[1])
 
-        for partition in after_code:
-            if ('oke:' in partition or 'okes:' in partition or 'joke' in partition):
-                joke_line = (partition[partition.index(':')+1:]).lstrip()
-                parse_joke(joke_line)
-                found_joke = True
-                break
-    if not found_joke:
-        print("No joke line found.")
+        threads = []
+        thread_results_list = [[] for _ in range(len(games_to_search))]
+
+        def _search_for_game_in_thread(game_name: str, should_print: bool, show_all: bool, should_search_vgmrips: bool, results_list: list, index: int):
+            results = chain.from_iterable(search_sites(game_name, Zophar, KHInsider, VGMRips and should_search_vgmrips, HCS64, should_print))
+            # if(results):
+                # print_results(results, show_all, game_name)
+            # else:
+                # print(NO_RESULTS_MSG)
+            results_list[index] = list(results)
+
+        for i, game_name in enumerate(list(games_to_search)):
+            thread = threading.Thread(target=_search_for_game_in_thread, args=(game_name, False, True, True, thread_results_list, i))
+            threads.append(thread)
+            thread.start()
+
+        for t in threads:
+            t.join()
+
+        for result_list in thread_results_list:
+            album_results.extend(result_list)
+
+    my_url = YOUTUBE_SEARCH_URL + quote_plus(title)
+    # print(f"Game search results: {my_url}")
+
+    joke = get_rip_joke(submissionText)
+    # print(f'JOKE: {joke}')
+    if len(joke):
+        jokes = re.split(f'[{COMMON_JOKE_DELIMITERS}]', joke)
+
+        for(joke) in jokes:
+            my_url = YOUTUBE_SEARCH_URL + quote_plus(joke)
+            # print(f"Joke search results on YouTube: {my_url}")
+
+        joke_results = []
+
+        dividers = [' - ', ' from ']
+        for divider in dividers:
+            for joke in jokes:
+                temp_results = find_song(joke, divider, DEFAULT_SIMILARITY)[0]
+                joke_results.extend(temp_results)
+
+        if (len(joke_results) > 0):
+            print(joke_results)
+
+    else:
+        # print("Joke not found.")
+        pass
 
     print("All done!")
+
+
+
 
 import sys
 parse_rip(sys.argv[1])

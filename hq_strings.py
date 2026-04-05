@@ -93,14 +93,14 @@ def clean_strings_markdown(texts: str) -> list[str]:
         result.append(s)
     return result
 
-def get_raw_rip_title(text: str) -> str:
+#TODO: (Ahmayk) don't return None, return empty string
+def get_raw_rip_title(text: str) -> str | None:
     """
     Return the rip title line of a Discord message.
     Assumes the message follows the format where the rip title is after the first instance of ```
     """
     # Update: now use regex to find the first instance of "```[\n][text][\n]"
-    pattern = r'\`\`\`\n*.*\n'
-    rip_title = re.search(pattern, text)
+    rip_title = re.search(r'\`\`\`\n*.*\n', text)
     if rip_title is not None:
         rip_title = rip_title.group(0)
         rip_title = rip_title.replace('`', '')
@@ -170,6 +170,17 @@ def get_rip_description(text: str) -> str:
     else:
         return ""  # Return empty string if no match was found
 
+def get_rip_joke(text: str) -> str:
+    result = ""
+    after_desc = text
+    chunks = text.split('```')
+    if len(chunks) >= 2:
+        after_desc = chunks[2]
+    for line in after_desc.splitlines():
+        if ('oke:' in line or 'okes:' in line or 'joke' in line):
+            result = (line[line.index(':')+1:]).lstrip()
+            break
+    return result
 
 def format_message_link(guild_id: int, channel_id: int, message_id: int):
     return  f"<https://discord.com/channels/{str(guild_id)}/{str(channel_id)}/{str(message_id)}>"
