@@ -292,46 +292,6 @@ def search_sites(game: str, doZophar: bool, doKHInsider: bool,
     return list_of_results
 
 
-def print_subresults(theList: list[Result], name):
-    print(name)
-    if theList:
-            for result in theList:
-                print("  ", result)
-    else:
-            print(NO_RESULTS_MSG)
-
-def print_results(all_results: Iterable, show_all: bool, game: str):
-    exact_matches = []
-    other_results = []
-    for result in all_results:
-        if result.title == game:
-            exact_matches.append(result)
-        else:
-            other_results.append(result)
-
-    sorted_other_results = list(reversed(sorted(
-            other_results,
-            key=lambda result:
-                SequenceMatcher(None, result.title, game).ratio())))
-
-    if exact_matches:
-        plural = ""
-        if len(exact_matches) > 1: plural = "es"
-        print(f"\nExact title match{plural} for {game} found:")
-        for result in exact_matches:
-            print(f"  {result.url}")
-
-        if show_all:
-            if (sorted_other_results):
-                print_subresults(sorted_other_results,
-                    "\nOther search results were:")
-            else:
-                print("No other results to display.")
-    else:
-        print_subresults(sorted_other_results,
-                                         f"\nNo exact title match found for \"{game}\". Search results were:")
-
-
 def validate_track(title: str, url: str):
     if (url in track_urls_reported):
         return False
@@ -412,9 +372,6 @@ YOUTUBE_SEARCH_URL = "https://www.youtube.com/results?search_query="
 COMMON_JOKE_DELIMITERS = ",."
 NO_TRACK = "!@#$%^&*()"
 
-def remove_last_mixname(name):
-    return name[0:name.rindex("(")]
-
 def parseTitle(title: str, divider: str):
     pairs: list[list[str]] = []
 
@@ -426,18 +383,23 @@ def parseTitle(title: str, divider: str):
             before = title[0:i]
             after = title[j-1:]
             foundDivider = True
-            beforeStrip = before.strip()
-            afterStrip = after.strip()
+            before = before.strip()
+            after = after.strip()
 
-            pairs.append([beforeStrip, afterStrip])
-            if (beforeStrip.endswith(")") and "(" in beforeStrip):
-                pairs.extend(parseTitle(
-                        remove_last_mixname(before) + divider + after, divider))
-            if (afterStrip.endswith(")") and "(" in afterStrip):
-                pairs.extend(parseTitle(
-                        before + divider + remove_last_mixname(afterStrip), divider))
+            pairs.append([before, after])
+
+            if (before.endswith(")") and "(" in before):
+                before_no_mixname = before[0:before.rindex("(")]
+                pairs.extend(parseTitle(before_no_mixname + divider + after, divider))
+
+            if (after.endswith(")") and "(" in after):
+                after_no_mixname = after[0:after.rindex("(")]
+                pairs.extend(parseTitle(before + divider + after_no_mixname, divider))
+
     if not foundDivider:
         pairs.append([NO_TRACK, title])
+
+    print(f'PAIRS: {pairs}')
     return pairs
 
 
@@ -538,7 +500,6 @@ def parse_rip(submissionText: str):
         pass
     else:
         print("Unable to find track. Searching for game album:")
-        album_results = []
         games_to_search = set()
         for pair in pairs:
             games_to_search.add(pair[1])
@@ -549,7 +510,37 @@ def parse_rip(submissionText: str):
         def _search_for_game_in_thread(game_name: str, should_print: bool, show_all: bool, should_search_vgmrips: bool, results_list: list, index: int):
             results = chain.from_iterable(search_sites(game_name, Zophar, KHInsider, VGMRips and should_search_vgmrips, HCS64, should_print))
             if(results):
-                print_results(results, show_all, game_name)
+                exact_matches = []
+                other_results = []
+                for result in results:
+                    if result.title == game_name:
+                        exact_matches.append(result)
+                    else:
+                        other_results.append(result)
+
+                print(f'EXACT: {exact_matches}')
+                print(f'OTHER: {other_results}')
+
+                if len(exact_matches):
+                    plural = ""
+                    if len(exact_matches) > 1: plural = "es"
+                    print(f"\nExact title match{plural} for {game_name} found:")
+                    for result in exact_matches:
+                        print(f"  {result.url}")
+                else:
+                    print(f"\nNo exact title match found for \"{game_name}\".")
+
+                if len(other_results):
+                    sorted_other_results = list(reversed(sorted(other_results, key=lambda result: SequenceMatcher(None, result.title, game_name).ratio())))
+                    print("\nOther search results were:")
+                    for result in sorted_other_results:
+                        print("  ", result)
+                else:
+                    print("No other results to display.")
+                    
+                if not exact_matches and not other_results:
+                    print(NO_RESULTS_MSG)
+
             else:
                 print(NO_RESULTS_MSG)
             results_list[index] = list(results)
@@ -561,9 +552,6 @@ def parse_rip(submissionText: str):
 
         for t in threads:
             t.join()
-
-        for result_list in thread_results_list:
-            album_results.extend(result_list)
 
     my_url = YOUTUBE_SEARCH_URL + quote_plus(title)
     print(f"Game search results: {my_url}")
