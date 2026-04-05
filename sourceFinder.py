@@ -5,10 +5,10 @@ from bs4 import BeautifulSoup, Tag
 from urllib.parse import quote, quote_plus, urljoin
 from urllib3.util.retry import Retry
 from difflib import SequenceMatcher
-from typing import Callable
+from typing import Callable, Any
 from collections.abc import Iterable
 from itertools import chain
-from enum import Enum
+from enum import Enum, auto
 from requests.adapters import HTTPAdapter
 
 from hq_strings import *
@@ -36,22 +36,16 @@ adapter = HTTPAdapter(max_retries=retry_strategy, pool_connections=50, pool_maxs
 my_session.mount("http://", adapter)
 my_session.mount("https://", adapter)
 
-class ResultType(Enum):
-    ALBUM = 1
-    TRACK = 2
+class ScanResultType(Enum):
+    ALBUM = auto() 
+    TRACK = auto() 
 
-class Result():
-    #has three public variables initialized with its constructor: title, url, and source
-    def __init__(self, resultType: ResultType, title: str, url: str, source: str, hcs_dict=None):
-        self.resultType = resultType
-        self.title = title
-        self.url = url
-        self.source = source
-        self.hcs_dict = hcs_dict
-
-    def __str__(self):
-        return(f"{self.title} ({self.url})")
-    def get_dict(self): return self.hcs_dict
+class ScanResult(NamedTuple):
+    type: ScanResultType 
+    title: str
+    url: str
+    source: str
+    hcs_dict: None | Any #bleh 
 
 def get_json(link: str) -> Iterable:
     # Load the json file at https://vgm.hcs64.com/index-clean.json
@@ -80,7 +74,8 @@ def get_index():
     return json
 
 
-hcs_index = []
+#NOTE: (Ahmayk) list of json, probably
+hcs_index: list[Any] = []
 
 broken_sites: set[str] = set()
 track_urls_reported: set[str] = set()
@@ -96,14 +91,14 @@ headers = {'User-Agent': AGENT}
 vgmRipsPackUrl = "https://vgmrips.net/packs/pack"
 
 
-def parse_link_tag(link_tag, pre_href: str, target_name: str, filter: Callable, resultType: ResultType):
+def parse_link_tag(link_tag, pre_href: str, target_name: str, filter: Callable, resultType: ScanResultType):
     href = link_tag['href']
     assert isinstance(href, str)
     if filter(href):
         full_url = urljoin(pre_href, href)
         title = link_tag.get_text(strip=True)
         if (title):
-            return Result(resultType, title, full_url, target_name)
+            return ScanResult(resultType, title, full_url, target_name, None)
     return None
 
 
@@ -115,7 +110,7 @@ remix_keywords: set['str'] = {"restored",
                                     "soundfont remix",
                                     "soundtrack remake"}
 
-def validate_album(album: Result):
+def validate_album(album: ScanResult):
     title: str = album.title.lower()
     for keyword in remix_keywords:
         if keyword in title:
@@ -125,7 +120,7 @@ def validate_album(album: Result):
 HCS64_SET_URL = "https://vgm.hcs64.com/?set="
 
 # Generic link-collecting function
-def scan_page(base_url: str, target_name: str, pre_href: str, filter: Callable, should_print: bool, resultType: ResultType):
+def scan_page(base_url: str, target_name: str, pre_href: str, filter: Callable, should_print: bool, resultType: ScanResultType):
 
     # If this site has thrown errors before, don't even bother searching again.
     if target_name in broken_sites:
@@ -146,7 +141,7 @@ def scan_page(base_url: str, target_name: str, pre_href: str, filter: Callable, 
             title = title_tag.string
             assert isinstance(title, str)
             clean_title = title[0:title.index(" vgm music • VGMRips")]
-            page_results = [Result(resultType, clean_title, response.url,target_name)]
+            page_results = [ScanResult(resultType, clean_title, response.url, target_name, None)]
         else:
             all_link_tags = soup.find_all('a', href=True)
             for link_tag in all_link_tags:
@@ -180,7 +175,7 @@ def search_db(game: str,
                             should_print: bool):
     search_url = base_url + search_mod + quote_plus(game)
     return scan_page(search_url, site_name + " search page",
-                                     pre_href, filter, should_print, ResultType.ALBUM)
+                                     pre_href, filter, should_print, ScanResultType.ALBUM)
 
 def search_db_in_thread(game: str,
                             base_url: str,
@@ -229,7 +224,7 @@ def search_HCS(game_name: str, should_print: bool, results: list):
             hcs_game_name = hcs_game_name.strip()
             url = HCS64_SET_URL + str(hcs_game["id"])
 
-            my_results.append(Result(ResultType.ALBUM, hcs_game_name, url, "HCS64", hcs_game))
+            my_results.append(ScanResult(ScanResultType.ALBUM, hcs_game_name, url, "HCS64", hcs_game))
             num += 1
     results.extend(my_results)
 
@@ -316,7 +311,7 @@ def _find_track_for_album_thread(album, track, similarity, game, should_print, t
             album.title,
             lambda x: True,
             should_print,
-            ResultType.TRACK)
+            ScanResultType.TRACK)
 
     if (track_results is None): return
 
@@ -344,8 +339,7 @@ def _find_track_for_album_thread(album, track, similarity, game, should_print, t
                 print(f"\nTrack found: {cool}")
 
 def hcs_album_track_finder(album, track, similarity, game, should_print):
-    hcs_album_dict = album.get_dict()
-    new_url = "https://" + quote(hcs_album_dict["sd"]) + ".joshw.info/.filelists/" + hcs_album_dict["nm"] + ".json"
+    new_url = "https://" + quote(album.hcs_dict["sd"]) + ".joshw.info/.filelists/" + album.hcs_dict["nm"] + ".json"
     json = get_json(new_url)
     try:
         assert isinstance(json, dict)
@@ -355,17 +349,9 @@ def hcs_album_track_finder(album, track, similarity, game, should_print):
     results = []
     if (not json is None):
         for file in json["files"]:
-            results.append(Result(ResultType.TRACK, file["name"], NO_URL_MSG, "HCS64"))
+            results.append(ScanResult(ScanResultType.TRACK, file["name"], NO_URL_MSG, "HCS64", None))
             print(file["name"])
     return results
-
-
-#TODO: (Ahamyk) wow [redacted] was coping really hard here lol 
-def clean_title(title: str):
-    #if title ends with "Super Smash Bros. UItimate", replace that ending with "Super Smash Bros. Ultimate"
-    if title.endswith("Super Smash Bros. UItimate"):
-        title = title.replace("Super Smash Bros. UItimate", "Super Smash Bros. Ultimate")
-    return title
 
 
 YOUTUBE_SEARCH_URL = "https://www.youtube.com/results?search_query="
