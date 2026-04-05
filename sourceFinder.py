@@ -400,33 +400,6 @@ def hcs_album_track_finder(album, track, similarity, game, should_print):
     return results
 
 
-def find_track(track: str, results: Iterable, similarity: float, depth: int, should_print: bool, game: str):
-    tracks_found = []
-
-    sorted_all_results = list(reversed(sorted(results, key=lambda album: SequenceMatcher(None, album.title, game).ratio())))
-    threads = []
-    thread_results_list = [[] for _ in range(len(sorted_all_results[:depth]))]
-
-    for i, album in enumerate(sorted_all_results[:depth]):
-        thread = None
-        thread = threading.Thread(target=_find_track_for_album_thread, args=(album, track, similarity, game, should_print, thread_results_list[i]))
-        threads.append(thread)
-        thread.start()
-
-    for thread in threads:
-        thread.join()
-
-    for tr in thread_results_list:
-        for result in tr:
-            if result not in tracks_found:
-                tracks_found.append(result)
-
-    if (len(tracks_found) == 0 and should_print):
-        print(f"\nUnable to find Track '{track}' – it may not be on any of these albums, or it may have a different title.")
-
-    return tracks_found
-
-
 #TODO: (Ahamyk) wow [redacted] was coping really hard here lol 
 def clean_title(title: str):
     #if title ends with "Super Smash Bros. UItimate", replace that ending with "Super Smash Bros. Ultimate"
@@ -485,13 +458,34 @@ def find_song(title: str, divider: str, similarity: float):
             my_results = list(chain.from_iterable(search_sites(game, Zophar, KHInsider, VGMRips, HCS64, False)))
             cached_album_results[game] = my_results
 
-        track_record = None
+        track_record = []
         if (game, track) in cached_track_results:
             track_record = cached_track_results[(game, track)]
         else:
-            track_record = find_track(
-                    track, my_results, sensitivity, 10, False, game)
+            sorted_all_results = list(reversed(sorted(my_results, key=lambda album: SequenceMatcher(None, album.title, game).ratio())))
+            threads = []
+            depth = 10
+            thread_results_list = [[] for _ in range(len(sorted_all_results[:depth]))]
+
+            for i, album in enumerate(sorted_all_results[:depth]):
+                thread = None
+                thread = threading.Thread(target=_find_track_for_album_thread, args=(album, track, similarity, game, False, thread_results_list[i]))
+                threads.append(thread)
+                thread.start()
+
+            for thread in threads:
+                thread.join()
+
+            for tr in thread_results_list:
+                for result in tr:
+                    if result not in track_record:
+                        track_record.append(result)
+
+            if (len(track_record) == 0 and False):
+                print(f"\nUnable to find Track '{track}' – it may not be on any of these albums, or it may have a different title.")
+
             cached_track_results[(game, track)] = track_record
+
         track_results[index] = track_record
 
     for pair in pairs:
