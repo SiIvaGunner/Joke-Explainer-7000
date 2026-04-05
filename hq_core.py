@@ -849,6 +849,7 @@ class CommandType(Enum):
     QUEUE = auto()
     STATS = auto()
     ANALYZE = auto()
+    SOURCE = auto()
     SECRET = auto()
     MANAGEMENT = auto()
 
@@ -861,6 +862,7 @@ COMMAND_TYPE_DATA[CommandType.SUBS] = CommandTypeData('get info on rips in submi
 COMMAND_TYPE_DATA[CommandType.QUEUE] = CommandTypeData('get info on rips in approved queues')
 COMMAND_TYPE_DATA[CommandType.STATS] = CommandTypeData('get miscellaneous info on all rips')
 COMMAND_TYPE_DATA[CommandType.ANALYZE] = CommandTypeData('analyze rip metadata or audio for common issues')
+COMMAND_TYPE_DATA[CommandType.SOURCE] = CommandTypeData('search for rip sources from online VGM databases')
 COMMAND_TYPE_DATA[CommandType.MANAGEMENT] = CommandTypeData('manage or learn about the bot')
 
 class CommandContext(NamedTuple):

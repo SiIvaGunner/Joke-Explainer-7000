@@ -6,6 +6,7 @@ from datetime import datetime, timezone, timedelta
 from bot_secrets import YOUTUBE_API_KEY, YOUTUBE_CHANNEL_NAME
 from simpleQoC.qoc import performQoC, ffmpegExists, getFileMetadataMutagen, getFileMetadataFfprobe
 from simpleQoC.metadata import countDupe, isDupe
+from sourceFinder import search_rip_sources 
 
 from hq_core import *
 from hq_config import *
@@ -1672,6 +1673,32 @@ async def peek_url(args: list[str], command_context: CommandContext):
             await send(f'Error reading URL: {msg}', command_context.channel)
         else:
             await send(f'**File metadata**:\n{msg}', command_context.channel)
+
+
+@command(
+    command_type=CommandType.SOURCE,
+    format='<message link | text>',
+    brief='Search for sources in rip message',
+    public=True
+)
+async def source(args: list[str], command_context: CommandContext):
+
+    if not len(args):
+        return await send("Error: Please provide a link to message.", command_context.channel)
+
+    async with command_context.channel.typing():
+
+        text = " ".join(args)
+        message_link = extract_discord_link(args[0])
+        if len(message_link):
+            server, channel, message, status = await parse_message_link(message_link)
+            if message is None:
+                return await send(status, command_context.channel)
+            text = message.content
+
+        text = search_rip_sources(text)
+        await send_embed(text, command_context.channel, EmbedDesc())
+
 
 @command(
     command_type=CommandType.MANAGEMENT,

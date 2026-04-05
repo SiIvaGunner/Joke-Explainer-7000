@@ -87,7 +87,6 @@ def get_index():
 hcs_index: list[Any] = []
 
 track_urls_reported: set[str] = set()
-album_urls_reported: set[str] = set()
 cached_album_results = dict()
 cached_track_results = dict()
 
@@ -280,7 +279,7 @@ def search_album_for_track(scan_result_album: ScanResult, input_track_name: str,
                 else:
                     full_url = urljoin(scan_result_album.url, track_url)
 
-                cool = f"{track_title} ({full_url}) exists at the album {scan_result_album.title} ({scan_result_album.url})"
+                cool = f"**[{track_title}]({full_url})** - [{scan_result_album.title}]({scan_result_album.url})"
                 output_track_strings.append(cool)
                 track_urls_reported.add(track_url)
                 # print(f"-------Track found: {cool}")
@@ -382,11 +381,9 @@ def find_song(title: str, divider: str):
 
 
 
-def parse_rip(submissionText: str):
+def search_rip_sources(submissionText: str):
     global hcs_index
-    broken_sites = set()
     track_urls_reported = set()
-    album_urls_reported = set()
     cached_album_results = dict()
     cached_track_results = dict()
     if (len(hcs_index) == 0):
@@ -400,13 +397,30 @@ def parse_rip(submissionText: str):
 
     print("Searching...")
 
+    result = ""
+
     find_song_result = find_song(title, ' - ')
+    if len(find_song_result.track_strings):
+        result += "- " + "\n- ".join(find_song_result.track_strings) 
+    else:
+        result += "\nNo source tracks found."
+
+    if len(find_song_result.album_matches_exact):
+        for scan_result in find_song_result.album_matches_exact: 
+            result += f"\n- Exact Album Match: **[{scan_result.title}](<{scan_result.url}>)**"
+    elif len(find_song_result.scan_result_dict_albums):
+        result += "\nNo exact album matches found. Other albums:"
+        for scan_result in find_song_result.album_matches_exact: 
+            result += f"\n- [{scan_result.title}](<{scan_result.url}>)"
+    else:
+        result += "\nNo albums found."
 
     YOUTUBE_SEARCH_URL = "https://www.youtube.com/results?search_query="
     COMMON_JOKE_DELIMITERS = ",."
 
-    my_url = YOUTUBE_SEARCH_URL + quote_plus(title)
-    print(f"Game search results: {my_url}")
+    youtube_title_url = YOUTUBE_SEARCH_URL + quote_plus(title)
+    print(f"Game search results: {youtube_title_url}")
+    result += f"\n- Title Youtube Search: [{title}]({youtube_title_url})"
 
     joke = get_rip_joke(submissionText)
     print(f'\nJOKE: {joke}')
@@ -414,13 +428,14 @@ def parse_rip(submissionText: str):
         jokes = re.split(f'[{COMMON_JOKE_DELIMITERS}]', joke)
 
         for(joke) in jokes:
-            my_url = YOUTUBE_SEARCH_URL + quote_plus(joke)
-            print(f"Joke search results on YouTube: {my_url}")
+            youtube_title_url = YOUTUBE_SEARCH_URL + quote_plus(joke)
+            result += f"\nJoke Youtube Search: [{joke}](<{youtube_title_url}>)"
 
         dividers = [' - ', ' from ']
         for divider in dividers:
             for joke in jokes:
                 find_song_result = find_song(joke, divider)[0]
+                #TODO: (Ahmayk) display this somehow in a way that makes sense?
 
     else:
         print("Joke not found.")
