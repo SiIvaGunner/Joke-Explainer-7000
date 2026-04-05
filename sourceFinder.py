@@ -619,7 +619,6 @@ def parse_rip(submissionText: str):
         hcs_index = get_index()
 
     chunks = submissionText.split('```')
-    platforms = []
     if len(chunks) > 1:
         ripData = chunks[1]
     else:
