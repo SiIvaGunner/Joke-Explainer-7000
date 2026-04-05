@@ -13,15 +13,7 @@ from requests.adapters import HTTPAdapter
 
 from hq_strings import *
 
-Zophar = True
-KHInsider = True
-VGMRips = True
-HCS64 = True
-
 DEFAULT_SIMILARITY = 0.72
-
-NO_URL_MSG = "[No URL]"
-
 
 my_session = requests.Session()
 retry_strategy = Retry(
@@ -36,16 +28,33 @@ adapter = HTTPAdapter(max_retries=retry_strategy, pool_connections=50, pool_maxs
 my_session.mount("http://", adapter)
 my_session.mount("https://", adapter)
 
+class VGMSite(Enum):
+    ZOPHAR = auto()
+    KHINSIDER = auto()
+    VGMRIPS = auto()
+    HSC64 = auto()
+
+class VGMSiteInfo(NamedTuple):
+    name: str
+    pre_href: str
+    search_url_pathname: str
+
+VGM_SITE_INFOS: dict[VGMSite, VGMSiteInfo] = {} 
+VGM_SITE_INFOS[VGMSite.ZOPHAR] = VGMSiteInfo("Zophar's Domain", 'https://www.zophar.net', '/music/search?search=')
+VGM_SITE_INFOS[VGMSite.KHINSIDER] = VGMSiteInfo("Kingdom Hearts Insider", 'https://downloads.khinsider.com', '/search?search=')
+VGM_SITE_INFOS[VGMSite.VGMRIPS] = VGMSiteInfo("VGMRips", 'https://vgmrips.net', '/packs/search?q=')
+#NOTE: (Ahmayk) no info needed for HSC64 as we access everything from a json we predownload
+
 class ScanResultType(Enum):
     ALBUM = auto() 
     TRACK = auto() 
 
 class ScanResult(NamedTuple):
+    vgm_site: VGMSite
     type: ScanResultType 
     title: str
     url: str
-    source: str
-    hcs_dict: None | Any #bleh 
+    hcs_dict: None | Any #NOTE: (Ahmayk) JSON
 
 def get_json(link: str) -> Iterable:
     # Load the json file at https://vgm.hcs64.com/index-clean.json
@@ -77,7 +86,6 @@ def get_index():
 #NOTE: (Ahmayk) list of json, probably
 hcs_index: list[Any] = []
 
-broken_sites: set[str] = set()
 track_urls_reported: set[str] = set()
 album_urls_reported: set[str] = set()
 cached_album_results = dict()
@@ -85,63 +93,34 @@ cached_track_results = dict()
 
 NO_RESULTS_MSG = "No results to display."
 
-AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-headers = {'User-Agent': AGENT}
+def scan_vgm_site(url: str, vgm_site: VGMSite, scan_result_type: ScanResultType, output_scan_results: List[ScanResult]):
 
-vgmRipsPackUrl = "https://vgmrips.net/packs/pack"
+    # print(f"SCANNING SITE: {url}")
 
+    assert vgm_site in VGM_SITE_INFOS
+    vgm_site_info = VGM_SITE_INFOS[vgm_site]
 
-def parse_link_tag(link_tag, pre_href: str, target_name: str, filter: Callable, resultType: ScanResultType):
-    href = link_tag['href']
-    assert isinstance(href, str)
-    if filter(href):
-        full_url = urljoin(pre_href, href)
-        title = link_tag.get_text(strip=True)
-        if (title):
-            return ScanResult(resultType, title, full_url, target_name, None)
-    return None
-
-
-# I HATE REMIX ALBUMS ON KHINSIDER!
-# I HATE REMIX ALBUMS ON KHINSIDER!
-remix_keywords: set['str'] = {"restored",
-                                    "fan remaster", "recreat",
-                                    "fanmade", "fan-made",
-                                    "soundfont remix",
-                                    "soundtrack remake"}
-
-def validate_album(album: ScanResult):
-    title: str = album.title.lower()
-    for keyword in remix_keywords:
-        if keyword in title:
-            return False
-    return True
-
-HCS64_SET_URL = "https://vgm.hcs64.com/?set="
-
-# Generic link-collecting function
-def scan_page(base_url: str, target_name: str, pre_href: str, filter: Callable, should_print: bool, resultType: ScanResultType):
-
-    # If this site has thrown errors before, don't even bother searching again.
-    if target_name in broken_sites:
-        return []
-
-    page_results = []
+    response = None
+    soup = None
     try:
-        response: requests.Response = my_session.get(base_url, headers=headers, timeout=10)
-        response.raise_for_status() # Raise an exception for HTTP errors (4xx or 5xx)
-        soup: BeautifulSoup = BeautifulSoup(response.text, 'html.parser')
+        agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        headers = {'User-Agent': agent}
+        response = my_session.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, 'html.parser')
+    except (requests.exceptions.RequestException, AssertionError) as e:
+        print(f"Error fetching data from {vgm_site_info.name}: {e}")
 
-        # get host name of website
-
-        if (response.url.startswith(vgmRipsPackUrl) and response.url != base_url):
+    if response and soup:
+        aborted = False
+        if (response.url.startswith("https://vgmrips.net/packs/pack") and response.url != url):
             # get the string contained in the <title> tag in the page
             title_tag = soup.find('title')
             assert (title_tag and isinstance(title_tag, Tag))
             title = title_tag.string
             assert isinstance(title, str)
             clean_title = title[0:title.index(" vgm music • VGMRips")]
-            page_results = [ScanResult(resultType, clean_title, response.url, target_name, None)]
+            output_scan_results.append(ScanResult(vgm_site, scan_result_type, clean_title, response.url, None))
         else:
             all_link_tags = soup.find_all('a', href=True)
             for link_tag in all_link_tags:
@@ -150,208 +129,162 @@ def scan_page(base_url: str, target_name: str, pre_href: str, filter: Callable, 
                 assert isinstance(href, str)
                 parent_tag = link_tag.parent
                 assert isinstance(parent_tag, Tag)
-                if "/game-soundtracks/arrangements" in href and parent_tag.name == "b": return []
-                if (parent_tag.has_attr('class') and "albumIconLarge" in parent_tag['class']): continue
-                result = parse_link_tag(link_tag, pre_href, target_name, filter, resultType)
-                if (result and validate_album(result)): page_results.append(result)
 
-        if target_name and target_name != "" and should_print:
-            print(f"Successfully fetched and parsed {target_name}. [{len(page_results)} result(s)]")
-            pass
-    except (requests.exceptions.RequestException, AssertionError) as e:
-        print(f"Error fetching data from {target_name}: {e}")
-        broken_sites.add(target_name)
+                is_valid = True
 
-    return page_results
+                if "/game-soundtracks/arrangements" in href and parent_tag.name == "b":
+                    aborted = True
+                    break
+
+                title = link_tag.get_text(strip=True)
+                found_url = urljoin(vgm_site_info.pre_href, href)
+                if not len(title): 
+                    is_valid = False
+
+                if scan_result_type == ScanResultType.ALBUM:
+                    if (parent_tag.has_attr('class') and "albumIconLarge" in parent_tag['class']):
+                        is_valid = False
+
+                    title_lower = title.lower()
+                    remix_keywords = ["restored", "fan remaster", "recreat", "fanmade", "fan-made", "soundfont remix", "soundtrack remake"]
+                    for keyword in remix_keywords:
+                        if keyword in title_lower:
+                            is_valid = False
+                            break
+
+                    match vgm_site:
+                        case VGMSite.ZOPHAR:
+                            if (
+                                href.count('/') < 3
+                                or "patreon" in href 
+                                or "music/letter" in href
+                                or "search.html" in href
+                            ):
+                                is_valid = False
+                        case VGMSite.KHINSIDER:
+                            if not "/album/" in href:
+                                is_valid = False
+                        case VGMSite.VGMRIPS:
+                            if not "/pack/" in href:
+                                is_valid = False
+                        case _:
+                            assert "Unimplemented VGMSite Enum"
+
+                if scan_result_type == ScanResultType.TRACK:
+                    if vgm_site == VGMSite.VGMRIPS and "DUMMY#" in found_url:
+                        # I dunno why this shows up in the url on VGMrips.
+                        found_url = found_url[5:]
+
+                    if (url in track_urls_reported):
+                        is_valid = False
+                    if ("/company/" in url or "/developer/" in url):
+                        is_valid = False
+                    if ("letter/)" in url):
+                        is_valid = False
+                    if ("Download all files as" in title or "Download original music files" in title):
+                        is_valid = False
+
+                if is_valid:
+                    result = ScanResult(vgm_site, scan_result_type, title, found_url, None)
+                    output_scan_results.append(result)
+
+        if not aborted:
+            print(f"Successfully fetched and parsed {vgm_site_info.name}. [{len(output_scan_results)} result(s)] {url}")
 
 
-# Searches specifically for albums
-def search_db(game: str,
-                            base_url: str,
-                            search_mod: str,
-                            site_name: str,
-                            pre_href: str,
-                            filter: Callable,
-                            should_print: bool):
-    search_url = base_url + search_mod + quote_plus(game)
-    return scan_page(search_url, site_name + " search page",
-                                     pre_href, filter, should_print, ScanResultType.ALBUM)
+def search_sites_for_albums(game_name: str) -> List[ScanResult]:
+    print(f"SEARCHING SITES FOR {game_name}")
+    threads: List[threading.Thread] = []
+    result_lists: List[List[ScanResult]] = []
+    game_name = quote(game_name) 
+    for i, vgm_site in enumerate(VGMSite):
+        result_lists.insert(i, [])
 
-def search_db_in_thread(game: str,
-                            base_url: str,
-                            search_mod: str,
-                            site_name: str,
-                            pre_href: str,
-                            filter: Callable,
-                            should_print: bool,
-                            results: list,
-                            index: int):
-    res = search_db(game,
-                            base_url,
-                            search_mod,
-                            site_name,
-                            pre_href,
-                            filter,
-                            should_print)
-    results[index] = res
+        if vgm_site == VGMSite.HSC64:
+            ##NOTE: No API call needed, reference downloaded json lookup
+            if len(game_name) > 1:
+                MAX_NUM = 30
+                num = 0
+                for hcs_game in hcs_index:
+                    #assert isinstance(hcs_game, tuple[str, str])
+                    if (num > MAX_NUM):
+                        #NOTE: (Ahmayk) why was this truncated?
+                        pass
+                        # return
+                    if "nm" in hcs_game:
+                        hcs_game_name_dirty = hcs_game["nm"]
+                    else: 
+                        continue
 
-
-def search_HCS(game_name: str, should_print: bool, results: list):
-    if len(game_name) < 2:
-        return
-    my_results = []
-    MAX_NUM = 30
-    num = 0
-    for hcs_game in hcs_index:
-        #assert isinstance(hcs_game, tuple[str, str])
-        if (num > MAX_NUM):
-            return
-        if "nm" in hcs_game:
-            hcs_game_name_dirty = hcs_game["nm"]
-        else: continue
-
-        hcs_game_name = ""
-        if "/" in hcs_game_name_dirty:
-            hcs_game_name = hcs_game_name_dirty[hcs_game_name_dirty.index("/")+1:]
+                    hcs_game_name = ""
+                    if "/" in hcs_game_name_dirty:
+                        hcs_game_name = hcs_game_name_dirty[hcs_game_name_dirty.index("/")+1:]
+                    else:
+                        hcs_game_name = hcs_game_name_dirty
+                    if (game_name.lower()) in (hcs_game_name.lower()):
+                        # if there are are "[" or "(" in hcs_game_name, remove everything after them
+                        if "[" in hcs_game_name:
+                            hcs_game_name = hcs_game_name[0:hcs_game_name.index("[")]
+                        if "(" in hcs_game_name:
+                            hcs_game_name = hcs_game_name[0:hcs_game_name.index("(")]
+                        hcs_game_name = hcs_game_name.strip()
+                        url = "https://vgm.hcs64.com/?set=" + str(hcs_game["id"])
+                        result_lists[i].append(ScanResult(vgm_site, ScanResultType.ALBUM, hcs_game_name, url, hcs_game))
+                        num += 1
         else:
-            hcs_game_name = hcs_game_name_dirty
-        if (game_name.lower()) in (hcs_game_name.lower()):
-            # if there are are "[" or "(" in hcs_game_name, remove everything after them
-            if "[" in hcs_game_name:
-                hcs_game_name = hcs_game_name[0:hcs_game_name.index("[")]
-            if "(" in hcs_game_name:
-                hcs_game_name = hcs_game_name[0:hcs_game_name.index("(")]
-            hcs_game_name = hcs_game_name.strip()
-            url = HCS64_SET_URL + str(hcs_game["id"])
+            assert vgm_site in VGM_SITE_INFOS
+            vgm_site_info = VGM_SITE_INFOS[vgm_site]
+            search_url = vgm_site_info.pre_href + vgm_site_info.search_url_pathname + game_name
+            thread = threading.Thread(target=scan_vgm_site, args=(search_url, vgm_site, ScanResultType.ALBUM, result_lists[i]))
+            thread.start()
+            threads.append(thread)
 
-            my_results.append(ScanResult(ScanResultType.ALBUM, hcs_game_name, url, "HCS64", hcs_game))
-            num += 1
-    results.extend(my_results)
-
-
-# The way these requests are called is a little bit janky but it works
-# and I don't wanna mess it up
-
-def search_sites(game: str, doZophar: bool, doKHInsider: bool,
-                                 doVGMRips: bool, doHCS64: bool, should_print: bool):
-    list_of_results = [[] for _ in range(4)]
-
-
-    threads = []
-    if doZophar:
-        zopharThread = threading.Thread(target=search_db_in_thread,
-                                args=(game,
-                                "https://www.zophar.net/music",
-                                "/search?search=",
-                                "Zophar's Domain",
-                                "https://www.zophar.net",
-                                lambda href: ((href.count('/') >= 3)
-                                                            and not ("patreon") in href
-                                                            and not ("music/letter") in href
-                                                            and not 'search.html' in href),
-                                should_print,
-                                list_of_results, 0))
-        threads.append(zopharThread)
-        zopharThread.start()
-    if doKHInsider:
-        khThread = threading.Thread(target=search_db_in_thread,
-                            args=(game,
-                            "https://downloads.khinsider.com",
-                            "/search?search=",
-                            "Kingdom Hearts Insider",
-                            "https://downloads.khinsider.com",
-                            lambda href: ("/album/" in href),
-                            should_print,
-                                list_of_results, 1))
-        threads.append(khThread)
-        khThread.start()
-    if doVGMRips:
-        vgmripsThread = threading.Thread(target=search_db_in_thread,
-                            args=(game,
-                            "https://vgmrips.net/packs",
-                            "/search?q=",
-                            "VGMRips",
-                            "https://vgmrips.net",
-                            lambda href: ("/pack/" in href),
-                            should_print,
-                                list_of_results, 2))
-        threads.append(vgmripsThread)
-        vgmripsThread.start()
-    if doHCS64:
-        hcs64Thread = threading.Thread(target=search_HCS, args=(game, should_print,list_of_results[3]))
-        threads.append(hcs64Thread)
-        hcs64Thread.start()
     for t in threads:
         t.join()
 
-    return list_of_results
+    result = []
+    for l in result_lists:
+        result.extend(l)
+    return result
 
+def search_album_for_track(scan_result_album: ScanResult, input_track_name: str, output_track_strings: List[str]):
 
-def validate_track(title: str, url: str):
-    if (url in track_urls_reported):
-        return False
-    if ("/company/" in url or "/developer/" in url):
-        return False
-    if ("letter/)" in url):
-        return False
+    NO_URL_MSG = "[No URL]"
 
-    if ("Download all files as" in title or "Download original music files" in title):
-        return False
-    #rint(url)
-    return True
-
-def _find_track_for_album_thread(album, track, similarity, game, should_print, thread_results):
-    track_results = []
-    if "vgm.hcs" in album.url:
-        track_results = hcs_album_track_finder(album, track, similarity, game, should_print)
+    if scan_result_album.vgm_site == VGMSite.HSC64:
+        new_url = "https://" + quote(scan_result_album.hcs_dict["sd"]) + ".joshw.info/.filelists/" + scan_result_album.hcs_dict["nm"] + ".json"
+        json = get_json(new_url)
+        try:
+            assert isinstance(json, dict)
+        except AssertionError as e:
+            print(e)
+        results = []
+        if (not json is None):
+            for file in json["files"]:
+                results.append(ScanResult(VGMSite.HSC64, ScanResultType.TRACK, file["name"], NO_URL_MSG, None))
+                # print(file["name"])
     else:
-        track_results = scan_page(
-            album.url,
-            album.source,
-            album.title,
-            lambda x: True,
-            should_print,
-            ScanResultType.TRACK)
+        scan_result_tracks: List[ScanResult] = []
+        scan_vgm_site(scan_result_album.url, scan_result_album.vgm_site, ScanResultType.TRACK, scan_result_tracks)
 
-    if (track_results is None): return
+        for scan_result in scan_result_tracks:
+            track_title = scan_result.title
+            track_url = scan_result.url
+            closeness_title = SequenceMatcher(None, track_title, input_track_name).ratio()
 
-    for myTrack in track_results:
-        track_title = myTrack.title
-        track_url = myTrack.url
-        if ("DUMMY#" in track_url):
-            # I dunno why this shows up in the url on VGMrips.
-            track_url = track_url[5:]
-        if (not validate_track(track_title, track_url)): continue
-        closeness_title = SequenceMatcher(None, track_title, track).ratio()
-        if (closeness_title >= similarity or track.strip() in track_title
-                or quote(track.strip()) in track_url):
+            if (closeness_title >= DEFAULT_SIMILARITY or input_track_name.strip() in track_title
+                    or quote(input_track_name.strip()) in track_url):
 
-            full_url = ""
-            if track_url == NO_URL_MSG:
-                full_url = track_url
-            else:
-                full_url = urljoin(album.url, track_url)
+                full_url = ""
+                if track_url == NO_URL_MSG:
+                    full_url = track_url
+                else:
+                    full_url = urljoin(scan_result_album.url, track_url)
 
-            cool = f"{track_title} ({full_url}) exists at the album {album.title} ({album.url})"
-            thread_results.append(cool)
-            track_urls_reported.add(track_url)
-            if should_print:
-                print(f"\nTrack found: {cool}")
-
-def hcs_album_track_finder(album, track, similarity, game, should_print):
-    new_url = "https://" + quote(album.hcs_dict["sd"]) + ".joshw.info/.filelists/" + album.hcs_dict["nm"] + ".json"
-    json = get_json(new_url)
-    try:
-        assert isinstance(json, dict)
-    except AssertionError as e:
-        print(e)
-        return []
-    results = []
-    if (not json is None):
-        for file in json["files"]:
-            results.append(ScanResult(ScanResultType.TRACK, file["name"], NO_URL_MSG, "HCS64", None))
-            print(file["name"])
-    return results
+                cool = f"{track_title} ({full_url}) exists at the album {scan_result_album.title} ({scan_result_album.url})"
+                output_track_strings.append(cool)
+                track_urls_reported.add(track_url)
+                # print(f"\nTrack found: {cool}")
 
 
 YOUTUBE_SEARCH_URL = "https://www.youtube.com/results?search_query="
@@ -389,73 +322,74 @@ def parseTitle(title: str, divider: str):
     return pairs
 
 
-def find_song(title: str, divider: str, similarity: float):
+def search_for_game_and_track(game_name: str, track_name: str, output_track_results: list[str]):
+
+    print(f'SEARCHING FOR GAME {game_name} AND TRACK {track_name}')
+
+    scan_results = None
+    if game_name in cached_album_results:
+        scan_results = cached_album_results[game_name]
+    else:
+        scan_results = search_sites_for_albums(game_name)
+        cached_album_results[game_name] = scan_results
+
+    track_list = []
+    if (game_name, track_name) in cached_track_results:
+        track_list = cached_track_results[(game_name, track_name)]
+    else:
+        sorted_all_results = list(reversed(sorted(scan_results, key=lambda album: SequenceMatcher(None, album.title, game_name).ratio())))
+        threads = []
+        depth = 10
+        thread_results_list: List[List[str]] = [] 
+
+        for i, scan_result in enumerate(sorted_all_results[:depth]):
+            thread_results_list.insert(i, [])
+            thread = None
+            thread = threading.Thread(target=search_album_for_track, args=(scan_result, track_name, thread_results_list[i]))
+            threads.append(thread)
+            thread.start()
+
+        for thread in threads:
+            thread.join()
+
+        for results_list in thread_results_list:
+            for result in results_list:
+                if result not in track_list:
+                    track_list.append(result)
+
+        if len(track_list) == 0:
+            print(f"Unable to find TRACK '{track_name}' for GAME '{game_name}' – it may not be on any of these albums, or it may have a different title.")
+
+        cached_track_results[(game_name, track_name)] = track_list
+
+    output_track_results.extend(track_list)
+
+
+def find_song(title: str, divider: str):
     pairs: list[list[str]] = parseTitle(title, divider)
-    track_results = []
     threads = []
-    bag = [list()] * (len(pairs) * 2)
-    index = 0
-
-    def search_for_game_and_track_in_thread(game: str, track: str, sensitivity: float, track_results: list, index: int):
-        # track_results[index] = search_for_game_and_track(game, track, sensitivity)
-
-        my_results = None
-        if game in cached_album_results:
-            my_results = cached_album_results[game]
-        else:
-            my_results = list(chain.from_iterable(search_sites(game, Zophar, KHInsider, VGMRips, HCS64, False)))
-            cached_album_results[game] = my_results
-
-        track_record = []
-        if (game, track) in cached_track_results:
-            track_record = cached_track_results[(game, track)]
-        else:
-            sorted_all_results = list(reversed(sorted(my_results, key=lambda album: SequenceMatcher(None, album.title, game).ratio())))
-            threads = []
-            depth = 10
-            thread_results_list = [[] for _ in range(len(sorted_all_results[:depth]))]
-
-            for i, album in enumerate(sorted_all_results[:depth]):
-                thread = None
-                thread = threading.Thread(target=_find_track_for_album_thread, args=(album, track, similarity, game, False, thread_results_list[i]))
-                threads.append(thread)
-                thread.start()
-
-            for thread in threads:
-                thread.join()
-
-            for tr in thread_results_list:
-                for result in tr:
-                    if result not in track_record:
-                        track_record.append(result)
-
-            if (len(track_record) == 0 and False):
-                print(f"\nUnable to find Track '{track}' – it may not be on any of these albums, or it may have a different title.")
-
-            cached_track_results[(game, track)] = track_record
-
-        track_results[index] = track_record
-
-    for pair in pairs:
+    track_string_lists: list[list[str]] = []
+    for i, pair in enumerate(pairs):
+        track_string_lists.insert(i, [])
         if(pair[0] == NO_TRACK or pair[1] == NO_TRACK):
             continue
-        secondThread = threading.Thread(target=search_for_game_and_track_in_thread, args=(pair[1], pair[0], similarity,bag,index,))
+        secondThread = threading.Thread(target=search_for_game_and_track, args=(pair[1], pair[0], track_string_lists[i]))
         threads.append(secondThread)
         secondThread.start()
-        index += 1
-        firstThread = threading.Thread(target=search_for_game_and_track_in_thread, args=(pair[0], pair[1], similarity,bag,index,))
+        firstThread = threading.Thread(target=search_for_game_and_track, args=(pair[0], pair[1], track_string_lists[i]))
         threads.append(firstThread)
         firstThread.start()
-        index += 1
 
     # Wait for all threads to finish
     for t in threads:
         t.join()
-    for thing in bag:
-        for result in thing:
-            if not result in track_results:
-                track_results.append(result)
-                print(result)
+
+    track_results = []
+    for track_string_list in track_string_lists:
+        for track_result in track_string_list:
+            if not track_result in track_results:
+                track_results.append(track_result)
+                print(f'---REFERENCE: {track_result}')
 
     return(track_results, pairs)
 
@@ -479,7 +413,7 @@ def parse_rip(submissionText: str):
 
     print("Searching...")
 
-    track_results, pairs = find_song(title, ' - ', DEFAULT_SIMILARITY)
+    track_results, pairs = find_song(title, ' - ')
     #For each hyphen in title, return pairs of all the text before and after it
     if (len(track_results) > 0):
         print("Done finding reference!")
@@ -494,7 +428,7 @@ def parse_rip(submissionText: str):
         thread_results_list = [[] for _ in range(len(games_to_search))]
 
         def _search_for_game_in_thread(game_name: str, should_print: bool, show_all: bool, should_search_vgmrips: bool, results_list: list, index: int):
-            results = chain.from_iterable(search_sites(game_name, Zophar, KHInsider, VGMRips and should_search_vgmrips, HCS64, should_print))
+            results = search_sites_for_albums(game_name)
             if(results):
                 exact_matches = []
                 other_results = []
@@ -503,9 +437,6 @@ def parse_rip(submissionText: str):
                         exact_matches.append(result)
                     else:
                         other_results.append(result)
-
-                print(f'EXACT: {exact_matches}')
-                print(f'OTHER: {other_results}')
 
                 if len(exact_matches):
                     plural = ""
@@ -516,13 +447,13 @@ def parse_rip(submissionText: str):
                 else:
                     print(f"\nNo exact title match found for \"{game_name}\".")
 
-                if len(other_results):
-                    sorted_other_results = list(reversed(sorted(other_results, key=lambda result: SequenceMatcher(None, result.title, game_name).ratio())))
-                    print("\nOther search results were:")
-                    for result in sorted_other_results:
-                        print("  ", result)
-                else:
-                    print("No other results to display.")
+                # if len(other_results):
+                    # sorted_other_results = list(reversed(sorted(other_results, key=lambda result: SequenceMatcher(None, result.title, game_name).ratio())))
+                    # print("\nOther search results were:")
+                    # for result in sorted_other_results:
+                    #     print("  ", result)
+                # else:
+                    # print("No other results to display.")
                     
                 if not exact_matches and not other_results:
                     print(NO_RESULTS_MSG)
@@ -556,7 +487,7 @@ def parse_rip(submissionText: str):
         dividers = [' - ', ' from ']
         for divider in dividers:
             for joke in jokes:
-                temp_results = find_song(joke, divider, DEFAULT_SIMILARITY)[0]
+                temp_results = find_song(joke, divider)[0]
                 joke_results.extend(temp_results)
 
         if (len(joke_results) > 0):
