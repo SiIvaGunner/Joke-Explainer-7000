@@ -1704,7 +1704,7 @@ async def source(args: list[str], command_context: CommandContext):
             text = message.content
 
         text = search_rip_sources(text)
-        await send_embed(text, command_context.channel, EmbedDesc(title="Found Source Links"))
+        await send_embed(text, command_context.channel, EmbedDesc(title="Sources"))
 
 
 @command(
