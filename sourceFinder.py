@@ -133,7 +133,7 @@ def scan_vgm_site(url: str, vgm_site: VGMSite, scan_result_type: ScanResultType,
                     aborted = True
                     break
 
-                title = link_tag.get_text(strip=True)
+                title = link_tag.get_text(strip=True).replace("\n", "")
                 found_url = urljoin(vgm_site_info.pre_href, href)
                 if not len(title): 
                     is_valid = False
@@ -248,19 +248,19 @@ class SourceTrack(NamedTuple):
     track_title: str
     track_url: str
 
-def add_source_track(scan_result_album: ScanResult, scan_result_track: ScanResult, output_source_tracks: List[SourceTrack]):
+def add_source_track(scan_result_track: ScanResult, scan_result_album: ScanResult, output_source_tracks: List[SourceTrack]):
     assert scan_result_album.vgm_site == scan_result_track.vgm_site
+    track_url = urljoin(scan_result_album.url, scan_result_track.url)
     source_track = SourceTrack(
         scan_result_album.vgm_site,
         scan_result_album.title,
         scan_result_album.url,
         scan_result_track.title,
-        scan_result_track.url
+        track_url 
     )
     output_source_tracks.append(source_track)
 
-def search_album_for_track(scan_result_album: ScanResult, input_track_name: str, output_source_tracks: List[SourceTrack]):
-
+def get_tracks_in_album(scan_result_album: ScanResult, output_source_tracks: List[SourceTrack]):
     if scan_result_album.vgm_site == VGMSite.HSC64:
         new_url = "https://" + quote(scan_result_album.hcs_dict["sd"]) + ".joshw.info/.filelists/" + scan_result_album.hcs_dict["nm"] + ".json"
         #NOTE: (Ahmayk) very bad that we keep calling this
@@ -278,18 +278,8 @@ def search_album_for_track(scan_result_album: ScanResult, input_track_name: str,
         scan_result_tracks: List[ScanResult] = []
         scan_vgm_site(scan_result_album.url, scan_result_album.vgm_site, ScanResultType.TRACK, scan_result_tracks)
         print(f"Returned tracks from scan for {scan_result_album.url}: {len(scan_result_tracks)}")
-
         for scan_result_track in scan_result_tracks:
-            closeness_title = SequenceMatcher(None, scan_result_track.title, input_track_name).ratio()
-
-            if (
-                closeness_title >= DEFAULT_SIMILARITY 
-                or input_track_name.strip() in scan_result_track.title
-                or quote(input_track_name.strip()) in scan_result_track.url
-            ):
-
-                # full_url = urljoin(scan_result_album.url, scan_result_track.url)
-                add_source_track(scan_result_track, scan_result_album, output_source_tracks)
+            add_source_track(scan_result_track, scan_result_album, output_source_tracks)
 
 
 class GameAndTrackPair(NamedTuple):
@@ -348,10 +338,9 @@ def parseTitle(title: str, divider: str, track_name: str) -> list[GameAndTrackPa
 
 class FindSongResult(NamedTuple):
     source_tracks: list[SourceTrack]
-    album_matches_exact: list[ScanResult]
-    other_albums: list[ScanResult]
+    albums: list[ScanResult]
 
-def find_song(game_and_track_pairs: list[GameAndTrackPair]):
+def find_song(game_and_track_pairs: list[GameAndTrackPair]) -> FindSongResult:
     threads = []
     scan_result_dict_albums: dict[str, list[ScanResult]] = {} 
     for pair in game_and_track_pairs:
@@ -360,57 +349,80 @@ def find_song(game_and_track_pairs: list[GameAndTrackPair]):
             thread = threading.Thread(target=search_sites_for_albums, args=(pair.game_name, scan_result_dict_albums[pair.game_name]))
             thread.start()
             threads.append(thread)
-
     for t in threads:
         t.join()
 
-    exact_album_matches: list[ScanResult] = []
     sorted_scan_result_dict_albums: dict[str, list[ScanResult]] = {} 
     for game_name, scan_result_list in scan_result_dict_albums.items():
         sorted_list = list(reversed(sorted(scan_result_list, key=lambda scan_result: SequenceMatcher(None, scan_result.title, game_name).ratio())))
         depth = 10
         sorted_scan_result_dict_albums[game_name] = sorted_list[:depth]
-        for scan_result in sorted_scan_result_dict_albums[game_name]:
-            print(f"Album result: {scan_result.title}")
-            if scan_result.title == game_name:
-                exact_album_matches.append(scan_result)
-                print(f'EXACT ALBUM MATCH: {scan_result.url}')
 
-    other_albums: list[ScanResult] = []
-    for game_name, scan_result_list in sorted_scan_result_dict_albums.items():
-        other_albums.extend(scan_result_list)
+    # other_albums: list[ScanResult] = []
+    # for game_name, scan_result_list in sorted_scan_result_dict_albums.items():
+    #     other_albums.extend(scan_result_list)
 
-    output_source_tracks : list[SourceTrack] = []
+    scanned_album_dict: dict[str, ScanResult] = {}
+    for game_name, scan_result_albums in sorted_scan_result_dict_albums.items():
+        for scan_result_album in scan_result_albums:
+            if scan_result_album.url not in scanned_album_dict:
+                scanned_album_dict[scan_result_album.url] = scan_result_album
+
+    output_source_tracks: list[SourceTrack] = []
     threads = []
-    for pair in game_and_track_pairs:
-        if pair.game_name in sorted_scan_result_dict_albums:
-            for scan_result in sorted_scan_result_dict_albums[pair.game_name]:
-                for other_pair in game_and_track_pairs:
-                    if pair.game_name == other_pair.game_name:
-                        thread = threading.Thread(target=search_album_for_track, args=(scan_result, other_pair.track_name, output_source_tracks))
-                        thread.start()
-                        threads.append(thread)
-    
-    # cached_track_results[(game_name, track_name)] = track_list
-
+    for url, scan_result_album in scanned_album_dict.items():
+        thread = threading.Thread(target=get_tracks_in_album, args=(scan_result_album, output_source_tracks))
+        thread.start()
+        threads.append(thread)
     for t in threads:
         t.join()
+
+    class ScoredSourceTrack(NamedTuple):
+        score: float
+        source_track: SourceTrack
+
+    scored_sources: list[ScoredSourceTrack] = []
+    for pair in game_and_track_pairs:
+        for source_track in output_source_tracks:
+            ratio_album = SequenceMatcher(None, source_track.album_title, pair.game_name).ratio()
+            ratio_track = SequenceMatcher(None, source_track.track_title, pair.track_name).ratio()
+            score = (ratio_album * 2) + (ratio_track * 5)
+            if pair.game_name not in source_track.album_title:
+                score -= 2
+            if pair.track_name not in source_track.track_title:
+                score -= 2
+            is_valid = True
+            for s in scored_sources:
+                if s.source_track == source_track:
+                    is_valid = score > s.score
+                    break
+            if is_valid:
+                scored_sources.append(ScoredSourceTrack(score, source_track))
+
+    scored_sources = sorted(scored_sources, key=lambda scored_source: scored_source.score, reverse=True)
+    scored_sources = scored_sources[:3]
+
+    for s in scored_sources:
+        print(s)
+
+    # full_url = urljoin(scan_result_album.url, scan_result_track.url)
+    # cached_track_results[(game_name, track_name)] = track_list
 
     if len(game_and_track_pairs):
         print(f'GAME NAME COUNT: {len(sorted_scan_result_dict_albums.keys())}')
         print(f'FINAL COUNT: {len(output_source_tracks)}')
 
     source_tracks: list[SourceTrack] = []
-    for output_source_track in output_source_tracks:
-        for source_track in source_tracks:
-            # album_match = output_source_track.album_title == source_track.album_title
-            title_match = output_source_track.track_title == source_track.track_title
-            vgm_site_match = output_source_track.vgm_site == source_track.vgm_site
-            if not (vgm_site_match and title_match):
-                source_tracks.append(source_track)
-                print(f"TRACK FOUND: {source_track}")
+    for scored_track in scored_sources:
+        # album_match = output_source_track.album_title == source_track.album_title
+        # title_match = scored_track.source_track.track_title == source_track.track_title
+        # vgm_site_match = scored_track.source_track.vgm_site == source_track.vgm_site
+        # if not (vgm_site_match and title_match):
+            # source_tracks.append(source_track)
+            # print(f"TRACK FOUND: {source_track}")
+        source_tracks.append(scored_track.source_track)
 
-    return FindSongResult(source_tracks, exact_album_matches, other_albums)
+    return FindSongResult(source_tracks, [])
 
 
 
@@ -446,25 +458,13 @@ def search_rip_sources(submissionText: str):
     else:
         result += "\n**No source tracks found.**"
 
-    if len(find_song_result.album_matches_exact):
-        for scan_result_album in find_song_result.album_matches_exact: 
-            match_source_track = False
-            for source_track in find_song_result.source_tracks: 
-                if scan_result_album.url == source_track.album_url:
-                    match_source_track = True
-                    break
-            if not match_source_track:
-                result += f"\nAlbum: **[{scan_result_album.title}](<{scan_result_album.url}>)**"
-
-    elif len(find_song_result.other_albums) and not len(find_song_result.source_tracks):
-        result += "\n**No exact album matches found. Possible albums:**"
-        for scan_result_album in find_song_result.other_albums: 
-            result += f"\n- [{scan_result_album.title}](<{scan_result_album.url}>)"
-    else:
-        result += "\n**No albums found.**"
+    # if len(find_song_result.albums):
+    #     for scan_result_album in find_song_result.albums: 
+    #         result += f"\nAlbum: [{scan_result_album.title}](<{scan_result_album.url}>)"
+    # else:
+    #     result += "\n**No albums found.**"
 
     YOUTUBE_SEARCH_URL = "https://www.youtube.com/results?search_query="
-    COMMON_JOKE_DELIMITERS = ",."
 
     youtube_title_url = YOUTUBE_SEARCH_URL + quote_plus(title)
     # print(f"Game search results: {youtube_title_url}")
@@ -473,7 +473,7 @@ def search_rip_sources(submissionText: str):
     joke = get_rip_joke(submissionText)
     print(f'\nJOKE: {joke}')
     if len(joke):
-        jokes = re.split(f'[{COMMON_JOKE_DELIMITERS}]', joke)
+        jokes = re.split(r'[\,\.]', joke)
 
         for(joke) in jokes:
             youtube_title_url = YOUTUBE_SEARCH_URL + quote_plus(joke)
