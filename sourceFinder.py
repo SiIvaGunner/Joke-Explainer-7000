@@ -12,6 +12,7 @@ from enum import Enum, auto
 from requests.adapters import HTTPAdapter
 
 from hq_strings import *
+from simpleQoC.metadata import desc_to_dict, get_music_from_desc
 
 DEFAULT_SIMILARITY = 0.72
 
@@ -290,16 +291,12 @@ def search_album_for_track(scan_result_album: ScanResult, input_track_name: str,
                 # full_url = urljoin(scan_result_album.url, scan_result_track.url)
                 add_source_track(scan_result_track, scan_result_album, output_source_tracks)
 
-                # cool = f"**[{scan_result_track.title}]({full_url})** - [{scan_result_album.title}]({scan_result_album.url})"
-                # output_track_strings.append(cool)
-                # print(f"-------Track found: {cool}")
-
 
 class GameAndTrackPair(NamedTuple):
-    game_name: str
     track_name: str
+    game_name: str
 
-def parseTitle(title: str, divider: str) -> list[GameAndTrackPair]:
+def parseTitle(title: str, divider: str, track_name: str) -> list[GameAndTrackPair]:
     pairs: list[GameAndTrackPair] = []
 
     for i in range(len(title)):
@@ -311,15 +308,21 @@ def parseTitle(title: str, divider: str) -> list[GameAndTrackPair]:
             before = before.strip()
             after = after.strip()
 
-            pairs.append(GameAndTrackPair(before, after))
+            if len(track_name):
+                if before == track_name:
+                    pairs.append(GameAndTrackPair(before, after))
+                if after == track_name:
+                    pairs.append(GameAndTrackPair(after, before))
+            else:
+                pairs.append(GameAndTrackPair(before, after))
+
             if (before.endswith(")") and "(" in before):
                 before_no_mixname = before[0:before.rindex("(")]
-                pairs.extend(parseTitle(before_no_mixname + divider + after, divider))
+                pairs.extend(parseTitle(before_no_mixname + divider + after, divider, track_name))
 
-            pairs.append(GameAndTrackPair(after, before))
             if (after.endswith(")") and "(" in after):
                 after_no_mixname = after[0:after.rindex("(")]
-                pairs.extend(parseTitle(before + divider + after_no_mixname, divider))
+                pairs.extend(parseTitle(before + divider + after_no_mixname, divider, track_name))
 
     if len(pairs):
         print(f'PAIRS: {pairs}')
@@ -330,10 +333,9 @@ def parseTitle(title: str, divider: str) -> list[GameAndTrackPair]:
 class FindSongResult(NamedTuple):
     source_tracks: list[SourceTrack]
     album_matches_exact: list[ScanResult]
-    scan_result_dict_albums: dict[str, list[ScanResult]]
+    other_albums: list[ScanResult]
 
-def find_song(title: str, divider: str):
-    game_and_track_pairs: list[GameAndTrackPair] = parseTitle(title, divider)
+def find_song(game_and_track_pairs: list[GameAndTrackPair]):
     threads = []
     scan_result_dict_albums: dict[str, list[ScanResult]] = {} 
     for pair in game_and_track_pairs:
@@ -356,6 +358,10 @@ def find_song(title: str, divider: str):
             if scan_result.title == game_name:
                 exact_album_matches.append(scan_result)
                 print(f'EXACT ALBUM MATCH: {scan_result.url}')
+
+    other_albums: list[ScanResult] = []
+    for game_name, scan_result_list in sorted_scan_result_dict_albums.items():
+        other_albums.extend(scan_result_list)
 
     output_source_tracks : list[SourceTrack] = []
     threads = []
@@ -387,7 +393,7 @@ def find_song(title: str, divider: str):
                 source_tracks.append(source_track)
                 print(f"TRACK FOUND: {source_track}")
 
-    return FindSongResult(source_tracks, exact_album_matches, scan_result_dict_albums)
+    return FindSongResult(source_tracks, exact_album_matches, other_albums)
 
 
 
@@ -402,13 +408,17 @@ def search_rip_sources(submissionText: str):
     if title is None: 
         title = submissionText
 
-    print(f'TITLE: {title}')
+    # print(f'TITLE: {title}')
 
-    print("Searching...")
+    description = get_rip_description(submissionText)
+    desc_dict, msgs = desc_to_dict(description, 1)
+    track_string = get_music_from_desc(desc_dict)
+
+    game_and_track_pairs = parseTitle(title, ' - ', track_string)
 
     result = ""
 
-    find_song_result = find_song(title, ' - ')
+    find_song_result = find_song(game_and_track_pairs)
     if len(find_song_result.source_tracks):
         for source_track in find_song_result.source_tracks:
             result += f"\n**[{source_track.track_title}]({source_track.track_url})** - [{source_track.album_title}]({source_track.album_url})"
@@ -423,11 +433,11 @@ def search_rip_sources(submissionText: str):
                     match_source_track = True
                     break
             if not match_source_track:
-                result += f"\n- Album: **[{scan_result_album.title}](<{scan_result_album.url}>)**"
+                result += f"\nAlbum: **[{scan_result_album.title}](<{scan_result_album.url}>)**"
 
-    elif len(find_song_result.scan_result_dict_albums):
+    elif len(find_song_result.other_albums) and not len(find_song_result.source_tracks):
         result += "\nNo exact album matches found. Possible albums:"
-        for scan_result_album in find_song_result.album_matches_exact: 
+        for scan_result_album in find_song_result.other_albums: 
             result += f"\n- [{scan_result_album.title}](<{scan_result_album.url}>)"
     else:
         result += "\nNo albums found."
@@ -436,8 +446,8 @@ def search_rip_sources(submissionText: str):
     COMMON_JOKE_DELIMITERS = ",."
 
     youtube_title_url = YOUTUBE_SEARCH_URL + quote_plus(title)
-    print(f"Game search results: {youtube_title_url}")
-    result += f"\n- Title Youtube Search: [{title}]({youtube_title_url})"
+    # print(f"Game search results: {youtube_title_url}")
+    result += f"\nTitle Youtube Search: [{title}]({youtube_title_url})"
 
     joke = get_rip_joke(submissionText)
     print(f'\nJOKE: {joke}')
@@ -448,11 +458,18 @@ def search_rip_sources(submissionText: str):
             youtube_title_url = YOUTUBE_SEARCH_URL + quote_plus(joke)
             result += f"\nJoke Youtube Search: [{joke}](<{youtube_title_url}>)"
 
+        joke_name_pairs: list[GameAndTrackPair] = []
         dividers = [' - ', ' from ']
         for divider in dividers:
             for joke in jokes:
-                find_song_result = find_song(joke, divider)[0]
-                #TODO: (Ahmayk) display this somehow in a way that makes sense?
+                game_and_track_pairs = parseTitle(joke, divider, "")
+                for pair in game_and_track_pairs:
+                    if pair not in joke_name_pairs:
+                        joke_name_pairs.append(pair)
+
+        find_song_result = find_song(joke_name_pairs)
+        #TODO: (Ahmayk) display this somehow in a way that makes sense?
+        # (or cut it lol, youtube might be more useful)
 
     else:
         print("Joke not found.")
