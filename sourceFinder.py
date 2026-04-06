@@ -29,21 +29,21 @@ adapter = HTTPAdapter(max_retries=retry_strategy, pool_connections=50, pool_maxs
 my_session.mount("http://", adapter)
 my_session.mount("https://", adapter)
 
-class VGMSite(Enum):
+class VGM_SITE(Enum):
     ZOPHAR = auto()
-    KHINSIDER = auto()
-    VGMRIPS = auto()
-    HSC64 = auto()
+    # KHINSIDER = auto()
+    # VGMRIPS = auto()
+    # HSC64 = auto()
 
 class VGMSiteInfo(NamedTuple):
     name: str
     pre_href: str
     search_url_pathname: str
 
-VGM_SITE_INFOS: dict[VGMSite, VGMSiteInfo] = {} 
-VGM_SITE_INFOS[VGMSite.ZOPHAR] = VGMSiteInfo("Zophar's Domain", 'https://www.zophar.net', '/music/search?search=')
-VGM_SITE_INFOS[VGMSite.KHINSIDER] = VGMSiteInfo("Kingdom Hearts Insider", 'https://downloads.khinsider.com', '/search?search=')
-VGM_SITE_INFOS[VGMSite.VGMRIPS] = VGMSiteInfo("VGMRips", 'https://vgmrips.net', '/packs/search?q=')
+VGM_SITE_INFOS: dict[VGM_SITE, VGMSiteInfo] = {} 
+VGM_SITE_INFOS[VGM_SITE.ZOPHAR] = VGMSiteInfo("Zophar", 'https://www.zophar.net', '/music/search?search=')
+# VGM_SITE_INFOS[VGMSite.KHINSIDER] = VGMSiteInfo("KHI", 'https://downloads.khinsider.com', '/search?search=')
+# VGM_SITE_INFOS[VGMSite.VGMRIPS] = VGMSiteInfo("VGMRips", 'https://vgmrips.net', '/packs/search?q=')
 #NOTE: (Ahmayk) no info needed for HSC64 as we access everything from a json we predownload
 
 class ScanResultType(Enum):
@@ -51,7 +51,7 @@ class ScanResultType(Enum):
     TRACK = auto() 
 
 class ScanResult(NamedTuple):
-    vgm_site: VGMSite
+    vgm_site: VGM_SITE
     type: ScanResultType 
     title: str
     url: str
@@ -90,7 +90,7 @@ hcs_index: list[Any] = []
 cached_album_results = dict()
 cached_track_results = dict()
 
-def scan_vgm_site(url: str, vgm_site: VGMSite, scan_result_type: ScanResultType, output_scan_results: List[ScanResult]):
+def scan_vgm_site(url: str, vgm_site: VGM_SITE, scan_result_type: ScanResultType, output_scan_results: List[ScanResult]):
 
     print(f"SCANNING SITE: {url}")
 
@@ -109,82 +109,178 @@ def scan_vgm_site(url: str, vgm_site: VGMSite, scan_result_type: ScanResultType,
         print(f"Error fetching data from {vgm_site_info.name}: {e}")
 
     if response and soup:
-        aborted = False
-        if (response.url.startswith("https://vgmrips.net/packs/pack") and response.url != url):
-            # get the string contained in the <title> tag in the page
-            title_tag = soup.find('title')
-            assert (title_tag and isinstance(title_tag, Tag))
-            title = title_tag.string
-            assert isinstance(title, str)
-            clean_title = title[0:title.index(" vgm music • VGMRips")]
-            output_scan_results.append(ScanResult(vgm_site, scan_result_type, clean_title, response.url, None))
-        else:
-            all_link_tags = soup.find_all('a', href=True)
-            for link_tag in all_link_tags:
-                assert isinstance(link_tag, Tag)
-                href = link_tag['href']
-                assert isinstance(href, str)
-                parent_tag = link_tag.parent
-                assert isinstance(parent_tag, Tag)
 
-                is_valid = True
+        all_link_tags = soup.find_all('a', href=True)
+        for link_tag in all_link_tags:
+            assert isinstance(link_tag, Tag)
+            href = link_tag['href']
+            assert isinstance(href, str)
 
-                if "/game-soundtracks/arrangements" in href and parent_tag.name == "b":
-                    aborted = True
-                    break
+            is_valid = True
+            found_url = urljoin(vgm_site_info.pre_href, href)
+            title = "" 
 
-                title = link_tag.get_text(strip=True).replace("\n", "")
-                found_url = urljoin(vgm_site_info.pre_href, href)
-                if not len(title): 
-                    is_valid = False
+            match vgm_site:
+                case VGM_SITE.ZOPHAR:
 
-                if scan_result_type == ScanResultType.ALBUM:
-                    if (parent_tag.has_attr('class') and "albumIconLarge" in parent_tag['class']):
-                        is_valid = False
-
-                    title_lower = title.lower()
-                    remix_keywords = ["restored", "fan remaster", "recreat", "fanmade", "fan-made", "soundfont remix", "soundtrack remake"]
-                    for keyword in remix_keywords:
-                        if keyword in title_lower:
+                    if scan_result_type == ScanResultType.ALBUM:
+                        if href.count('/') != 3:
                             is_valid = False
-                            break
+                        if not 'music' in href: 
+                            is_valid = False
+                        if "music/letter" in href:
+                            is_valid = False
+                        title = link_tag.get_text(strip=True)
 
-                    match vgm_site:
-                        case VGMSite.ZOPHAR:
-                            if (
-                                href.count('/') < 3
-                                or "patreon" in href 
-                                or "music/letter" in href
-                                or "search.html" in href
-                            ):
-                                is_valid = False
-                        case VGMSite.KHINSIDER:
-                            if not "/album/" in href:
-                                is_valid = False
-                        case VGMSite.VGMRIPS:
-                            if not "/pack/" in href:
-                                is_valid = False
-                        case _:
-                            assert "Unimplemented VGMSite Enum"
+                    if scan_result_type == ScanResultType.TRACK:
+                        if not href.startswith('https://fi.zophar.net/soundfiles/'):
+                            is_valid = False
 
-                if scan_result_type == ScanResultType.TRACK:
-                    if vgm_site == VGMSite.VGMRIPS and "DUMMY#" in found_url:
-                        # I dunno why this shows up in the url on VGMrips.
-                        found_url = found_url[5:]
+                        if is_valid:
+                            parent = link_tag.parent
+                            if parent is not None:
+                                row = parent.parent
+                                if row is not None:
+                                    name_tag = row.find('td', class_='name')
+                                    if name_tag is not None:
+                                        title = name_tag.get_text(strip=True)
 
-                    if ("/company/" in url or "/developer/" in url):
-                        is_valid = False
-                    if ("letter/)" in url):
-                        is_valid = False
-                    if ("Download all files as" in title or "Download original music files" in title):
-                        is_valid = False
+                    # if "/game-soundtracks/arrangements" in href and parent_tag.name == "b":
+                    #     aborted = True
+                    #     break
 
-                if is_valid:
-                    result = ScanResult(vgm_site, scan_result_type, title, found_url, None)
-                    output_scan_results.append(result)
+                    # if scan_result_type == ScanResultType.ALBUM:
+                    #     if (parent_tag.has_attr('class') and "albumIconLarge" in parent_tag['class']):
+                    #         is_valid = False
 
-        if not aborted:
-            print(f"Successfully fetched and parsed {vgm_site_info.name}. [{len(output_scan_results)} result(s)] {url}")
+                    #     title_lower = title.lower()
+                    #     remix_keywords = ["restored", "fan remaster", "recreat", "fanmade", "fan-made", "soundfont remix", "soundtrack remake"]
+                    #     for keyword in remix_keywords:
+                    #         if keyword in title_lower:
+                    #             is_valid = False
+                    #             break
+
+                    #     match vgm_site:
+                    #         case VGM_SITE.ZOPHAR:
+                    #             if (
+                    #                 href.count('/') < 3
+                    #                 or "patreon" in href 
+                    #                 or "music/letter" in href
+                    #                 or "search.html" in href
+                    #             ):
+                    #                 is_valid = False
+                    #         # case VGMSite.KHINSIDER:
+                    #         #     if not "/album/" in href:
+                    #         #         is_valid = False
+                    #         # case VGMSite.VGMRIPS:
+                    #         #     if not "/pack/" in href:
+                    #         #         is_valid = False
+                    #         case _:
+                    #             assert "Unimplemented VGMSite Enum"
+
+                    # if scan_result_type == ScanResultType.TRACK:
+                        # if vgm_site == VGMSite.VGMRIPS and "DUMMY#" in found_url:
+                        #     # I dunno why this shows up in the url on VGMrips.
+                        #     found_url = found_url[5:]
+                        # if ("/company/" in url or "/developer/" in url):
+                        #     is_valid = False
+                        # if ("letter/)" in url):
+                        #     is_valid = False
+                        # if ("Download all files as" in title or "Download original music files" in title):
+                        #     is_valid = False
+
+
+            if not len(title): 
+                is_valid = False
+
+            if is_valid:
+
+                # if scan_result_type == ScanResultType.TRACK:
+                    # print(link_tag)
+                    # print(f'HREF: {href}')
+                    # print(f'URL: {found_url}')
+
+                assert len(title)
+                result = ScanResult(vgm_site, scan_result_type, title, found_url, None)
+                output_scan_results.append(result)
+
+
+        # aborted = False
+        # if (response.url.startswith("https://vgmrips.net/packs/pack") and response.url != url):
+        #     # get the string contained in the <title> tag in the page
+        #     title_tag = soup.find('title')
+        #     assert (title_tag and isinstance(title_tag, Tag))
+        #     title = title_tag.string
+        #     assert isinstance(title, str)
+        #     clean_title = title[0:title.index(" vgm music • VGMRips")]
+        #     output_scan_results.append(ScanResult(vgm_site, scan_result_type, clean_title, response.url, None))
+        # else:
+        #     all_link_tags = soup.find_all('a', href=True)
+        #     for link_tag in all_link_tags:
+        #         assert isinstance(link_tag, Tag)
+        #         href = link_tag['href']
+        #         assert isinstance(href, str)
+        #         parent_tag = link_tag.parent
+        #         assert isinstance(parent_tag, Tag)
+
+        #         is_valid = True
+
+        #         if "/game-soundtracks/arrangements" in href and parent_tag.name == "b":
+        #             aborted = True
+        #             break
+
+        #         title = link_tag.get_text(strip=True).replace("\n", "")
+        #         found_url = urljoin(vgm_site_info.pre_href, href)
+        #         if not len(title): 
+        #             is_valid = False
+
+        #         if scan_result_type == ScanResultType.ALBUM:
+        #             if (parent_tag.has_attr('class') and "albumIconLarge" in parent_tag['class']):
+        #                 is_valid = False
+
+        #             title_lower = title.lower()
+        #             remix_keywords = ["restored", "fan remaster", "recreat", "fanmade", "fan-made", "soundfont remix", "soundtrack remake"]
+        #             for keyword in remix_keywords:
+        #                 if keyword in title_lower:
+        #                     is_valid = False
+        #                     break
+
+        #             match vgm_site:
+        #                 case VGM_SITE.ZOPHAR:
+        #                     if (
+        #                         href.count('/') < 3
+        #                         or "patreon" in href 
+        #                         or "music/letter" in href
+        #                         or "search.html" in href
+        #                     ):
+        #                         is_valid = False
+        #                 # case VGMSite.KHINSIDER:
+        #                 #     if not "/album/" in href:
+        #                 #         is_valid = False
+        #                 # case VGMSite.VGMRIPS:
+        #                 #     if not "/pack/" in href:
+        #                 #         is_valid = False
+        #                 case _:
+        #                     assert "Unimplemented VGMSite Enum"
+
+        #         if scan_result_type == ScanResultType.TRACK:
+        #             # if vgm_site == VGMSite.VGMRIPS and "DUMMY#" in found_url:
+        #             #     # I dunno why this shows up in the url on VGMrips.
+        #             #     found_url = found_url[5:]
+
+        #             if ("/company/" in url or "/developer/" in url):
+        #                 is_valid = False
+        #             if ("letter/)" in url):
+        #                 is_valid = False
+        #             if ("Download all files as" in title or "Download original music files" in title):
+        #                 is_valid = False
+
+        #         if is_valid:
+        #             result = ScanResult(vgm_site, scan_result_type, title, found_url, None)
+        #             output_scan_results.append(result)
+
+        # if not aborted:
+        #     print(f"Successfully fetched and parsed {vgm_site_info.name}. [{len(output_scan_results)} result(s)] {url}")
 
 
 def search_sites_for_albums(game_name: str, output_scan_result_list: List[ScanResult]):
@@ -192,47 +288,47 @@ def search_sites_for_albums(game_name: str, output_scan_result_list: List[ScanRe
     threads: List[threading.Thread] = []
     result_lists: List[List[ScanResult]] = []
     game_name = quote(game_name) 
-    for i, vgm_site in enumerate(VGMSite):
+    for i, vgm_site in enumerate(VGM_SITE):
         result_lists.insert(i, [])
 
-        if vgm_site == VGMSite.HSC64:
-            ##NOTE: No API call needed, reference downloaded json lookup
-            if len(game_name) > 1:
-                MAX_NUM = 30
-                num = 0
-                for hcs_game in hcs_index:
-                    #assert isinstance(hcs_game, tuple[str, str])
-                    if (num > MAX_NUM):
-                        #NOTE: (Ahmayk) why was this truncated?
-                        pass
-                        # return
-                    if "nm" in hcs_game:
-                        hcs_game_name_dirty = hcs_game["nm"]
-                    else: 
-                        continue
+        # if vgm_site == VGM_SITE.HSC64:
+        #     ##NOTE: No API call needed, reference downloaded json lookup
+        #     if len(game_name) > 1:
+        #         MAX_NUM = 30
+        #         num = 0
+        #         for hcs_game in hcs_index:
+        #             #assert isinstance(hcs_game, tuple[str, str])
+        #             if (num > MAX_NUM):
+        #                 #NOTE: (Ahmayk) why was this truncated?
+        #                 pass
+        #                 # return
+        #             if "nm" in hcs_game:
+        #                 hcs_game_name_dirty = hcs_game["nm"]
+        #             else: 
+        #                 continue
 
-                    hcs_game_name = ""
-                    if "/" in hcs_game_name_dirty:
-                        hcs_game_name = hcs_game_name_dirty[hcs_game_name_dirty.index("/")+1:]
-                    else:
-                        hcs_game_name = hcs_game_name_dirty
-                    if (game_name.lower()) in (hcs_game_name.lower()):
-                        # if there are are "[" or "(" in hcs_game_name, remove everything after them
-                        if "[" in hcs_game_name:
-                            hcs_game_name = hcs_game_name[0:hcs_game_name.index("[")]
-                        if "(" in hcs_game_name:
-                            hcs_game_name = hcs_game_name[0:hcs_game_name.index("(")]
-                        hcs_game_name = hcs_game_name.strip()
-                        url = "https://vgm.hcs64.com/?set=" + str(hcs_game["id"])
-                        result_lists[i].append(ScanResult(vgm_site, ScanResultType.ALBUM, hcs_game_name, url, hcs_game))
-                        num += 1
-        else:
-            assert vgm_site in VGM_SITE_INFOS
-            vgm_site_info = VGM_SITE_INFOS[vgm_site]
-            search_url = vgm_site_info.pre_href + vgm_site_info.search_url_pathname + game_name
-            thread = threading.Thread(target=scan_vgm_site, args=(search_url, vgm_site, ScanResultType.ALBUM, result_lists[i]))
-            thread.start()
-            threads.append(thread)
+        #             hcs_game_name = ""
+        #             if "/" in hcs_game_name_dirty:
+        #                 hcs_game_name = hcs_game_name_dirty[hcs_game_name_dirty.index("/")+1:]
+        #             else:
+        #                 hcs_game_name = hcs_game_name_dirty
+        #             if (game_name.lower()) in (hcs_game_name.lower()):
+        #                 # if there are are "[" or "(" in hcs_game_name, remove everything after them
+        #                 if "[" in hcs_game_name:
+        #                     hcs_game_name = hcs_game_name[0:hcs_game_name.index("[")]
+        #                 if "(" in hcs_game_name:
+        #                     hcs_game_name = hcs_game_name[0:hcs_game_name.index("(")]
+        #                 hcs_game_name = hcs_game_name.strip()
+        #                 url = "https://vgm.hcs64.com/?set=" + str(hcs_game["id"])
+        #                 result_lists[i].append(ScanResult(vgm_site, ScanResultType.ALBUM, hcs_game_name, url, hcs_game))
+        #                 num += 1
+        # else:
+        assert vgm_site in VGM_SITE_INFOS
+        vgm_site_info = VGM_SITE_INFOS[vgm_site]
+        search_url = vgm_site_info.pre_href + vgm_site_info.search_url_pathname + game_name
+        thread = threading.Thread(target=scan_vgm_site, args=(search_url, vgm_site, ScanResultType.ALBUM, result_lists[i]))
+        thread.start()
+        threads.append(thread)
 
     for t in threads:
         t.join()
@@ -242,7 +338,7 @@ def search_sites_for_albums(game_name: str, output_scan_result_list: List[ScanRe
 
 
 class SourceTrack(NamedTuple):
-    vgm_site: VGMSite
+    vgm_site: VGM_SITE
     album_title: str
     album_url: str 
     track_title: str
@@ -261,25 +357,26 @@ def add_source_track(scan_result_track: ScanResult, scan_result_album: ScanResul
     output_source_tracks.append(source_track)
 
 def get_tracks_in_album(scan_result_album: ScanResult, output_source_tracks: List[SourceTrack]):
-    if scan_result_album.vgm_site == VGMSite.HSC64:
-        new_url = "https://" + quote(scan_result_album.hcs_dict["sd"]) + ".joshw.info/.filelists/" + scan_result_album.hcs_dict["nm"] + ".json"
-        #NOTE: (Ahmayk) very bad that we keep calling this
-        json = get_json(new_url)
-        try:
-            assert isinstance(json, dict)
-        except AssertionError as e:
-            print(e)
-        if (not json is None):
-            for file in json["files"]:
-                #TODO: (Ahmayk) really? no track URL? That doesn't seem right
-                scan_result_track = ScanResult(VGMSite.HSC64, ScanResultType.TRACK, file["name"], "", None)
-                add_source_track(scan_result_track, scan_result_album, output_source_tracks)
-    else:
-        scan_result_tracks: List[ScanResult] = []
-        scan_vgm_site(scan_result_album.url, scan_result_album.vgm_site, ScanResultType.TRACK, scan_result_tracks)
-        print(f"Returned tracks from scan for {scan_result_album.url}: {len(scan_result_tracks)}")
-        for scan_result_track in scan_result_tracks:
-            add_source_track(scan_result_track, scan_result_album, output_source_tracks)
+    # if scan_result_album.vgm_site == VGM_SITE.HSC64:
+    #     new_url = "https://" + quote(scan_result_album.hcs_dict["sd"]) + ".joshw.info/.filelists/" + scan_result_album.hcs_dict["nm"] + ".json"
+    #     #NOTE: (Ahmayk) very bad that we keep calling this
+    #     json = get_json(new_url)
+    #     try:
+    #         assert isinstance(json, dict)
+    #     except AssertionError as e:
+    #         print(e)
+    #     if (not json is None):
+    #         for file in json["files"]:
+    #             #TODO: (Ahmayk) really? no track URL? That doesn't seem right
+    #             scan_result_track = ScanResult(VGM_SITE.HSC64, ScanResultType.TRACK, file["name"], "", None)
+    #             add_source_track(scan_result_track, scan_result_album, output_source_tracks)
+    # else:
+    scan_result_tracks: List[ScanResult] = []
+    scan_vgm_site(scan_result_album.url, scan_result_album.vgm_site, ScanResultType.TRACK, scan_result_tracks)
+    print(f"Returned tracks from scan for {scan_result_album.url}: {len(scan_result_tracks)}")
+    for scan_result_track in scan_result_tracks:
+        # print(f'track name in album {scan_result_album.title}: {scan_result_track.title}')
+        add_source_track(scan_result_track, scan_result_album, output_source_tracks)
 
 
 class GameAndTrackPair(NamedTuple):
@@ -352,26 +449,39 @@ def find_song(game_and_track_pairs: list[GameAndTrackPair]) -> FindSongResult:
     for t in threads:
         t.join()
 
-    sorted_scan_result_dict_albums: dict[str, list[ScanResult]] = {} 
+    class ScoredAlbum(NamedTuple):
+        score: float
+        scan_result_album: ScanResult
+
+    scan_result_dict_albums_scored: dict[str, list[ScoredAlbum]] = {} 
     for game_name, scan_result_list in scan_result_dict_albums.items():
-        sorted_list = list(reversed(sorted(scan_result_list, key=lambda scan_result: SequenceMatcher(None, scan_result.title, game_name).ratio())))
-        depth = 10
-        sorted_scan_result_dict_albums[game_name] = sorted_list[:depth]
+        scan_result_dict_albums_scored[game_name] = []
+        for scan_result_album in scan_result_list:
+            score = SequenceMatcher(None, scan_result_album.title, game_name).ratio()
+            if score > 0.3:
+                scan_result_dict_albums_scored[game_name].append(ScoredAlbum(score, scan_result_album))
+    
+    scan_result_dict_albums_sorted: dict[str, list[ScoredAlbum]] = {}
+    for game_name, scored_albums in scan_result_dict_albums_scored.items():
+        sorted_scored = sorted(scored_albums, key=lambda s: s.score , reverse=True)
+        scan_result_dict_albums_sorted[game_name] = sorted_scored[:10]
 
-    # other_albums: list[ScanResult] = []
-    # for game_name, scan_result_list in sorted_scan_result_dict_albums.items():
-    #     other_albums.extend(scan_result_list)
+    scanned_album_dict: dict[str, ScoredAlbum] = {}
+    for game_name, scored_albums in scan_result_dict_albums_sorted.items():
+        for scored_album in scored_albums:
+            is_valid = True 
+            if scored_album.scan_result_album.url in scanned_album_dict:
+                is_valid = scanned_album_dict[scored_album.scan_result_album.url].score < scored_album.score
+            if is_valid:
+                scanned_album_dict[scored_album.scan_result_album.url] = scored_album
 
-    scanned_album_dict: dict[str, ScanResult] = {}
-    for game_name, scan_result_albums in sorted_scan_result_dict_albums.items():
-        for scan_result_album in scan_result_albums:
-            if scan_result_album.url not in scanned_album_dict:
-                scanned_album_dict[scan_result_album.url] = scan_result_album
+    scored_albums = list(sorted(scanned_album_dict.values(), key=lambda s: s.score, reverse=True))
+    print(f'SCORED ALBUMS: {scored_albums}')
 
     output_source_tracks: list[SourceTrack] = []
     threads = []
-    for url, scan_result_album in scanned_album_dict.items():
-        thread = threading.Thread(target=get_tracks_in_album, args=(scan_result_album, output_source_tracks))
+    for scored_album in scored_albums: 
+        thread = threading.Thread(target=get_tracks_in_album, args=(scored_album.scan_result_album, output_source_tracks))
         thread.start()
         threads.append(thread)
     for t in threads:
@@ -384,23 +494,25 @@ def find_song(game_and_track_pairs: list[GameAndTrackPair]) -> FindSongResult:
     scored_sources: list[ScoredSourceTrack] = []
     for pair in game_and_track_pairs:
         for source_track in output_source_tracks:
-            ratio_album = SequenceMatcher(None, source_track.album_title, pair.game_name).ratio()
             ratio_track = SequenceMatcher(None, source_track.track_title, pair.track_name).ratio()
-            score = (ratio_album * 2) + (ratio_track * 5)
-            if pair.game_name not in source_track.album_title:
-                score -= 2
-            if pair.track_name not in source_track.track_title:
-                score -= 2
-            is_valid = True
-            for s in scored_sources:
-                if s.source_track == source_track:
-                    is_valid = score > s.score
-                    break
-            if is_valid:
-                scored_sources.append(ScoredSourceTrack(score, source_track))
+            if ratio_track > 0.3:
+                ratio_album = SequenceMatcher(None, source_track.album_title, pair.game_name).ratio()
+                score = (ratio_album * 2) + (ratio_track * 5)
+                if pair.game_name not in source_track.album_title:
+                    score -= 2
+                if pair.track_name not in source_track.track_title:
+                    score -= 2
+                is_valid = True
+                for s in scored_sources:
+                    if s.source_track == source_track:
+                        is_valid = score > s.score
+                        break
+                if is_valid:
+                    scored_sources.append(ScoredSourceTrack(score, source_track))
 
     scored_sources = sorted(scored_sources, key=lambda scored_source: scored_source.score, reverse=True)
-    scored_sources = scored_sources[:3]
+    # scored_sources = scored_sources[:3]
+    scored_sources = scored_sources[:20]
 
     for s in scored_sources:
         print(s)
@@ -409,20 +521,18 @@ def find_song(game_and_track_pairs: list[GameAndTrackPair]) -> FindSongResult:
     # cached_track_results[(game_name, track_name)] = track_list
 
     if len(game_and_track_pairs):
-        print(f'GAME NAME COUNT: {len(sorted_scan_result_dict_albums.keys())}')
-        print(f'FINAL COUNT: {len(output_source_tracks)}')
+        print(f'TOTAL ALBUM COUNT: {len(scan_result_dict_albums.keys())}')
+        print(f'TOTAL TRACK COUNT: {len(output_source_tracks)}')
 
     source_tracks: list[SourceTrack] = []
     for scored_track in scored_sources:
-        # album_match = output_source_track.album_title == source_track.album_title
-        # title_match = scored_track.source_track.track_title == source_track.track_title
-        # vgm_site_match = scored_track.source_track.vgm_site == source_track.vgm_site
-        # if not (vgm_site_match and title_match):
-            # source_tracks.append(source_track)
-            # print(f"TRACK FOUND: {source_track}")
         source_tracks.append(scored_track.source_track)
 
-    return FindSongResult(source_tracks, [])
+    albums: list[ScanResult] = []
+    for scored_album in scored_albums:
+        albums.append(scored_album.scan_result_album)
+
+    return FindSongResult(source_tracks, albums)
 
 
 
@@ -454,15 +564,21 @@ def search_rip_sources(submissionText: str):
     find_song_result = find_song(game_and_track_pairs)
     if len(find_song_result.source_tracks):
         for source_track in find_song_result.source_tracks:
-            result += f"\n**[{source_track.track_title}]({source_track.track_url})** - [{source_track.album_title}]({source_track.album_url})"
+            result += f"\n**[{source_track.track_title}]({source_track.track_url})** - [{source_track.album_title}]({source_track.album_url}) ({VGM_SITE_INFOS[source_track.vgm_site].name})"
     else:
         result += "\n**No source tracks found.**"
 
-    # if len(find_song_result.albums):
-    #     for scan_result_album in find_song_result.albums: 
-    #         result += f"\nAlbum: [{scan_result_album.title}](<{scan_result_album.url}>)"
-    # else:
-    #     result += "\n**No albums found.**"
+    if len(find_song_result.albums):
+        for scan_result_album in find_song_result.albums: 
+            exists_in_tracks = False
+            for source_track in find_song_result.source_tracks:
+                if scan_result_album.url == source_track.album_url:
+                    exists_in_tracks = True
+                    break
+            if not exists_in_tracks:
+                result += f"\nAlbum: [{scan_result_album.title}](<{scan_result_album.url}>) ({VGM_SITE_INFOS[scan_result_album.vgm_site].name})"
+    else:
+        result += "\n**No albums found.**"
 
     YOUTUBE_SEARCH_URL = "https://www.youtube.com/results?search_query="
 
