@@ -1195,6 +1195,7 @@ def channel_is_type(channel: typing.Union[GuildChannel, Thread], type: str) -> b
 def channel_is_types(channel: typing.Union[GuildChannel, Thread], types: typing.List[str]) -> bool:
     return any([t in get_channel_config(channel.id).types for t in types]) or hasattr(channel, "parent") and channel_is_types(channel.parent, types)
 
+#TODO: (Ahmayk) simplify 
 async def parse_message_link(link: str):
     """
     Parse the message link and return the server, channel and message objects.
@@ -1213,10 +1214,12 @@ async def parse_message_link(link: str):
     channel = server.get_channel_or_thread(channel_id)
 
     #TODO: (Ahmayk) handle message being null
-    #TODO: (Ahmayk) handle error 
     message_and_errors = await discord_fetch_message(msg_id, channel)
+    status = "" 
+    if len(message_and_errors.error_strings):
+        status = "\n".join(message_and_errors.error_strings)
 
-    return server, channel, message_and_errors.message, ""
+    return server, channel, message_and_errors.message, status 
 
 
 ##TODO: (Ahmayk) refactor input system, don't give default on error by default
