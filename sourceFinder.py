@@ -31,7 +31,7 @@ my_session.mount("https://", adapter)
 
 class VGM_SITE(Enum):
     ZOPHAR = auto()
-    # KHINSIDER = auto()
+    KHINSIDER = auto()
     VGMRIPS = auto()
     # HSC64 = auto()
 
@@ -42,7 +42,7 @@ class VGMSiteInfo(NamedTuple):
 
 VGM_SITE_INFOS: dict[VGM_SITE, VGMSiteInfo] = {} 
 VGM_SITE_INFOS[VGM_SITE.ZOPHAR] = VGMSiteInfo("Zophar", 'https://www.zophar.net', '/music/search?search=')
-# VGM_SITE_INFOS[VGM_SITE.KHINSIDER] = VGMSiteInfo("KHI", 'https://downloads.khinsider.com', '/search?search=')
+VGM_SITE_INFOS[VGM_SITE.KHINSIDER] = VGMSiteInfo("KHInsider", 'https://downloads.khinsider.com', '/search?search=')
 VGM_SITE_INFOS[VGM_SITE.VGMRIPS] = VGMSiteInfo("VGMRips", 'https://vgmrips.net', '/packs/search?q=')
 #NOTE: (Ahmayk) no info needed for HSC64 as we access everything from a json we predownload
 
@@ -114,9 +114,9 @@ def scan_vgm_site(url: str, vgm_site: VGM_SITE, scan_result_type: ScanResultType
 
         #NOTE: (Ahmayk) VGMRips redirects you to a page sometimes
         if (response.url.startswith("https://vgmrips.net/packs/pack") and response.url != url):
-            title_tag = soup.find('title')
-            if title_tag is not None and title_tag.string is not None:
-                title = title_tag.string[0:title_tag.string.index(" vgm music • VGMRips")]
+            page_element = soup.find('title')
+            if page_element is not None and page_element.string is not None:
+                title = page_element.string[0:page_element.string.index(" vgm music • VGMRips")]
                 found_url = response.url
                 skip_link_parsing = True
                 output_scan_results.append(ScanResult(vgm_site, scan_result_type, title, found_url, None))
@@ -179,9 +179,33 @@ def scan_vgm_site(url: str, vgm_site: VGM_SITE, scan_result_type: ScanResultType
                                 found_url = found_url[5:]
                             title = link_tag.get_text(strip=True)
 
-                        # if "/game-soundtracks/arrangements" in href and parent_tag.name == "b":
-                        #     aborted = True
-                        #     break
+                    case VGM_SITE.KHINSIDER:
+
+                        found_url = urljoin(vgm_site_info.pre_href, href)
+
+                        if scan_result_type == ScanResultType.ALBUM:
+                            if href.count('/') != 3:
+                                is_valid = False
+                            if not "/game-soundtracks/album" in href:
+                                is_valid = False
+                            title = link_tag.get_text(strip=True)
+
+                        if scan_result_type == ScanResultType.TRACK:
+
+                            #NOTE: (Ahmayk) invalid by default unless we find the title 
+                            is_valid = False
+
+                            #NOTE: (Ahmayk) search for title! 
+                            if href.endswith(".mp3"):
+                                play_track_tag = link_tag.find_previous(attrs={"title": "play track"})
+                                if play_track_tag is not None:
+                                    parent = play_track_tag.parent
+                                    if parent is not None and parent.contents is not None and len(parent.contents) > 7:
+                                        #NOTE: (Ahmayk) finds the first link, this should always have the title 
+                                        title_tag = parent.a
+                                        if title_tag is not None:
+                                            title = title_tag.get_text(strip=True)
+                                            is_valid = True
 
                         # if scan_result_type == ScanResultType.ALBUM:
                         #     if (parent_tag.has_attr('class') and "albumIconLarge" in parent_tag['class']):
@@ -233,10 +257,11 @@ def scan_vgm_site(url: str, vgm_site: VGM_SITE, scan_result_type: ScanResultType
 
                 if is_valid:
 
-                    if scan_result_type == ScanResultType.TRACK:
+                    # if scan_result_type == ScanResultType.TRACK:
                         # print(link_tag)
                         # print(f'HREF: {href}')
-                        print(f'URL: {found_url}')
+                        # print(f'URL: {found_url}')
+                        # print(f'Title: {title}')
 
                     assert len(title)
                     result = ScanResult(vgm_site, scan_result_type, title, found_url, None)
@@ -364,9 +389,22 @@ def search_sites_for_albums(game_name: str, output_scan_result_list: List[ScanRe
         assert vgm_site in VGM_SITE_INFOS
         vgm_site_info = VGM_SITE_INFOS[vgm_site]
         search_url = vgm_site_info.pre_href + vgm_site_info.search_url_pathname + game_name
-        thread = threading.Thread(target=scan_vgm_site, args=(search_url, vgm_site, ScanResultType.ALBUM, result_lists[i]))
-        thread.start()
-        threads.append(thread)
+
+        if vgm_site == VGM_SITE.KHINSIDER:
+            search_url += '&album_type='
+            #NOTE: (Ahmayk) 
+            # album type 1 = Soundtracks
+            # album type 2 = Gamerips
+            # Could include Singles and Compilations maybe. Are filtering so we don't get arrangmenets and remixes
+            types = ['1', '2']
+            for album_type in types:
+                thread = threading.Thread(target=scan_vgm_site, args=(search_url + album_type, vgm_site, ScanResultType.ALBUM, result_lists[i]))
+                thread.start()
+                threads.append(thread)
+        else:
+            thread = threading.Thread(target=scan_vgm_site, args=(search_url, vgm_site, ScanResultType.ALBUM, result_lists[i]))
+            thread.start()
+            threads.append(thread)
 
     for t in threads:
         t.join()
