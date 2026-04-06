@@ -32,7 +32,7 @@ my_session.mount("https://", adapter)
 class VGM_SITE(Enum):
     ZOPHAR = auto()
     # KHINSIDER = auto()
-    # VGMRIPS = auto()
+    VGMRIPS = auto()
     # HSC64 = auto()
 
 class VGMSiteInfo(NamedTuple):
@@ -42,8 +42,8 @@ class VGMSiteInfo(NamedTuple):
 
 VGM_SITE_INFOS: dict[VGM_SITE, VGMSiteInfo] = {} 
 VGM_SITE_INFOS[VGM_SITE.ZOPHAR] = VGMSiteInfo("Zophar", 'https://www.zophar.net', '/music/search?search=')
-# VGM_SITE_INFOS[VGMSite.KHINSIDER] = VGMSiteInfo("KHI", 'https://downloads.khinsider.com', '/search?search=')
-# VGM_SITE_INFOS[VGMSite.VGMRIPS] = VGMSiteInfo("VGMRips", 'https://vgmrips.net', '/packs/search?q=')
+# VGM_SITE_INFOS[VGM_SITE.KHINSIDER] = VGMSiteInfo("KHI", 'https://downloads.khinsider.com', '/search?search=')
+VGM_SITE_INFOS[VGM_SITE.VGMRIPS] = VGMSiteInfo("VGMRips", 'https://vgmrips.net', '/packs/search?q=')
 #NOTE: (Ahmayk) no info needed for HSC64 as we access everything from a json we predownload
 
 class ScanResultType(Enum):
@@ -110,99 +110,137 @@ def scan_vgm_site(url: str, vgm_site: VGM_SITE, scan_result_type: ScanResultType
 
     if response and soup:
 
-        all_link_tags = soup.find_all('a', href=True)
-        for link_tag in all_link_tags:
-            assert isinstance(link_tag, Tag)
-            href = link_tag['href']
-            assert isinstance(href, str)
+        skip_link_parsing = False
 
-            is_valid = True
-            found_url = urljoin(vgm_site_info.pre_href, href)
-            title = "" 
+        #NOTE: (Ahmayk) VGMRips redirects you to a page sometimes
+        if (response.url.startswith("https://vgmrips.net/packs/pack") and response.url != url):
+            title_tag = soup.find('title')
+            if title_tag is not None and title_tag.string is not None:
+                title = title_tag.string[0:title_tag.string.index(" vgm music • VGMRips")]
+                found_url = response.url
+                skip_link_parsing = True
+                output_scan_results.append(ScanResult(vgm_site, scan_result_type, title, found_url, None))
 
-            match vgm_site:
-                case VGM_SITE.ZOPHAR:
+        if not skip_link_parsing:
+            all_link_tags = soup.find_all('a', href=True)
+            for link_tag in all_link_tags:
+                assert isinstance(link_tag, Tag)
+                href = link_tag['href']
+                assert isinstance(href, str)
 
-                    if scan_result_type == ScanResultType.ALBUM:
-                        if href.count('/') != 3:
-                            is_valid = False
-                        if not 'music' in href: 
-                            is_valid = False
-                        if "music/letter" in href:
-                            is_valid = False
-                        title = link_tag.get_text(strip=True)
+                is_valid = True
+                found_url = ""
+                title = "" 
+
+                match vgm_site:
+                    case VGM_SITE.ZOPHAR:
+
+                        found_url = urljoin(vgm_site_info.pre_href, href)
+
+                        if scan_result_type == ScanResultType.ALBUM:
+                            if href.count('/') != 3:
+                                is_valid = False
+                            if not 'music' in href: 
+                                is_valid = False
+                            if "music/letter" in href:
+                                is_valid = False
+                            title = link_tag.get_text(strip=True)
+
+                        if scan_result_type == ScanResultType.TRACK:
+                            if not href.startswith('https://fi.zophar.net/soundfiles/'):
+                                is_valid = False
+
+                            if is_valid:
+                                parent = link_tag.parent
+                                if parent is not None:
+                                    row = parent.parent
+                                    if row is not None:
+                                        name_tag = row.find('td', class_='name')
+                                        if name_tag is not None:
+                                            title = name_tag.get_text(strip=True)
+
+                    case VGM_SITE.VGMRIPS:
+
+                        if scan_result_type == ScanResultType.ALBUM:
+                            found_url = urljoin(vgm_site_info.pre_href, href)
+                            if href.count('/') != 5:
+                                is_valid = False
+                            if not "/packs/pack" in href:
+                                is_valid = False
+                            if "#autoplay" in href:
+                                is_valid = False
+                            title = link_tag.get_text(strip=True)
+
+                        if scan_result_type == ScanResultType.TRACK:
+                            found_url = urljoin(url, href)
+                            if "#" not in href:
+                                is_valid = False
+                            if "DUMMY#" in found_url:
+                                found_url = found_url[5:]
+                            title = link_tag.get_text(strip=True)
+
+                        # if "/game-soundtracks/arrangements" in href and parent_tag.name == "b":
+                        #     aborted = True
+                        #     break
+
+                        # if scan_result_type == ScanResultType.ALBUM:
+                        #     if (parent_tag.has_attr('class') and "albumIconLarge" in parent_tag['class']):
+                        #         is_valid = False
+
+                        #     title_lower = title.lower()
+                        #     remix_keywords = ["restored", "fan remaster", "recreat", "fanmade", "fan-made", "soundfont remix", "soundtrack remake"]
+                        #     for keyword in remix_keywords:
+                        #         if keyword in title_lower:
+                        #             is_valid = False
+                        #             break
+
+                        #     match vgm_site:
+                        #         case VGM_SITE.ZOPHAR:
+                        #             if (
+                        #                 href.count('/') < 3
+                        #                 or "patreon" in href 
+                        #                 or "music/letter" in href
+                        #                 or "search.html" in href
+                        #             ):
+                        #                 is_valid = False
+                        #         # case VGMSite.KHINSIDER:
+                        #         #     if not "/album/" in href:
+                        #         #         is_valid = False
+                        #         # case VGMSite.VGMRIPS:
+                        #         #     if not "/pack/" in href:
+                        #         #         is_valid = False
+                        #         case _:
+                        #             assert "Unimplemented VGMSite Enum"
+
+                        # if scan_result_type == ScanResultType.TRACK:
+                            # if vgm_site == VGMSite.VGMRIPS and "DUMMY#" in found_url:
+                            #     # I dunno why this shows up in the url on VGMrips.
+                            #     found_url = found_url[5:]
+                            # if ("/company/" in url or "/developer/" in url):
+                            #     is_valid = False
+                            # if ("letter/)" in url):
+                            #     is_valid = False
+                            # if ("Download all files as" in title or "Download original music files" in title):
+                            #     is_valid = False
+
+
+                if not len(title) or not len(found_url): 
+                    is_valid = False
+
+                for scan_result in output_scan_results:
+                    if scan_result.url == found_url:
+                        is_valid = False
+
+                if is_valid:
 
                     if scan_result_type == ScanResultType.TRACK:
-                        if not href.startswith('https://fi.zophar.net/soundfiles/'):
-                            is_valid = False
+                        # print(link_tag)
+                        # print(f'HREF: {href}')
+                        print(f'URL: {found_url}')
 
-                        if is_valid:
-                            parent = link_tag.parent
-                            if parent is not None:
-                                row = parent.parent
-                                if row is not None:
-                                    name_tag = row.find('td', class_='name')
-                                    if name_tag is not None:
-                                        title = name_tag.get_text(strip=True)
-
-                    # if "/game-soundtracks/arrangements" in href and parent_tag.name == "b":
-                    #     aborted = True
-                    #     break
-
-                    # if scan_result_type == ScanResultType.ALBUM:
-                    #     if (parent_tag.has_attr('class') and "albumIconLarge" in parent_tag['class']):
-                    #         is_valid = False
-
-                    #     title_lower = title.lower()
-                    #     remix_keywords = ["restored", "fan remaster", "recreat", "fanmade", "fan-made", "soundfont remix", "soundtrack remake"]
-                    #     for keyword in remix_keywords:
-                    #         if keyword in title_lower:
-                    #             is_valid = False
-                    #             break
-
-                    #     match vgm_site:
-                    #         case VGM_SITE.ZOPHAR:
-                    #             if (
-                    #                 href.count('/') < 3
-                    #                 or "patreon" in href 
-                    #                 or "music/letter" in href
-                    #                 or "search.html" in href
-                    #             ):
-                    #                 is_valid = False
-                    #         # case VGMSite.KHINSIDER:
-                    #         #     if not "/album/" in href:
-                    #         #         is_valid = False
-                    #         # case VGMSite.VGMRIPS:
-                    #         #     if not "/pack/" in href:
-                    #         #         is_valid = False
-                    #         case _:
-                    #             assert "Unimplemented VGMSite Enum"
-
-                    # if scan_result_type == ScanResultType.TRACK:
-                        # if vgm_site == VGMSite.VGMRIPS and "DUMMY#" in found_url:
-                        #     # I dunno why this shows up in the url on VGMrips.
-                        #     found_url = found_url[5:]
-                        # if ("/company/" in url or "/developer/" in url):
-                        #     is_valid = False
-                        # if ("letter/)" in url):
-                        #     is_valid = False
-                        # if ("Download all files as" in title or "Download original music files" in title):
-                        #     is_valid = False
-
-
-            if not len(title): 
-                is_valid = False
-
-            if is_valid:
-
-                # if scan_result_type == ScanResultType.TRACK:
-                    # print(link_tag)
-                    # print(f'HREF: {href}')
-                    # print(f'URL: {found_url}')
-
-                assert len(title)
-                result = ScanResult(vgm_site, scan_result_type, title, found_url, None)
-                output_scan_results.append(result)
+                    assert len(title)
+                    result = ScanResult(vgm_site, scan_result_type, title, found_url, None)
+                    output_scan_results.append(result)
 
 
         # aborted = False
@@ -503,10 +541,13 @@ def find_song(game_and_track_pairs: list[GameAndTrackPair]) -> FindSongResult:
                 if pair.track_name not in source_track.track_title:
                     score -= 2
                 is_valid = True
+                to_remove = None
                 for s in scored_sources:
-                    if s.source_track == source_track:
-                        is_valid = score > s.score
+                    if s.source_track == source_track and score > s.score:
+                        to_remove = s
                         break
+                if to_remove:
+                    scored_sources.remove(to_remove)
                 if is_valid:
                     scored_sources.append(ScoredSourceTrack(score, source_track))
 
