@@ -59,7 +59,7 @@ cached_track_results = dict()
 
 def scan_vgm_site(url: str, vgm_site: VGM_SITE, scan_result_type: ScanResultType, output_scan_results: List[ScanResult]):
 
-    print(f"SCANNING SITE: {url}")
+    # print(f"SCANNING SITE: {url}")
 
     assert vgm_site in VGM_SITE_INFOS
     vgm_site_info = VGM_SITE_INFOS[vgm_site]
@@ -228,7 +228,7 @@ def scan_vgm_site(url: str, vgm_site: VGM_SITE, scan_result_type: ScanResultType
 
 
 def search_sites_for_albums(game_name: str, output_scan_result_list: List[ScanResult]):
-    print(f"SEARCHING SITES FOR {game_name}")
+    # print(f"SEARCHING SITES FOR {game_name}")
     threads: List[threading.Thread] = []
     result_lists: List[List[ScanResult]] = []
     game_name = quote(game_name) 
@@ -272,7 +272,7 @@ class SourceTrack(NamedTuple):
 def get_tracks_in_album(scan_result_album: ScanResult, output_source_tracks: List[SourceTrack]):
     scan_result_tracks: List[ScanResult] = []
     scan_vgm_site(scan_result_album.url, scan_result_album.vgm_site, ScanResultType.TRACK, scan_result_tracks)
-    print(f"Returned tracks from scan for {scan_result_album.url}: {len(scan_result_tracks)}")
+    # print(f"Returned tracks from scan for {scan_result_album.url}: {len(scan_result_tracks)}")
     for scan_result_track in scan_result_tracks:
         assert scan_result_album.vgm_site == scan_result_track.vgm_site
         track_url = urljoin(scan_result_album.url, scan_result_track.url)
@@ -449,7 +449,7 @@ def find_song(game_and_track_pairs: list[GameAndTrackPair]) -> FindSongResult:
                 score = score_title_similarity(game_name, scan_result_album.title, ScanResultType.ALBUM)
                 if scan_result_album.url not in scored_album_dict or scored_album_dict[scan_result_album.url].score < score:
                     scored_album_dict[scan_result_album.url] = ScoredAlbum(score, scan_result_album)
-                    print(f'SCORED ALBUM {game_name} {score} - {scan_result_album.title}')
+                    # print(f'SCORED ALBUM {game_name} {score} - {scan_result_album.title}')
 
     scored_albums = list(sorted(scored_album_dict.values(), key=lambda s: s.score, reverse=True))
     scored_albums = scored_albums[:10]
@@ -509,15 +509,15 @@ def find_song(game_and_track_pairs: list[GameAndTrackPair]) -> FindSongResult:
         scored_sources.remove(track)
     scored_sources = scored_sources[:5]
 
-    for s in scored_sources:
-        print(s)
+    # for s in scored_sources:
+    #     print(s)
 
     # full_url = urljoin(scan_result_album.url, scan_result_track.url)
     # cached_track_results[(game_name, track_name)] = track_list
 
-    if len(game_and_track_pairs):
-        print(f'TOTAL ALBUM COUNT: {len(scan_result_dict_albums.keys())}')
-        print(f'TOTAL TRACK COUNT: {len(output_source_tracks)}')
+    # if len(game_and_track_pairs):
+    #     print(f'TOTAL ALBUM COUNT: {len(scan_result_dict_albums.keys())}')
+    #     print(f'TOTAL TRACK COUNT: {len(output_source_tracks)}')
 
     source_tracks: list[SourceTrack] = []
     for scored_track in scored_sources:
@@ -547,17 +547,17 @@ def search_rip_sources(submissionText: str):
     if title is None: 
         title = submissionText
 
-    print(f'TITLE: {title}')
+    # print(f'TITLE: {title}')
 
     description = get_rip_description(submissionText)
     desc_dict, msgs = desc_to_dict(description, 1)
     track_string = get_music_from_desc(desc_dict)
 
-    print(f'TRACK STRING: {track_string}')
+    # print(f'TRACK STRING: {track_string}')
 
     game_and_track_pairs = parseTitle(title, ' - ', track_string)
 
-    print(f'PAIRS: {game_and_track_pairs}')
+    # print(f'PAIRS: {game_and_track_pairs}')
 
     result = ""
 
@@ -623,25 +623,5 @@ def search_rip_sources(submissionText: str):
         if len(joke_links):
             joke_string = ", ".join(joke_links)
             result += f"\nYouTube Search: {joke_string}"
-
-        # joke_name_pairs: list[GameAndTrackPair] = []
-        # dividers = [' - ', ' from ']
-        # for divider in dividers:
-        #     for joke in jokes:
-        #         game_and_track_pairs = parseTitle(joke, divider, "")
-        #         for pair in game_and_track_pairs:
-        #             if pair not in joke_name_pairs:
-        #                 joke_name_pairs.append(pair)
-
-        # if len(joke_name_pairs):
-        #     find_song_result = find_song(joke_name_pairs)
-        #TODO: (Ahmayk) display this somehow in a way that makes sense?
-        # (or cut it lol, youtube might be more useful)
-
-    else:
-        print("Joke not found.")
-        pass
-
-    print("All done!")
 
     return result
