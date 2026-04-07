@@ -4,3 +4,4 @@ numpy==1.24.2
 Requests==2.32.3
 scipy==1.10.1
 python-dateutil>=2.9.0.post0
+bs4>=0.0.2
