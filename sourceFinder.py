@@ -267,6 +267,7 @@ def _parse_title_internal(title: str, divider: str, track_name: str) -> list[Gam
             after = after.strip()
 
             before_no_mixname = "" 
+            after_no_mixname = "" 
             if (before.endswith(")") and "(" in before):
                 before_no_mixname = before[0:before.rindex("(")].strip()
             if (after.endswith(")") and "(" in after):
@@ -519,18 +520,26 @@ def search_rip_sources(submissionText: str):
 
     result = ""
 
-    find_song_result = find_song(game_and_track_pairs)
-    for source_track in find_song_result.source_tracks:
-        result += f"\n- **[{source_track.track_title}]({source_track.track_url})** - [{source_track.album_title}]({source_track.album_url}) ({VGM_SITE_INFOS[source_track.vgm_site].name})"
+    skip_search = False
+    for pair in game_and_track_pairs:
+        if pair.game_name == "Undertale" or pair.game_name == "Deltarune":
+            skip_search = True
+            result += "\nsorry sebby said no"
+            break
 
-    for scan_result_album in find_song_result.albums: 
-        exists_in_tracks = False
+    if not skip_search:
+        find_song_result = find_song(game_and_track_pairs)
         for source_track in find_song_result.source_tracks:
-            if scan_result_album.url == source_track.album_url:
-                exists_in_tracks = True
-                break
-        if not exists_in_tracks:
-            result += f"\nAlbum: [{scan_result_album.title}](<{scan_result_album.url}>) ({VGM_SITE_INFOS[scan_result_album.vgm_site].name})"
+            result += f"\n- **[{source_track.track_title}]({source_track.track_url})** - [{source_track.album_title}]({source_track.album_url}) ({VGM_SITE_INFOS[source_track.vgm_site].name})"
+
+        for scan_result_album in find_song_result.albums: 
+            exists_in_tracks = False
+            for source_track in find_song_result.source_tracks:
+                if scan_result_album.url == source_track.album_url:
+                    exists_in_tracks = True
+                    break
+            if not exists_in_tracks:
+                result += f"\nAlbum: [{scan_result_album.title}](<{scan_result_album.url}>) ({VGM_SITE_INFOS[scan_result_album.vgm_site].name})"
 
     YOUTUBE_SEARCH_URL = "https://www.youtube.com/results?search_query="
 
@@ -538,13 +547,18 @@ def search_rip_sources(submissionText: str):
     result += f"\nYouTube Search: [{title}]({youtube_title_url})"
 
     joke = get_rip_joke(submissionText)
-    print(f'\nJOKE: {joke}')
     if len(joke):
+        #NOTE: (Ahmayk) removes embedded links
+        joke = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', joke)
         jokes = re.split(r'[\,\.]', joke)
-
+        joke_links = []
         for(joke) in jokes:
             youtube_title_url = YOUTUBE_SEARCH_URL + quote_plus(joke)
-            result += f"\nYouTube Search: [{joke}](<{youtube_title_url}>)"
+            joke = joke.translate(str.maketrans('', '', string.punctuation))
+            joke_links.append(f"[{joke}](<{youtube_title_url}>)")
+        if len(joke_links):
+            joke_string = ", ".join(joke_links)
+            result += f"\nYouTube Search: {joke_string}"
 
         # joke_name_pairs: list[GameAndTrackPair] = []
         # dividers = [' - ', ' from ']
@@ -555,7 +569,8 @@ def search_rip_sources(submissionText: str):
         #             if pair not in joke_name_pairs:
         #                 joke_name_pairs.append(pair)
 
-        # find_song_result = find_song(joke_name_pairs)
+        # if len(joke_name_pairs):
+        #     find_song_result = find_song(joke_name_pairs)
         #TODO: (Ahmayk) display this somehow in a way that makes sense?
         # (or cut it lol, youtube might be more useful)
 
