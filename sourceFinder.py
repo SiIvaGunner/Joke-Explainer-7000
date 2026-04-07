@@ -391,39 +391,62 @@ def parseTitle(title: str, divider: str, track_name: str) -> list[GameAndTrackPa
 def get_cleaned_words(title: str) -> str:
     title = title.lower()
     title = title.translate(str.maketrans('', '', string.punctuation))
+    #NOTE: (Ahmayk) remove common mixname keywords, matching to them dilutes search
+    title = title.replace("version", "")
+    title = title.replace("mix", "")
     return title
 
+
+#https://www.geeksforgeeks.org/dsa/longest-common-substring-dp-29/
+def longest_common_substring(s1, s2):
+    m = len(s1)
+    n = len(s2)
+
+    # Create a 1D array to store the previous row's results
+    prev = [0] * (n + 1)
+    
+    res = 0
+    for i in range(1, m + 1):
+      
+        # Create a temporary array to store the current row
+        curr = [0] * (n + 1)
+        for j in range(1, n + 1):
+            if s1[i - 1] == s2[j - 1]:
+                curr[j] = prev[j - 1] + 1
+                res = max(res, curr[j])
+            else:
+                curr[j] = 0
+        
+        # Move the current row's data to the previous row
+        prev = curr
+    
+    return res
+
+#NOTE: (Ahamyk) fine tuned similarity algorythm
 def score_title_similarity(submitted_title: str, scanned_title: str, scan_result_type: ScanResultType) -> float:
 
-    parenthesis_index: list[bool] = []
-    is_in_parenthesis = False
-    for word in submitted_title.split():
-        if '(' in word in word:
-            is_in_parenthesis = True
-        parenthesis_index.append(is_in_parenthesis)
-        if ')' in word in word:
-            is_in_parenthesis = True
+    score = 0.0
 
     submitted_title = get_cleaned_words(submitted_title)
     scanned_title = get_cleaned_words(scanned_title)
 
-    submitted_title_words = submitted_title.split()
-    scanned_title_words = scanned_title.split() 
+    score += longest_common_substring(submitted_title, scanned_title)
 
-    word_ratio = 0.0
-    if len(submitted_title_words):
-        count = 0.0
-        for i, word in enumerate(submitted_title_words):
-            if word in scanned_title_words:
-                if parenthesis_index[i]:
-                    count += 0.5
-                else:
-                    count += 1
-        word_ratio = count / float(len(submitted_title_words))
+    match scan_result_type:
 
-    character_ratio = SequenceMatcher(None, submitted_title, scanned_title).ratio()
+        case ScanResultType.ALBUM:
+            if submitted_title == scanned_title:
+                score += 5 
 
-    score = word_ratio + character_ratio
+        case ScanResultType.TRACK:
+            if submitted_title == scanned_title:
+                score += 12 
+            else:
+                if submitted_title in scanned_title:
+                    score += 10 
+
+                ratio = SequenceMatcher(None, submitted_title, scanned_title).ratio()
+                score += ratio * 3
 
     return score 
 
@@ -452,10 +475,10 @@ def find_song(game_and_track_pairs: list[GameAndTrackPair]) -> FindSongResult:
     for game_name, scan_result_list in scan_result_dict_albums.items():
         scan_result_dict_albums_scored[game_name] = []
         for scan_result_album in scan_result_list:
-            score = score_title_similarity(game_name, scan_result_album.title, ScanResultType.ALBUM)
-            print(f"ALBUM SCORE {score}: {scan_result_album.title}")
-            if score > 0.0:
-                scan_result_dict_albums_scored[game_name].append(ScoredAlbum(score, scan_result_album))
+            total_score = score_title_similarity(game_name, scan_result_album.title, ScanResultType.ALBUM)
+            print(f"ALBUM SCORE {total_score}: {scan_result_album.title}")
+            if total_score > 0.0:
+                scan_result_dict_albums_scored[game_name].append(ScoredAlbum(total_score, scan_result_album))
     
     scan_result_dict_albums_sorted: dict[str, list[ScoredAlbum]] = {}
     for game_name, scored_albums in scan_result_dict_albums_scored.items():
@@ -490,21 +513,21 @@ def find_song(game_and_track_pairs: list[GameAndTrackPair]) -> FindSongResult:
     scored_sources: list[ScoredSourceTrack] = []
     for pair in game_and_track_pairs:
         for source_track in output_source_tracks:
-            ratio_track = score_title_similarity(pair.track_name, source_track.track_title, ScanResultType.TRACK)
-            if ratio_track > 0:
-                print(f'TRACK SCORE: {ratio_track}: {source_track.track_title}')
-                ratio_album = score_title_similarity(pair.game_name, source_track.album_title, ScanResultType.ALBUM)
-                score = ratio_track + ratio_album
+            score_track = score_title_similarity(pair.track_name, source_track.track_title, ScanResultType.TRACK)
+            if score_track > 0:
+                print(f'TRACK SCORE: {score_track}: {source_track.track_title}')
+                score_album = score_title_similarity(pair.game_name, source_track.album_title, ScanResultType.ALBUM)
+                total_score = score_track + score_album
                 is_valid = True
                 to_remove = None
                 for s in scored_sources:
-                    if s.source_track == source_track and score > s.score:
+                    if s.source_track == source_track and total_score > s.score:
                         to_remove = s
                         break
                 if to_remove:
                     scored_sources.remove(to_remove)
                 if is_valid:
-                    scored_sources.append(ScoredSourceTrack(score, source_track))
+                    scored_sources.append(ScoredSourceTrack(total_score, source_track))
 
     scored_sources = sorted(scored_sources, key=lambda scored_source: scored_source.score, reverse=True)
     # scored_sources = scored_sources[:3]
@@ -573,8 +596,7 @@ def search_rip_sources(submissionText: str):
     YOUTUBE_SEARCH_URL = "https://www.youtube.com/results?search_query="
 
     youtube_title_url = YOUTUBE_SEARCH_URL + quote_plus(title)
-    # print(f"Game search results: {youtube_title_url}")
-    result += f"\n\nTitle YouTube Search: [{title}]({youtube_title_url})"
+    result += f"\n\nYouTube Search: [{title}]({youtube_title_url})"
 
     joke = get_rip_joke(submissionText)
     print(f'\nJOKE: {joke}')
@@ -583,7 +605,7 @@ def search_rip_sources(submissionText: str):
 
         for(joke) in jokes:
             youtube_title_url = YOUTUBE_SEARCH_URL + quote_plus(joke)
-            result += f"\nJoke YouTube Search: [{joke}](<{youtube_title_url}>)"
+            result += f"\nYouTube Search: [{joke}](<{youtube_title_url}>)"
 
         # joke_name_pairs: list[GameAndTrackPair] = []
         # dividers = [' - ', ' from ']
