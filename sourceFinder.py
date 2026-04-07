@@ -52,6 +52,7 @@ class ScanResult(NamedTuple):
     type: ScanResultType 
     title: str
     url: str
+    platform: str
 
 cached_album_results = dict()
 cached_track_results = dict()
@@ -85,10 +86,42 @@ def scan_vgm_site(url: str, vgm_site: VGM_SITE, scan_result_type: ScanResultType
                 title = page_element.string[0:page_element.string.index(" vgm music • VGMRips")]
                 found_url = response.url
                 skip_link_parsing = True
-                output_scan_results.append(ScanResult(vgm_site, scan_result_type, title, found_url))
+                output_scan_results.append(ScanResult(vgm_site, scan_result_type, title, found_url, ""))
 
         if not skip_link_parsing:
             all_link_tags = soup.find_all('a', href=True)
+
+            track_platform = ""
+            if scan_result_type == ScanResultType.TRACK:
+                match vgm_site:
+                    case VGM_SITE.ZOPHAR:
+                        label_tag = soup.find(string="Console:")
+                        if label_tag:
+                            platform_tag = label_tag.find_next()
+                            if platform_tag:
+                                track_platform = platform_tag.get_text(strip=True)
+                        pass
+                    case VGM_SITE.VGMRIPS:
+                        label_tag = soup.find(string=["Systems:", "System:"])
+                        if label_tag:
+                            platform_tag = label_tag.find_next(class_="badge")
+                            if platform_tag:
+                                track_platform = platform_tag.get_text(strip=True)
+                        pass
+                    case VGM_SITE.KHINSIDER:
+                        meta_desc_tag = soup.find("meta", attrs={"name": "description"})
+                        title_tag = soup.h2
+                        if meta_desc_tag and title_tag:
+                            title = title_tag.get_text(strip=True)
+                            match = re.search(re.escape(title) + r'\s*\(([^)]+)\)', str(meta_desc_tag["content"]))
+                            if match:
+                                track_platform = match.group(1)
+
+            #NOTE: (Ahmayk) output dummy result so that we export the platform in the event there are no tracks found
+            # (This came up with zophar)
+            dummy_result = ScanResult(vgm_site, scan_result_type, "", "", track_platform)
+            output_scan_results.append(dummy_result)
+
             for link_tag in all_link_tags:
                 assert isinstance(link_tag, Tag)
                 href = link_tag['href']
@@ -189,7 +222,7 @@ def scan_vgm_site(url: str, vgm_site: VGM_SITE, scan_result_type: ScanResultType
                         # print(f'Title: {title}')
 
                     assert len(title)
-                    result = ScanResult(vgm_site, scan_result_type, title, found_url)
+                    result = ScanResult(vgm_site, scan_result_type, title, found_url, track_platform)
                     output_scan_results.append(result)
 
 
@@ -233,6 +266,7 @@ class SourceTrack(NamedTuple):
     album_url: str 
     track_title: str
     track_url: str
+    track_platform: str
 
 def get_tracks_in_album(scan_result_album: ScanResult, output_source_tracks: List[SourceTrack]):
     scan_result_tracks: List[ScanResult] = []
@@ -246,7 +280,8 @@ def get_tracks_in_album(scan_result_album: ScanResult, output_source_tracks: Lis
             scan_result_album.title,
             scan_result_album.url,
             scan_result_track.title,
-            track_url 
+            track_url ,
+            scan_result_track.platform,
         )
         output_source_tracks.append(source_track)
         # print(f'track name in album {scan_result_album.title}: {scan_result_track.title}')
@@ -443,8 +478,7 @@ def find_song(game_and_track_pairs: list[GameAndTrackPair]) -> FindSongResult:
     for pair in game_and_track_pairs:
         for source_track in output_source_tracks:
             score_track = score_title_similarity(pair.track_name, source_track.track_title, ScanResultType.TRACK)
-            print(f'TRACK SCORE: {score_track}: {source_track.track_title}')
-            # score_album = score_title_similarity(pair.game_name, source_track.album_title, ScanResultType.ALBUM)
+            # print(f'TRACK SCORE: {score_track}: {source_track.track_title}')
             total_score = score_track
             is_valid = True
             to_remove = None
@@ -489,7 +523,12 @@ def find_song(game_and_track_pairs: list[GameAndTrackPair]) -> FindSongResult:
 
     albums: list[ScanResult] = []
     for i in range(min(3, len(scored_albums))):
-        albums.append(scored_albums[i].scan_result_album)
+        album_output = scored_albums[i].scan_result_album
+        for scoured_track in output_source_tracks: 
+            if scoured_track.album_url == album_output.url and len(scoured_track.track_platform):
+                album_output = album_output._replace(platform = scoured_track.track_platform)
+                break
+        albums.append(album_output)
 
     return FindSongResult(source_tracks, albums)
 
@@ -529,8 +568,25 @@ def search_rip_sources(submissionText: str):
 
     if not skip_search:
         find_song_result = find_song(game_and_track_pairs)
-        for source_track in find_song_result.source_tracks:
-            result += f"\n- **[{source_track.track_title}]({source_track.track_url})** - [{source_track.album_title}]({source_track.album_url}) ({VGM_SITE_INFOS[source_track.vgm_site].name})"
+
+        display_platforms = False
+        if len(find_song_result.source_tracks):
+            test_platform = ""
+            for source_track in find_song_result.source_tracks:
+                if len(find_song_result.source_tracks[0].track_platform):
+                    test_platform = find_song_result.source_tracks[0].track_platform
+            if not display_platforms and len(test_platform):
+                for source_track in find_song_result.source_tracks:
+                    if len(source_track.track_platform) and test_platform != source_track.track_platform:
+                        display_platforms = True
+                        break
+
+            for source_track in find_song_result.source_tracks:
+                album_title = source_track.album_title
+                if display_platforms and len(source_track.track_platform):
+                    album_title += f" ({source_track.track_platform})"
+                result += f"\n- **[{source_track.track_title}]({source_track.track_url})** - [{album_title}]({source_track.album_url})"
+                result += f" [{VGM_SITE_INFOS[source_track.vgm_site].name}]"
 
         for scan_result_album in find_song_result.albums: 
             exists_in_tracks = False
@@ -539,7 +595,11 @@ def search_rip_sources(submissionText: str):
                     exists_in_tracks = True
                     break
             if not exists_in_tracks:
-                result += f"\nAlbum: [{scan_result_album.title}](<{scan_result_album.url}>) ({VGM_SITE_INFOS[scan_result_album.vgm_site].name})"
+                album_title = scan_result_album.title 
+                if display_platforms and len(scan_result_album.platform):
+                    album_title += f" ({scan_result_album.platform})"
+                result += f"\nAlbum: [{album_title}](<{scan_result_album.url}>)"
+                result += f" [{VGM_SITE_INFOS[scan_result_album.vgm_site].name}]"
 
     YOUTUBE_SEARCH_URL = "https://www.youtube.com/results?search_query="
 
@@ -555,7 +615,9 @@ def search_rip_sources(submissionText: str):
         for(joke) in jokes:
             youtube_title_url = YOUTUBE_SEARCH_URL + quote_plus(joke)
             joke = joke.translate(str.maketrans('', '', string.punctuation))
-            joke_links.append(f"[{joke}](<{youtube_title_url}>)")
+            joke = joke.strip()
+            if len(joke):
+                joke_links.append(f"[{joke}](<{youtube_title_url}>)")
         if len(joke_links):
             joke_string = ", ".join(joke_links)
             result += f"\nYouTube Search: {joke_string}"
