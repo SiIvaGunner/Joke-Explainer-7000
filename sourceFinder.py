@@ -445,10 +445,11 @@ def find_song(game_and_track_pairs: list[GameAndTrackPair]) -> FindSongResult:
     scored_album_dict: dict[str, ScoredAlbum] = {}
     for game_name, scan_result_list in scan_result_dict_albums.items():
         for scan_result_album in scan_result_list:
-            score = score_title_similarity(game_name, scan_result_album.title, ScanResultType.ALBUM)
-            if scan_result_album.url not in scored_album_dict or scored_album_dict[scan_result_album.url].score < score:
-                scored_album_dict[scan_result_album.url] = ScoredAlbum(score, scan_result_album)
-                print(f'SCORED ALBUM {game_name} {score} - {scan_result_album.title}')
+            if len(scan_result_album.title):
+                score = score_title_similarity(game_name, scan_result_album.title, ScanResultType.ALBUM)
+                if scan_result_album.url not in scored_album_dict or scored_album_dict[scan_result_album.url].score < score:
+                    scored_album_dict[scan_result_album.url] = ScoredAlbum(score, scan_result_album)
+                    print(f'SCORED ALBUM {game_name} {score} - {scan_result_album.title}')
 
     scored_albums = list(sorted(scored_album_dict.values(), key=lambda s: s.score, reverse=True))
     scored_albums = scored_albums[:10]

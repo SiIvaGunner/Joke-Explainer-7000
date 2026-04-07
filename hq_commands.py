@@ -1685,7 +1685,7 @@ async def peek_url(args: list[str], command_context: CommandContext):
 @command(
     command_type=CommandType.SOURCE,
     format='<message link | text>',
-    brief='Search for sources in rip message',
+    brief='Search for sources in rip msg or text',
     public=True
 )
 async def source(args: list[str], command_context: CommandContext):
