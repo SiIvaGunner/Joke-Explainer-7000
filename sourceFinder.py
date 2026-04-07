@@ -1,13 +1,13 @@
 import requests
 import re
 import threading
+import string
 from bs4 import BeautifulSoup, Tag
 from urllib.parse import quote, quote_plus, urljoin
 from urllib3.util.retry import Retry
 from difflib import SequenceMatcher
-from typing import Callable, Any
+from typing import Any
 from collections.abc import Iterable
-from itertools import chain
 from enum import Enum, auto
 from requests.adapters import HTTPAdapter
 
@@ -388,6 +388,46 @@ def parseTitle(title: str, divider: str, track_name: str) -> list[GameAndTrackPa
     return pairs
 
 
+def get_cleaned_words(title: str) -> str:
+    title = title.lower()
+    title = title.translate(str.maketrans('', '', string.punctuation))
+    return title
+
+def score_title_similarity(submitted_title: str, scanned_title: str, scan_result_type: ScanResultType) -> float:
+
+    parenthesis_index: list[bool] = []
+    is_in_parenthesis = False
+    for word in submitted_title.split():
+        if '(' in word in word:
+            is_in_parenthesis = True
+        parenthesis_index.append(is_in_parenthesis)
+        if ')' in word in word:
+            is_in_parenthesis = True
+
+    submitted_title = get_cleaned_words(submitted_title)
+    scanned_title = get_cleaned_words(scanned_title)
+
+    submitted_title_words = submitted_title.split()
+    scanned_title_words = scanned_title.split() 
+
+    word_ratio = 0.0
+    if len(submitted_title_words):
+        count = 0.0
+        for i, word in enumerate(submitted_title_words):
+            if word in scanned_title_words:
+                if parenthesis_index[i]:
+                    count += 0.5
+                else:
+                    count += 1
+        word_ratio = count / float(len(submitted_title_words))
+
+    character_ratio = SequenceMatcher(None, submitted_title, scanned_title).ratio()
+
+    score = word_ratio + character_ratio
+
+    return score 
+
+
 class FindSongResult(NamedTuple):
     source_tracks: list[SourceTrack]
     albums: list[ScanResult]
@@ -412,9 +452,9 @@ def find_song(game_and_track_pairs: list[GameAndTrackPair]) -> FindSongResult:
     for game_name, scan_result_list in scan_result_dict_albums.items():
         scan_result_dict_albums_scored[game_name] = []
         for scan_result_album in scan_result_list:
-            score = SequenceMatcher(None, scan_result_album.title, game_name).ratio()
+            score = score_title_similarity(game_name, scan_result_album.title, ScanResultType.ALBUM)
             print(f"ALBUM SCORE {score}: {scan_result_album.title}")
-            if score > 0.2:
+            if score > 0.0:
                 scan_result_dict_albums_scored[game_name].append(ScoredAlbum(score, scan_result_album))
     
     scan_result_dict_albums_sorted: dict[str, list[ScoredAlbum]] = {}
@@ -432,7 +472,7 @@ def find_song(game_and_track_pairs: list[GameAndTrackPair]) -> FindSongResult:
                 scanned_album_dict[scored_album.scan_result_album.url] = scored_album
 
     scored_albums = list(sorted(scanned_album_dict.values(), key=lambda s: s.score, reverse=True))
-    print(f'SCORED ALBUMS: {scored_albums}')
+    # print(f'SCORED ALBUMS: {scored_albums}')
 
     output_source_tracks: list[SourceTrack] = []
     threads = []
@@ -450,14 +490,11 @@ def find_song(game_and_track_pairs: list[GameAndTrackPair]) -> FindSongResult:
     scored_sources: list[ScoredSourceTrack] = []
     for pair in game_and_track_pairs:
         for source_track in output_source_tracks:
-            ratio_track = SequenceMatcher(None, source_track.track_title, pair.track_name).ratio()
-            if ratio_track > 0.2:
-                ratio_album = SequenceMatcher(None, source_track.album_title, pair.game_name).ratio()
-                score = (ratio_album * 2) + (ratio_track * 5)
-                if pair.game_name not in source_track.album_title:
-                    score -= 2
-                if pair.track_name not in source_track.track_title:
-                    score -= 2
+            ratio_track = score_title_similarity(pair.track_name, source_track.track_title, ScanResultType.TRACK)
+            if ratio_track > 0:
+                print(f'TRACK SCORE: {ratio_track}: {source_track.track_title}')
+                ratio_album = score_title_similarity(pair.game_name, source_track.album_title, ScanResultType.ALBUM)
+                score = ratio_track + ratio_album
                 is_valid = True
                 to_remove = None
                 for s in scored_sources:
@@ -470,8 +507,8 @@ def find_song(game_and_track_pairs: list[GameAndTrackPair]) -> FindSongResult:
                     scored_sources.append(ScoredSourceTrack(score, source_track))
 
     scored_sources = sorted(scored_sources, key=lambda scored_source: scored_source.score, reverse=True)
-    scored_sources = scored_sources[:3]
-    # scored_sources = scored_sources[:20]
+    # scored_sources = scored_sources[:3]
+    scored_sources = scored_sources[:20]
 
     for s in scored_sources:
         print(s)
