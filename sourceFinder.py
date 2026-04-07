@@ -109,13 +109,14 @@ def scan_vgm_site(url: str, vgm_site: VGM_SITE, scan_result_type: ScanResultType
                                 track_platform = platform_tag.get_text(strip=True)
                         pass
                     case VGM_SITE.KHINSIDER:
-                        meta_desc_tag = soup.find("meta", attrs={"name": "description"})
                         title_tag = soup.h2
-                        if meta_desc_tag and title_tag:
-                            title = title_tag.get_text(strip=True)
-                            match = re.search(re.escape(title) + r'\s*\(([^)]+)\)', str(meta_desc_tag["content"]))
-                            if match:
-                                track_platform = match.group(1)
+                        if title_tag:
+                            desc_tag = title_tag.find_next('p', attrs={"align": "left"})
+                            if desc_tag:
+                                desc = desc_tag.get_text()
+                                lines = desc.splitlines()
+                                if len(lines) > 1:
+                                    track_platform = lines[1].replace("Platforms: ", "").strip()
 
             #NOTE: (Ahmayk) output dummy result so that we export the platform in the event there are no tracks found
             # (This came up with zophar)
