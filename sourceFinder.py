@@ -387,12 +387,19 @@ def parseTitle(title: str, divider: str, track_name: str) -> list[GameAndTrackPa
     return pairs
 
 
-def get_cleaned_words(title: str) -> str:
+def get_cleaned_words(title: str, scan_result_type: ScanResultType) -> str:
     title = title.lower()
     title = title.translate(str.maketrans('', '', string.punctuation))
-    #NOTE: (Ahmayk) remove common mixname keywords, matching to them dilutes search
-    title = title.replace("version", "")
-    title = title.replace("mix", "")
+    #NOTE: (Ahmayk) remove common keywords, matching to them dilutes search
+    if scan_result_type == ScanResultType.ALBUM:
+        title = title.replace(" ost", " ")
+        title = title.replace(" official soundtrack ", " ")
+        title = title.replace(" unofficial soundtrack", " ")
+        title = title.replace(" soundtrack", " ")
+    if scan_result_type == ScanResultType.TRACK:
+        title = title.replace(" version", " ")
+        title = title.replace(" mix", " ")
+    title = title.strip()
     return title
 
 
@@ -426,25 +433,34 @@ def score_title_similarity(submitted_title: str, scanned_title: str, scan_result
 
     score = 0.0
 
-    submitted_title = get_cleaned_words(submitted_title)
-    scanned_title = get_cleaned_words(scanned_title)
+    submitted_title = get_cleaned_words(submitted_title, scan_result_type)
+    scanned_title = get_cleaned_words(scanned_title, scan_result_type)
 
-    score += longest_common_substring(submitted_title, scanned_title)
+    # print(f'SUB: {submitted_title} SCAN: {scanned_title}')
+    lcs = longest_common_substring(submitted_title, scanned_title)
+    # print(f"LCS: {lcs}")
+    score += lcs 
 
     match scan_result_type:
 
         case ScanResultType.ALBUM:
+            # print(f'SUB: {submitted_title} SCAN: {scanned_title}')
+            # print(f'SUB: {len(submitted_title)} SCAN: {len(scanned_title)}')
             if submitted_title == scanned_title:
+                # print("MATCHES!")
                 score += 5 
 
         case ScanResultType.TRACK:
             if submitted_title == scanned_title:
+                # print("Exact match!")
                 score += 12 
             else:
                 if submitted_title in scanned_title:
+                    # print(f"Included!")
                     score += 10 
 
                 ratio = SequenceMatcher(None, submitted_title, scanned_title).ratio()
+                # print(f"ratio: {ratio}")
                 score += ratio * 3
 
     return score 
@@ -485,42 +501,18 @@ def find_song(game_and_track_pairs: list[GameAndTrackPair]) -> FindSongResult:
     scored_albums = list(sorted(scored_album_dict.values(), key=lambda s: s.score, reverse=True))
     scored_albums = scored_albums[:10]
 
+    #NOTE: (Ahmayk) filter out everything below the mean.
+    #this removes non matches pretty well!
     scores: list[float] = []
     for scored_album in scored_albums:
         scores.append(scored_album.score)
-    scores = sorted(scores, reverse=True)
-    album_standard_deviation = numpy.std(scores)
     album_mean = numpy.mean(scores)
-    album_min = numpy.min(scores)
-    album_max = numpy.max(scores)
-    q1 = numpy.percentile(scores, 25) 
-    q3 = numpy.percentile(scores, 75) 
-    iqr = q3 - q1 
-    min_zscore = (album_min - album_mean) / album_standard_deviation
-    max_zscore = (album_max - album_mean) / album_standard_deviation
-    cutoff = ((max_zscore / 2) * album_standard_deviation) + album_mean
-    print(scores)
-
-    zscores = []
-    for score in scores:
-        zscores.append((score - album_mean) / album_standard_deviation)
-    print(zscores)
-
-    print(f'std: {album_standard_deviation}')
-    print(f'mean: {album_mean}')
-    print(f'q1: {q1}')
-    print(f'q3: {q3}')
-    print(f'iqr: {iqr}')
-    print(f'min: {album_min}')
-    print(f'max: {album_max}')
-    print(f'min zscore: {min_zscore}')
-    print(f'max zscore: {max_zscore}')
-
-
-
-    # print(f'SCORED ALBUMS: {scored_albums}')
-
-    return FindSongResult([], [])
+    albums_to_remove = []
+    for album in scored_albums:
+        if album.score < album_mean:
+            albums_to_remove.append(album)
+    for album in albums_to_remove:
+        scored_albums.remove(album)
 
     output_source_tracks: list[SourceTrack] = []
     threads = []
@@ -531,30 +523,39 @@ def find_song(game_and_track_pairs: list[GameAndTrackPair]) -> FindSongResult:
     for t in threads:
         t.join()
 
-
     scored_sources: list[ScoredSourceTrack] = []
     for pair in game_and_track_pairs:
         for source_track in output_source_tracks:
             score_track = score_title_similarity(pair.track_name, source_track.track_title, ScanResultType.TRACK)
-            if score_track > 0:
-                # print(f'TRACK SCORE: {score_track}: {source_track.track_title}')
-                score_album = score_title_similarity(pair.game_name, source_track.album_title, ScanResultType.ALBUM)
-                total_score = score_track + score_album
-                is_valid = True
-                to_remove = None
-                for s in scored_sources:
-                    if s.source_track.track_url == source_track.track_url and total_score > s.score:
-                        to_remove = s
-                        break
-                if to_remove:
-                    print(f'REMOVING: {to_remove.source_track.track_url}')
-                    scored_sources.remove(to_remove)
-                if is_valid:
-                    scored_sources.append(ScoredSourceTrack(total_score, source_track))
+            print(f'TRACK SCORE: {score_track}: {source_track.track_title}')
+            # score_album = score_title_similarity(pair.game_name, source_track.album_title, ScanResultType.ALBUM)
+            total_score = score_track
+            is_valid = True
+            to_remove = None
+            for s in scored_sources:
+                if s.source_track.track_url == source_track.track_url and total_score > s.score:
+                    to_remove = s
+                    break
+            if to_remove:
+                scored_sources.remove(to_remove)
+            if is_valid:
+                scored_sources.append(ScoredSourceTrack(total_score, source_track))
 
     scored_sources = sorted(scored_sources, key=lambda scored_source: scored_source.score, reverse=True)
-    # scored_sources = scored_sources[:3]
     scored_sources = scored_sources[:20]
+    # print(scored_sources)
+
+    scores = []
+    for scored_track in scored_sources:
+        scores.append(scored_track.score)
+    track_mean = numpy.mean(scores)
+    tracks_to_remove: list[ScoredSourceTrack] = []
+    for track in scored_sources:
+        if track.score < track_mean:
+            tracks_to_remove.append(track)
+    for track in tracks_to_remove:
+        scored_sources.remove(track)
+    scored_sources = scored_sources[:5]
 
     for s in scored_sources:
         print(s)
@@ -619,7 +620,7 @@ def search_rip_sources(submissionText: str):
     YOUTUBE_SEARCH_URL = "https://www.youtube.com/results?search_query="
 
     youtube_title_url = YOUTUBE_SEARCH_URL + quote_plus(title)
-    result += f"\n\nYouTube Search: [{title}]({youtube_title_url})"
+    result += f"\nYouTube Search: [{title}]({youtube_title_url})"
 
     joke = get_rip_joke(submissionText)
     print(f'\nJOKE: {joke}')
