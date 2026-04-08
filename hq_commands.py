@@ -1702,6 +1702,8 @@ async def source(args: list[str], command_context: CommandContext):
             if message is None:
                 return await send(status, command_context.channel)
             text = message.content
+        elif '-' not in text:
+            return await send("Please format what you want to find like a rip title! `[track] - [game]`. Or you can give me a link to a message with a submitted rip in it.", command_context.channel)
 
         text = search_rip_sources(text)
         await send_embed(text, command_context.channel, EmbedDesc(title="Sources"))
