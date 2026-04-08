@@ -311,7 +311,7 @@ def _parse_title_internal(title: str, divider: str, track_name: str) -> list[Gam
 
             add_before_after = False
             add_after_before = False
-            
+
             if len(track_name):
                 if before == track_name:
                     add_before_after = True
@@ -324,10 +324,14 @@ def _parse_title_internal(title: str, divider: str, track_name: str) -> list[Gam
                 pairs.append(GameAndTrackPair(before, after))
                 if len(before_no_mixname):
                     pairs.append(GameAndTrackPair(before_no_mixname, after))
-            if add_after_before:
-                pairs.append(GameAndTrackPair(after, before))
                 if len(after_no_mixname):
                     pairs.append(GameAndTrackPair(before, after_no_mixname))
+            if add_after_before:
+                pairs.append(GameAndTrackPair(after, before))
+                if len(before_no_mixname):
+                    pairs.append(GameAndTrackPair(after, before_no_mixname))
+                if len(after_no_mixname):
+                    pairs.append(GameAndTrackPair(after_no_mixname, before))
 
     return pairs
 
