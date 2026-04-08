@@ -621,17 +621,16 @@ def search_rip_sources(submissionText: str):
         find_song_result = find_song(game_and_track_pairs)
 
         display_platforms = False
-        if len(find_song_result.source_tracks):
-            test_platform = ""
-            for source_track in find_song_result.source_tracks:
-                if len(find_song_result.source_tracks[0].track_platform):
-                    test_platform = find_song_result.source_tracks[0].track_platform
-            if not display_platforms and len(test_platform):
-                for source_track in find_song_result.source_tracks:
-                    if len(source_track.track_platform) and test_platform != source_track.track_platform:
-                        display_platforms = True
-                        break
+        test_platform = ""
+        for scan_result_album in find_song_result.albums: 
+            if len(scan_result_album.platform):
+                test_platform = scan_result_album.platform
+        for scan_result_album in find_song_result.albums: 
+            if len(scan_result_album.platform) and test_platform != scan_result_album.platform:
+                display_platforms = True
+                break
 
+        if len(find_song_result.source_tracks):
             for source_track in find_song_result.source_tracks:
                 album_title = source_track.album_title
                 if display_platforms and len(source_track.track_platform):
