@@ -54,9 +54,6 @@ class ScanResult(NamedTuple):
     url: str
     platform: str
 
-cached_album_results = dict()
-cached_track_results = dict()
-
 def scan_vgm_site(url: str, vgm_site: VGM_SITE, scan_result_type: ScanResultType, output_scan_results: List[ScanResult]):
 
     # print(f"SCANNING SITE: {url}")
@@ -91,6 +88,7 @@ def scan_vgm_site(url: str, vgm_site: VGM_SITE, scan_result_type: ScanResultType
         if not skip_link_parsing:
             all_link_tags = soup.find_all('a', href=True)
 
+            #NOTE: (Ahmayk) This code will need to be updated if the layout of a website ever changes
             track_platform = ""
             if scan_result_type == ScanResultType.TRACK:
                 match vgm_site:
@@ -132,6 +130,7 @@ def scan_vgm_site(url: str, vgm_site: VGM_SITE, scan_result_type: ScanResultType
                 found_url = ""
                 title = "" 
 
+                #NOTE: (Ahmayk) This code will need to be updated if the layout of a website ever changes
                 match vgm_site:
                     case VGM_SITE.ZOPHAR:
 
@@ -202,6 +201,7 @@ def scan_vgm_site(url: str, vgm_site: VGM_SITE, scan_result_type: ScanResultType
                                     parent = play_track_tag.parent
                                     if parent is not None and parent.contents is not None and len(parent.contents) > 7:
                                         #NOTE: (Ahmayk) finds the first link, this should always have the title 
+                                        #duplicates are filtered out later
                                         title_tag = parent.a
                                         if title_tag is not None:
                                             title = title_tag.get_text(strip=True)
@@ -272,7 +272,7 @@ class SourceTrack(NamedTuple):
 def get_tracks_in_album(scan_result_album: ScanResult, output_source_tracks: List[SourceTrack]):
     scan_result_tracks: List[ScanResult] = []
     scan_vgm_site(scan_result_album.url, scan_result_album.vgm_site, ScanResultType.TRACK, scan_result_tracks)
-    print(f"Returned tracks from scan for {scan_result_album.url}: {len(scan_result_tracks)}")
+    # print(f"Returned tracks from scan for {scan_result_album.url}: {len(scan_result_tracks)}")
     for scan_result_track in scan_result_tracks:
         assert scan_result_album.vgm_site == scan_result_track.vgm_site
         track_url = urljoin(scan_result_album.url, scan_result_track.url)
@@ -463,10 +463,10 @@ def find_song(game_and_track_pairs: list[GameAndTrackPair]) -> FindSongResult:
         for scan_result_album in scan_result_list:
             if len(scan_result_album.title):
                 score = score_title_similarity(game_name, scan_result_album.title, ScanResultType.ALBUM)
-                print(f"ALBUM URL {scan_result_album.url}")
+                # print(f"ALBUM URL {scan_result_album.url}")
                 if scan_result_album.url not in scored_album_dict or scored_album_dict[scan_result_album.url].score < score:
                     scored_album_dict[scan_result_album.url] = ScoredAlbum(score, scan_result_album)
-                    print(f'SCORED ALBUM {game_name} {score} - {scan_result_album.title}')
+                    # print(f'SCORED ALBUM {game_name} {score} - {scan_result_album.title}')
 
     scored_albums = list(sorted(scored_album_dict.values(), key=lambda s: s.score, reverse=True))
     scored_albums = scored_albums[:10]
@@ -479,7 +479,7 @@ def find_song(game_and_track_pairs: list[GameAndTrackPair]) -> FindSongResult:
     if len(scores):
         album_cutoff = numpy.minimum(numpy.max(scores), numpy.mean(scores))
 
-    print(f"ALBUM CUTOFF: {album_cutoff}")
+    # print(f"ALBUM CUTOFF: {album_cutoff}")
     albums_to_remove = []
     for album in scored_albums:
         if album.score <= (album_cutoff - 0.0001):
@@ -505,7 +505,7 @@ def find_song(game_and_track_pairs: list[GameAndTrackPair]) -> FindSongResult:
         for source_track in output_source_tracks:
             if len(source_track.track_title):
                 score_track = score_title_similarity(pair.track_name, source_track.track_title, ScanResultType.TRACK)
-                print(f'TRACK SCORE: {score_track}: {source_track.track_title}')
+                # print(f'TRACK SCORE: {score_track}: {source_track.track_title}')
                 if source_track not in scored_sources_dict or score_track > scored_sources_dict[source_track].score:
                     scored_sources_dict[source_track] = ScoredSourceTrack(score_track, source_track)
 
@@ -517,33 +517,35 @@ def find_song(game_and_track_pairs: list[GameAndTrackPair]) -> FindSongResult:
     for scored_track in scored_sources:
         scores.append(scored_track.score)
 
-    if len(scores):
-        scores = sorted(scores, reverse=True)
-        album_standard_deviation = numpy.std(scores)
-        album_mean = numpy.mean(scores)
-        album_min = numpy.min(scores)
-        album_max = numpy.max(scores)
-        q1 = numpy.percentile(scores, 25) 
-        q3 = numpy.percentile(scores, 75) 
-        iqr = q3 - q1 
-        min_zscore = (album_min - album_mean) / album_standard_deviation
-        max_zscore = (album_max - album_mean) / album_standard_deviation
-        print(scores)
+    #NOTE: (Ahmayk) useful for showing statistics on the score
+    #Used this to experiemnt with the math to make the scoring algorythm
+    # if len(scores):
+    #     scores = sorted(scores, reverse=True)
+    #     album_standard_deviation = numpy.std(scores)
+    #     album_mean = numpy.mean(scores)
+    #     album_min = numpy.min(scores)
+    #     album_max = numpy.max(scores)
+    #     q1 = numpy.percentile(scores, 25) 
+    #     q3 = numpy.percentile(scores, 75) 
+    #     iqr = q3 - q1 
+    #     min_zscore = (album_min - album_mean) / album_standard_deviation
+    #     max_zscore = (album_max - album_mean) / album_standard_deviation
+    #     print(scores)
 
-        zscores = []
-        for score in scores:
-            zscores.append((score - album_mean) / album_standard_deviation)
-        print(zscores)
+    #     zscores = []
+    #     for score in scores:
+    #         zscores.append((score - album_mean) / album_standard_deviation)
+    #     print(zscores)
 
-        print(f'std: {album_standard_deviation}')
-        print(f'mean: {album_mean}')
-        print(f'q1: {q1}')
-        print(f'q3: {q3}')
-        print(f'iqr: {iqr}')
-        print(f'min: {album_min}')
-        print(f'max: {album_max}')
-        print(f'min zscore: {min_zscore}')
-        print(f'max zscore: {max_zscore}')
+    #     print(f'std: {album_standard_deviation}')
+    #     print(f'mean: {album_mean}')
+    #     print(f'q1: {q1}')
+    #     print(f'q3: {q3}')
+    #     print(f'iqr: {iqr}')
+    #     print(f'min: {album_min}')
+    #     print(f'max: {album_max}')
+    #     print(f'min zscore: {min_zscore}')
+    #     print(f'max zscore: {max_zscore}')
 
     track_cutoff = 0 
     if len(scores):
@@ -551,7 +553,7 @@ def find_song(game_and_track_pairs: list[GameAndTrackPair]) -> FindSongResult:
         standard_deviation = numpy.maximum(0.0, numpy.std(scores))
         max_score = numpy.max(scores)
         track_cutoff = numpy.minimum(max_score, track_mean + standard_deviation)
-    print(f"TRACK CUTOFF: {track_cutoff}")
+    # print(f"TRACK CUTOFF: {track_cutoff}")
 
     tracks_to_remove: list[ScoredSourceTrack] = []
     for track in scored_sources:
@@ -573,7 +575,7 @@ def find_song(game_and_track_pairs: list[GameAndTrackPair]) -> FindSongResult:
 
     source_tracks: list[SourceTrack] = []
     for scored_track in scored_sources:
-        print(scored_track)
+        # print(scored_track)
         source_tracks.append(scored_track.source_track)
 
     albums: list[ScanResult] = []
@@ -590,11 +592,6 @@ def find_song(game_and_track_pairs: list[GameAndTrackPair]) -> FindSongResult:
 
 
 def search_rip_sources(submissionText: str):
-    # global hcs_index
-    # cached_album_results = dict()
-    # cached_track_results = dict()
-    # if (len(hcs_index) == 0):
-    #     hcs_index = get_index()
 
     title = get_raw_rip_title(submissionText)
     if title is None: 
@@ -610,7 +607,7 @@ def search_rip_sources(submissionText: str):
 
     game_and_track_pairs = parseTitle(title, ' - ', track_string)
 
-    print(f'PAIRS: {game_and_track_pairs}')
+    # print(f'PAIRS: {game_and_track_pairs}')
 
     result = ""
 

@@ -2009,3 +2009,32 @@ async def modify_config(args: list[str], command_context: CommandContext):
     
     set_config(conf, new_val)
     await send(f"Modified config {conf} from {cur_val} to {new_val}.", command_context.channel)
+
+
+@command(
+    command_type=CommandType.SECRET,
+    public=True
+)
+async def testsource(args: list[str], command_context: CommandContext):
+
+    #NOTE: (Ahmayk) Don't want anything that can spam this command accessible 
+    #but this is useful for testing. Uncomment this block if you need to test.
+    #but don't do it too much! Don't want to spam these websites with requests
+    return await send(f'no spam allowed! Only developers can use this command by removing this check in the code :)', command_context.channel) 
+
+    channel_ids = get_channel_ids_of_types(["QUEUE"])
+
+    temp_rips_all: List[Rip] = []
+    for channel_id in channel_ids:
+        channel = bot.get_channel(channel_id)
+        if channel:
+            temp_rips_and_errors = await get_rips(channel, GetRipsDesc(typing_channel=command_context.channel))
+            # error_strings.extend(temp_rips_and_errors.error_strings)
+            temp_rips_all.extend(temp_rips_and_errors.rips)
+
+    selected_rip_message_ids = choose_random_rips(temp_rips_all, 10)
+    for rip in temp_rips_all:
+        if rip.message_id in selected_rip_message_ids:
+            title = get_rip_title(rip.text)
+            await send(f'TESTING: {title}', command_context.channel)
+            await source([title], command_context)
