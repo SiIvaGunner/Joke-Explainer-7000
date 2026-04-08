@@ -41,10 +41,8 @@ async def remove_embeds_from_channel(channel_ids: List[int], expire_time_seconds
         channel = bot.get_channel(channel_id)
         if channel:
             messages_and_errors = await discord_cleanup_embeds(200, expire_time_seconds, channel, None) 
-            count = len(messages_and_errors.messages)
-            if count > 0:
-                await send(f"Removed {count} embed messages sent more than {expire_time_seconds // 60} minutes ago. " + \
-                       f"I'm just cleaning up my embeds sent before I restarted, don't worry!", channel)
+            #NOTE: (Ahmayk) Don't send errors in channel and don't notify anyone
+            # only bot devs care about this. errors will be posted in log
 
 
 @tasks.loop(time=times)
