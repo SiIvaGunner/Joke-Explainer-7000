@@ -610,13 +610,14 @@ def search_rip_sources(submissionText: str):
 
     joke = get_rip_joke(submissionText)
     if len(joke):
-        #NOTE: (Ahmayk) removes embedded links
+        #NOTE: (Ahmayk) removes formatted links
         joke = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', joke)
-        jokes = re.split(r'[\,\.]', joke)
+        #NOTE: (Ahmayk) removes regular links 
+        joke = re.sub(r'<?https?://\S+|www\.\S+>?', "", joke)
+        jokes = re.split(r'[\,\.\;]', joke)
         joke_links = []
         for(joke) in jokes:
             youtube_title_url = YOUTUBE_SEARCH_URL + quote_plus(joke)
-            joke = joke.translate(str.maketrans('', '', string.punctuation))
             joke = joke.strip()
             if len(joke):
                 joke_links.append(f"[{joke}](<{youtube_title_url}>)")
