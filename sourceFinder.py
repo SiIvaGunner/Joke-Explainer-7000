@@ -332,10 +332,14 @@ def _parse_title_internal(title: str, divider: str, track_name: str) -> list[Gam
     return pairs
 
 def parseTitle(title: str, divider: str, track_name: str) -> list[GameAndTrackPair]:
-    pairs = _parse_title_internal(title, divider, track_name)
-    #NOTE: (Ahmayk) if trying to match to a track_name doesn't turn up anything, repeat without matching to track_name
-    if not len(pairs) and len(track_name):
-        pairs = _parse_title_internal(title, divider, "")
+    pairs = [] 
+    if divider in title:
+        pairs = _parse_title_internal(title, divider, track_name)
+        #NOTE: (Ahmayk) if trying to match to a track_name doesn't turn up anything, repeat without matching to track_name
+        if not len(pairs) and len(track_name):
+            pairs = _parse_title_internal(title, divider, "")
+    else:
+        pairs.append(GameAndTrackPair(title, title))
     return pairs
 
 
