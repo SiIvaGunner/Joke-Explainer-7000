@@ -150,7 +150,7 @@ def scan_vgm_site(url: str, vgm_site: VGM_SITE, scan_result_type: ScanResultType
                             if not href.startswith('https://fi.zophar.net/soundfiles/'):
                                 is_valid = False
 
-                            if is_valid:
+                            if is_valid and href.endswith(".mp3"):
                                 parent = link_tag.parent
                                 if parent is not None:
                                     row = parent.parent
@@ -396,7 +396,7 @@ def score_title_similarity(submitted_title: str, scanned_title: str, scan_result
 
     # print(f'SUB: {submitted_title} SCAN: {scanned_title}')
     longest_common_substring_ratio = longest_common_substring(submitted_title, scanned_title) / len(submitted_title)
-    print(f"LCS: {longest_common_substring_ratio}")
+    # print(f"LCS: {longest_common_substring_ratio}")
 
     match scan_result_type:
 
@@ -420,11 +420,11 @@ def score_title_similarity(submitted_title: str, scanned_title: str, scan_result
             else:
                 is_partial_match = 0.0 
                 if submitted_title in scanned_title:
-                    print(f"Included! {submitted_title} -> {scanned_title}")
+                    # print(f"Included! {submitted_title} -> {scanned_title}")
                     is_partial_match = 1.0 
 
                 ratio_rattcliff = SequenceMatcher(None, submitted_title, scanned_title).ratio()
-                print(f"ratio: {ratio_rattcliff}")
+                # print(f"ratio: {ratio_rattcliff}")
 
                 score = (
                     (0.5 * longest_common_substring_ratio)
@@ -437,13 +437,6 @@ def score_title_similarity(submitted_title: str, scanned_title: str, scan_result
 
     return score
 
-class ScoredSourceTrack(NamedTuple):
-    score: float
-    source_track: SourceTrack
-
-class ScoredAlbum(NamedTuple):
-    score: float
-    scan_result_album: ScanResult
 
 class FindSongResult(NamedTuple):
     source_tracks: list[SourceTrack]
@@ -461,6 +454,9 @@ def find_song(game_and_track_pairs: list[GameAndTrackPair]) -> FindSongResult:
     for t in threads:
         t.join()
 
+    class ScoredAlbum(NamedTuple):
+        score: float
+        scan_result_album: ScanResult
 
     scored_album_dict: dict[str, ScoredAlbum] = {}
     for game_name, scan_result_list in scan_result_dict_albums.items():
@@ -499,6 +495,10 @@ def find_song(game_and_track_pairs: list[GameAndTrackPair]) -> FindSongResult:
         threads.append(thread)
     for t in threads:
         t.join()
+
+    class ScoredSourceTrack(NamedTuple):
+        score: float
+        source_track: SourceTrack
 
     scored_sources_dict: dict[SourceTrack, ScoredSourceTrack] = {} 
     for pair in game_and_track_pairs:
