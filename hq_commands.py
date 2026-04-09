@@ -2037,4 +2037,5 @@ async def testsource(args: list[str], command_context: CommandContext):
         if rip.message_id in selected_rip_message_ids:
             title = get_rip_title(rip.text)
             await send(f'TESTING: {title}', command_context.channel)
-            await source([title], command_context)
+            text = search_rip_sources(rip.text)
+            await send_embed(text, command_context.channel, EmbedDesc(title="Sources"))

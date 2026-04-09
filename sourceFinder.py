@@ -440,7 +440,7 @@ def score_title_similarity(submitted_title: str, scanned_title: str, scan_result
 
 class FindSongResult(NamedTuple):
     source_tracks: list[SourceTrack]
-    albums: list[ScanResult]
+    found_exact_match: bool
 
 def find_song(game_and_track_pairs: list[GameAndTrackPair]) -> FindSongResult:
     threads = []
@@ -474,6 +474,8 @@ def find_song(game_and_track_pairs: list[GameAndTrackPair]) -> FindSongResult:
     scores: list[float] = []
     for scored_album in scored_albums:
         scores.append(scored_album.score)
+
+    found_album_exact_match = 1 in scores
 
     album_cutoff = 0.0
     if len(scores):
@@ -517,6 +519,8 @@ def find_song(game_and_track_pairs: list[GameAndTrackPair]) -> FindSongResult:
     for scored_track in scored_sources:
         scores.append(scored_track.score)
 
+    found_track_exact_match = 1 in scores
+
     #NOTE: (Ahmayk) useful for showing statistics on the score
     #Used this to experiemnt with the math to make the scoring algorythm
     # if len(scores):
@@ -555,13 +559,15 @@ def find_song(game_and_track_pairs: list[GameAndTrackPair]) -> FindSongResult:
         track_cutoff = numpy.minimum(max_score, track_mean + standard_deviation)
     # print(f"TRACK CUTOFF: {track_cutoff}")
 
+    max_things_output = 3
+
     tracks_to_remove: list[ScoredSourceTrack] = []
     for track in scored_sources:
         if track.score <= (track_cutoff - 0.0001):
             tracks_to_remove.append(track)
     for track in tracks_to_remove:
         scored_sources.remove(track)
-    scored_sources = scored_sources[:5]
+    scored_sources = scored_sources[:max_things_output]
 
     # for s in scored_sources:
     #     print(s)
@@ -578,16 +584,9 @@ def find_song(game_and_track_pairs: list[GameAndTrackPair]) -> FindSongResult:
         # print(scored_track)
         source_tracks.append(scored_track.source_track)
 
-    albums: list[ScanResult] = []
-    for i in range(min(3, len(scored_albums))):
-        album_output = scored_albums[i].scan_result_album
-        for scoured_track in output_source_tracks: 
-            if scoured_track.album_url == album_output.url and len(scoured_track.track_platform):
-                album_output = album_output._replace(platform = scoured_track.track_platform)
-                break
-        albums.append(album_output)
+    found_exact_match = found_album_exact_match and found_track_exact_match
 
-    return FindSongResult(source_tracks, albums)
+    return FindSongResult(source_tracks, found_exact_match)
 
 
 
@@ -615,19 +614,20 @@ def search_rip_sources(submissionText: str):
     for pair in game_and_track_pairs:
         if pair.game_name == "Undertale" or pair.game_name == "Deltarune":
             skip_search = True
-            result += "\nsorry sebby said no"
             break
 
+    found_exact_match = False
     if not skip_search:
         find_song_result = find_song(game_and_track_pairs)
+        found_exact_match = find_song_result.found_exact_match
 
         display_platforms = False
         test_platform = ""
-        for scan_result_album in find_song_result.albums: 
-            if len(scan_result_album.platform):
-                test_platform = scan_result_album.platform
-        for scan_result_album in find_song_result.albums: 
-            if len(scan_result_album.platform) and test_platform != scan_result_album.platform:
+        for source_track in find_song_result.source_tracks: 
+            if len(source_track.track_platform):
+                test_platform = source_track.track_platform
+        for source_track in find_song_result.source_tracks: 
+            if len(source_track.track_platform) and test_platform != source_track.track_platform:
                 display_platforms = True
                 break
 
@@ -639,26 +639,16 @@ def search_rip_sources(submissionText: str):
                 result += f"\n- **[{source_track.track_title}]({source_track.track_url})** - [{album_title}]({source_track.album_url})"
                 result += f" [{VGM_SITE_INFOS[source_track.vgm_site].name}]"
 
-        for scan_result_album in find_song_result.albums: 
-            exists_in_tracks = False
-            for source_track in find_song_result.source_tracks:
-                if scan_result_album.url == source_track.album_url:
-                    exists_in_tracks = True
-                    break
-            if not exists_in_tracks:
-                album_title = scan_result_album.title 
-                if display_platforms and len(scan_result_album.platform):
-                    album_title += f" ({scan_result_album.platform})"
-                result += f"\nAlbum: [{album_title}](<{scan_result_album.url}>)"
-                result += f" [{VGM_SITE_INFOS[scan_result_album.vgm_site].name}]"
 
     YOUTUBE_SEARCH_URL = "https://www.youtube.com/results?search_query="
 
-    youtube_title_url = YOUTUBE_SEARCH_URL + quote_plus(title)
-    result += f"\nYouTube Search: [{title}]({youtube_title_url})"
+    if not found_exact_match:
+        youtube_title_url = YOUTUBE_SEARCH_URL + quote_plus(title)
+        result += f"\nYouTube Search: [{title}]({youtube_title_url})"
 
     joke = get_rip_joke(submissionText)
-    if len(joke):
+    #NOTE: (Ahmayk) only parse this if the joke line is short. otherwise it clogs up chat
+    if len(joke) < 50:
         #NOTE: (Ahmayk) removes formatted links
         joke = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', joke)
         #NOTE: (Ahmayk) removes regular links 
