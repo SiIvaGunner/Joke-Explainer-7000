@@ -202,8 +202,11 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
                             message = message_and_errors.message
                         rip = cache_rip_in_message(message)
 
-                    source_text = search_rip_sources(message.content)
-                    await send_embed(source_text, channel, EmbedDesc(title="Sources"))
+                    #NOTE (Ahmayk) only lookup source info if rip has been posted recently
+                    #this is unwanted if repinning an old rip
+                    if datetime.now(timezone.utc) - message.created_at < timedelta(minutes=30):
+                        source_text = search_rip_sources(message.content)
+                        await send_embed(source_text, channel, EmbedDesc(title="Sources"))
 
                     vet_desc = VetRipDesc(message=message, use_youtube_api=True, is_new_pinned_message=True)
                     vet_report_and_errors = await vet_rip_or_url(rip.text, vet_desc)
