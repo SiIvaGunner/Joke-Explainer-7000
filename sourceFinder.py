@@ -395,7 +395,9 @@ def score_title_similarity(submitted_title: str, scanned_title: str, scan_result
     scanned_title = get_cleaned_words(scanned_title, scan_result_type)
 
     # print(f'SUB: {submitted_title} SCAN: {scanned_title}')
-    longest_common_substring_ratio = longest_common_substring(submitted_title, scanned_title) / len(submitted_title)
+    longest_common_substring_ratio = 0 
+    if len(submitted_title):
+        longest_common_substring_ratio = longest_common_substring(submitted_title, scanned_title) / len(submitted_title)
     # print(f"LCS: {longest_common_substring_ratio}")
 
     match scan_result_type:
