@@ -615,12 +615,18 @@ def search_rip_sources(submissionText: str):
     # print(f'PAIRS: {game_and_track_pairs}')
 
     result = ""
+    no_results_message = ""
 
     skip_search = False
+    skip_youtube_title_link = False
     for pair in game_and_track_pairs:
         if pair.game_name == "Undertale" or pair.game_name == "Deltarune":
             skip_search = True
             break
+        if pair.game_name == "Five Nights at Freddy's" and pair.track_name == "Circus":
+            skip_search = True
+            skip_youtube_title_link = True
+            no_results_message = ":bear: :microphone2: har har"
 
     found_exact_match = False
     if not skip_search:
@@ -666,13 +672,13 @@ def search_rip_sources(submissionText: str):
 
     YOUTUBE_SEARCH_URL = "https://www.youtube.com/results?search_query="
 
-    if not found_exact_match:
+    if not found_exact_match and not skip_youtube_title_link:
         youtube_title_url = YOUTUBE_SEARCH_URL + quote_plus(title)
         result += f"\nYouTube Search: [{title}]({youtube_title_url})"
 
     joke = get_rip_joke(submissionText)
     #NOTE: (Ahmayk) only parse this if the joke line is short. otherwise it clogs up chat
-    if len(joke) < 50:
+    if len(joke) < 75:
         #NOTE: (Ahmayk) removes formatted links
         joke = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', joke)
         #NOTE: (Ahmayk) removes regular links 
@@ -687,5 +693,8 @@ def search_rip_sources(submissionText: str):
         if len(joke_links):
             joke_string = ", ".join(joke_links)
             result += f"\nYouTube Search: {joke_string}"
+
+    if not len(result):
+        result = no_results_message 
 
     return result
