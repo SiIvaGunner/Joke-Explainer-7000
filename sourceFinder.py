@@ -381,7 +381,7 @@ def score_title_similarity(submitted_title: str, scanned_title: str, scan_result
     longest_common_substring_ratio = 0.0
     if len(submitted_title):
 
-        match = SequenceMatcher(lambda x: x==" ", submitted_title, scanned_title).find_longest_match()
+        match = SequenceMatcher(None, submitted_title, scanned_title).find_longest_match()
         longest_common_substring_ratio = match.size / len(submitted_title) 
         # print(match)
         # print(f"LCS: {longest_common_substring_ratio}")
