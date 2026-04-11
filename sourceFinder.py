@@ -353,8 +353,14 @@ def get_cleaned_words(title: str, scan_result_type: ScanResultType) -> str:
     #NOTE: (Ahmayk) remove common keywords, matching to them dilutes search
     if scan_result_type == ScanResultType.ALBUM:
         title = title.replace(" ost", " ")
-        title = title.replace(" official soundtrack ", " ")
+        title = title.replace(" original soundtrack", " ")
+        title = title.replace(" official soundtrack", " ")
+        title = title.replace(" the complete soundtrack", " ")
+        title = title.replace(" complete soundtrack", " ")
+        title = title.replace(" digital soundtrack", " ")
+        title = title.replace(" official ost", " ")
         title = title.replace(" unofficial soundtrack", " ")
+        title = title.replace(" unofficial ost", " ")
         title = title.replace(" soundtrack", " ")
     if scan_result_type == ScanResultType.TRACK:
         title = title.replace(" version", " ")
@@ -363,85 +369,70 @@ def get_cleaned_words(title: str, scan_result_type: ScanResultType) -> str:
     return title
 
 
-#https://www.geeksforgeeks.org/dsa/longest-common-substring-dp-29/
-def longest_common_substring(s1, s2):
-    m = len(s1)
-    n = len(s2)
-
-    # Create a 1D array to store the previous row's results
-    prev = [0] * (n + 1)
-    
-    res = 0
-    for i in range(1, m + 1):
-      
-        # Create a temporary array to store the current row
-        curr = [0] * (n + 1)
-        for j in range(1, n + 1):
-            if s1[i - 1] == s2[j - 1]:
-                curr[j] = prev[j - 1] + 1
-                res = max(res, curr[j])
-            else:
-                curr[j] = 0
-        
-        # Move the current row's data to the previous row
-        prev = curr
-    
-    return res
-
 #NOTE: (Ahamyk) fine tuned similarity algorythm
 def score_title_similarity(submitted_title: str, scanned_title: str, scan_result_type: ScanResultType) -> float:
+
+    score = 0.0
 
     submitted_title = get_cleaned_words(submitted_title, scan_result_type)
     scanned_title = get_cleaned_words(scanned_title, scan_result_type)
 
     # print(f'SUB: {submitted_title} SCAN: {scanned_title}')
-    longest_common_substring_ratio = 0 
+    longest_common_substring_ratio = 0.0
     if len(submitted_title):
-        longest_common_substring_ratio = longest_common_substring(submitted_title, scanned_title) / len(submitted_title)
-    # print(f"LCS: {longest_common_substring_ratio}")
+
+        match = SequenceMatcher(lambda x: x==" ", submitted_title, scanned_title).find_longest_match()
+        longest_common_substring_ratio = match.size / len(submitted_title) 
+        # print(match)
+        # print(f"LCS: {longest_common_substring_ratio}")
 
     match scan_result_type:
 
         case ScanResultType.ALBUM:
             # print(f'SUB: {submitted_title} SCAN: {scanned_title}')
             # print(f'SUB: {len(submitted_title)} SCAN: {len(scanned_title)}')
-            is_exact_match = submitted_title == scanned_title
-            ratio_rattcliff = SequenceMatcher(None, submitted_title, scanned_title).ratio()
 
-            score = (
-                (0.5 * longest_common_substring_ratio)
-                + (0.25 * is_exact_match)
-                + (0.25 * ratio_rattcliff)
-            )
-
-        case ScanResultType.TRACK:
-
-            if submitted_title == scanned_title:
-                # print("Exact match!")
-                score = 1.0
-            else:
-                is_partial_match = 0.0 
-                if submitted_title in scanned_title:
-                    # print(f"Included! {submitted_title} -> {scanned_title}")
-                    is_partial_match = 1.0 
-
+            if longest_common_substring_ratio > 0.1:
+                is_exact_match = submitted_title == scanned_title
                 ratio_rattcliff = SequenceMatcher(None, submitted_title, scanned_title).ratio()
-                # print(f"ratio: {ratio_rattcliff}")
 
                 score = (
                     (0.5 * longest_common_substring_ratio)
+                    + (0.25 * is_exact_match)
                     + (0.25 * ratio_rattcliff)
-                    + (0.25 * is_partial_match)
                 )
 
-                #NOTE: (Ahmayk) introduces harsher cutoff, makes lower scores lower than higher scores
-                score = score * score * score
+        case ScanResultType.TRACK:
+
+            if longest_common_substring_ratio > 0.5:
+
+                if submitted_title == scanned_title:
+                    # print("Exact match!")
+                    score = 1.0
+                else:
+                    is_partial_match = 0.0 
+                    if submitted_title in scanned_title:
+                        # print(f"Included! {submitted_title} -> {scanned_title}")
+                        is_partial_match = 1.0 
+
+                    ratio_rattcliff = SequenceMatcher(None, submitted_title, scanned_title).ratio()
+                    # print(f"ratio: {ratio_rattcliff}")
+
+                    score = (
+                        (0.5 * longest_common_substring_ratio)
+                        + (0.25 * ratio_rattcliff)
+                        + (0.25 * is_partial_match)
+                    )
+
+                    #NOTE: (Ahmayk) introduces harsher cutoff, makes lower scores lower than higher scores
+                    score = score * score * score
 
     return score
 
 
 class FindSongResult(NamedTuple):
     source_tracks: list[SourceTrack]
+    albums: list[ScanResult]
     found_exact_match: bool
 
 def find_song(game_and_track_pairs: list[GameAndTrackPair]) -> FindSongResult:
@@ -466,9 +457,10 @@ def find_song(game_and_track_pairs: list[GameAndTrackPair]) -> FindSongResult:
             if len(scan_result_album.title):
                 score = score_title_similarity(game_name, scan_result_album.title, ScanResultType.ALBUM)
                 # print(f"ALBUM URL {scan_result_album.url}")
-                if scan_result_album.url not in scored_album_dict or scored_album_dict[scan_result_album.url].score < score:
-                    scored_album_dict[scan_result_album.url] = ScoredAlbum(score, scan_result_album)
+                if score > 0:
                     # print(f'SCORED ALBUM {game_name} {score} - {scan_result_album.title}')
+                    if scan_result_album.url not in scored_album_dict or scored_album_dict[scan_result_album.url].score < score:
+                        scored_album_dict[scan_result_album.url] = ScoredAlbum(score, scan_result_album)
 
     scored_albums = list(sorted(scored_album_dict.values(), key=lambda s: s.score, reverse=True))
     scored_albums = scored_albums[:10]
@@ -509,12 +501,13 @@ def find_song(game_and_track_pairs: list[GameAndTrackPair]) -> FindSongResult:
         for source_track in output_source_tracks:
             if len(source_track.track_title):
                 score_track = score_title_similarity(pair.track_name, source_track.track_title, ScanResultType.TRACK)
-                # print(f'TRACK SCORE: {score_track}: {source_track.track_title}')
-                if source_track not in scored_sources_dict or score_track > scored_sources_dict[source_track].score:
-                    scored_sources_dict[source_track] = ScoredSourceTrack(score_track, source_track)
+                if score_track > 0:
+                    # print(f'TRACK SCORE: {score_track}: {source_track.track_title}')
+                    if source_track not in scored_sources_dict or score_track > scored_sources_dict[source_track].score:
+                        scored_sources_dict[source_track] = ScoredSourceTrack(score_track, source_track)
 
-    scored_sources = list(sorted(scored_sources_dict.values(), key=lambda scored_source: scored_source.score, reverse=True))
-    scored_sources = scored_sources[:20]
+    scored_sources_all = list(sorted(scored_sources_dict.values(), key=lambda scored_source: scored_source.score, reverse=True))
+    scored_sources = scored_sources_all[:20]
     # print(scored_sources)
 
     scores = []
@@ -586,9 +579,20 @@ def find_song(game_and_track_pairs: list[GameAndTrackPair]) -> FindSongResult:
         # print(scored_track)
         source_tracks.append(scored_track.source_track)
 
-    found_exact_match = found_album_exact_match and found_track_exact_match
+    albums: list[ScanResult] = []
+    if not len(source_tracks):
+        for i in range(min(3, len(scored_albums))):
+            album_output = scored_albums[i].scan_result_album
+            for source_track in output_source_tracks:
+                if source_track.album_url == album_output.url and len(source_track.track_platform):
+                    album_output = album_output._replace(platform = source_track.track_platform)
+                    break
+            albums.append(album_output)
 
-    return FindSongResult(source_tracks, found_exact_match)
+    found_exact_match = found_album_exact_match and found_track_exact_match
+    print(albums)
+
+    return FindSongResult(source_tracks, albums, found_exact_match)
 
 
 
@@ -623,23 +627,41 @@ def search_rip_sources(submissionText: str):
         find_song_result = find_song(game_and_track_pairs)
         found_exact_match = find_song_result.found_exact_match
 
-        display_platforms = False
+        display_platforms_tracks = False
         test_platform = ""
         for source_track in find_song_result.source_tracks: 
             if len(source_track.track_platform):
                 test_platform = source_track.track_platform
         for source_track in find_song_result.source_tracks: 
             if len(source_track.track_platform) and test_platform != source_track.track_platform:
-                display_platforms = True
+                display_platforms_tracks = True
                 break
 
         if len(find_song_result.source_tracks):
             for source_track in find_song_result.source_tracks:
                 album_title = source_track.album_title
-                if display_platforms and len(source_track.track_platform):
+                if display_platforms_tracks and len(source_track.track_platform):
                     album_title += f" ({source_track.track_platform})"
                 result += f"\n- **[{source_track.track_title}]({source_track.track_url})** - [{album_title}]({source_track.album_url})"
                 result += f" [{VGM_SITE_INFOS[source_track.vgm_site].name}]"
+
+
+        display_platforms_albums = False
+        test_platform = ""
+        for album in find_song_result.albums: 
+            if len(album.platform):
+                test_platform = album.platform 
+        for album in find_song_result.albums: 
+            if len(album.platform) and test_platform != album.platform:
+                display_platforms_albums = True
+                break
+
+        for scan_result_album in find_song_result.albums: 
+            album_title = scan_result_album.title 
+            if display_platforms_albums and len(scan_result_album.platform):
+                album_title += f" ({scan_result_album.platform})"
+            result += f"\nAlbum: [{album_title}](<{scan_result_album.url}>)"
+            result += f" [{VGM_SITE_INFOS[scan_result_album.vgm_site].name}]"
 
 
     YOUTUBE_SEARCH_URL = "https://www.youtube.com/results?search_query="
