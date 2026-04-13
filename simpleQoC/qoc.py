@@ -213,7 +213,7 @@ def downloadAudioFromUrl(validUrl: str) -> str:
     response = getResponseFromUrl(validUrl)
     try:
         msg = EmailMessage()
-        msg["Content-Disposition"] = response.headers.get("Content-Disposition")
+        msg["Content-Disposition"] = ''.join([char for char in response.headers.get("Content-Disposition") if char.isprintable()])
         content_filename = msg.get_filename()
         if content_filename is None:
             raise KeyError
