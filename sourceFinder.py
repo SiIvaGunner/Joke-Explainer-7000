@@ -15,18 +15,9 @@ from requests.adapters import HTTPAdapter
 from hq_strings import *
 from simpleQoC.metadata import desc_to_dict, get_music_from_desc
 
-my_session = requests.Session()
-retry_strategy = Retry(
-    total=3,
-    backoff_factor=1,
-    status_forcelist=[429, 500, 502, 503, 504],
-    allowed_methods=["HEAD", "GET", "OPTIONS"]
-)
-
-adapter = HTTPAdapter(max_retries=retry_strategy, pool_connections=50, pool_maxsize=50)
-
-my_session.mount("http://", adapter)
-my_session.mount("https://", adapter)
+requests_session = requests.Session()
+adapter = HTTPAdapter(max_retries=0, pool_connections=50, pool_maxsize=50)
+requests_session.mount("https://", adapter)
 
 class VGM_SITE(Enum):
     ZOPHAR = auto()
@@ -66,7 +57,8 @@ def scan_vgm_site(url: str, vgm_site: VGM_SITE, scan_result_type: ScanResultType
     try:
         agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         headers = {'User-Agent': agent}
-        response = my_session.get(url, headers=headers, timeout=10)
+        response = requests_session.get(url, headers=headers, timeout=5)
+        ##NOTE: (Ahmayk) better error handling where we pass things up the chain and show to user
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
     except (requests.exceptions.RequestException, AssertionError) as e:
@@ -590,7 +582,7 @@ def find_song(game_and_track_pairs: list[GameAndTrackPair]) -> FindSongResult:
             albums.append(album_output)
 
     found_exact_match = found_album_exact_match and found_track_exact_match
-    print(albums)
+    # print(albums)
 
     return FindSongResult(source_tracks, albums, found_exact_match)
 
