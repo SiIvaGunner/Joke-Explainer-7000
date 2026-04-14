@@ -213,7 +213,10 @@ def downloadAudioFromUrl(validUrl: str) -> str:
     response = getResponseFromUrl(validUrl)
     try:
         msg = EmailMessage()
-        msg["Content-Disposition"] = ''.join([char for char in response.headers.get("Content-Disposition") if char.isprintable()])
+        content_disposition = response.headers.get("Content-Disposition")
+        if content_disposition is None:
+            raise KeyError
+        msg["Content-Disposition"] = ''.join([char for char in content_disposition if char.isprintable()])
         content_filename = msg.get_filename()
         if content_filename is None:
             raise KeyError
@@ -889,15 +892,6 @@ if __name__ == '__main__':
     perform_qoc_result = performQoC(url)
 
     # TODO: (Ahmayk) Reimplement
-
-    # code2emoji = {
-    #     -1: ":link:",
-    #     0: ":check:",
-    #     1: ":fix:",
-    # }
     
-    # print(code2emoji[code] 
-    #       + (" :1234:" if msgContainsBitrateFix(msg) else "") 
-    #       + (" :loud_sound:" if msgContainsClippingFix(msg) else "")
-    # )
-    # print(msg)
+    for _, check in perform_qoc_result.items():
+        print(check.msg)
