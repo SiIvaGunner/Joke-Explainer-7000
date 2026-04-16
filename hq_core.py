@@ -734,6 +734,17 @@ def rip_react_count(reaction_type_list: List[ReactType], rip: Rip) -> int:
             result += 1
     return result 
 
+def rip_is_one_check_away_from_accept(rip) -> bool:
+    #NOTE: (Ahmayk) does not take num checks needed into account, it could if we wanted
+    #to standardize that in bot tho
+    checks_count = rip_react_count([ReactType.CHECK], rip)
+    rejects_count = rip_react_count([ReactType.REJECT], rip)
+    has_valid_stop = rip_has_react([ReactType.STOP], rip) and not rip_has_react([ReactType.GOLDCHECK], rip)
+    is_valid = checks_count - rejects_count == 2 \
+        and not rip_has_react(FIX_REACT_LIST, rip) \
+        and not has_valid_stop
+    return is_valid
+
 USER_REACT_CACHE: dict[int, dict[React, List[int]]] = {}
 
 #NOTE: (Ahmayk) This is an enum so we can iterate 

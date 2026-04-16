@@ -141,6 +141,7 @@ class RoundupFilterType(Enum):
     OVERDUE = auto()
     RANDOM = auto()
     SAVEQOC = auto()
+    MYSAVEQOC = auto()
 
 class RoundupDesc(NamedTuple):
     roundup_filter_type: RoundupFilterType = RoundupFilterType.NULL
@@ -237,14 +238,12 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
             case RoundupFilterType.RANDOM:
                 is_valid = rip.message_id in selected_rip_message_ids
             case RoundupFilterType.SAVEQOC:
-                #NOTE: (Ahmayk) does not take num checks needed into account, it could if we wanted
-                #to standardize that in bot tho
-                checks_count = rip_react_count([ReactType.CHECK], rip)
-                rejects_count = rip_react_count([ReactType.REJECT], rip)
-                has_valid_stop = rip_has_react([ReactType.STOP], rip) and not rip_has_react([ReactType.GOLDCHECK], rip)
-                is_valid = checks_count - rejects_count == 2 \
-                    and not rip_has_react(FIX_REACT_LIST, rip) \
-                    and not has_valid_stop
+                is_valid = rip_is_one_check_away_from_accept(rip) 
+            case RoundupFilterType.MYSAVEQOC:
+                is_valid = False
+                if rip_is_one_check_away_from_accept(rip):
+                    bool_and_errors = await user_is_react(UserReactCheckType.CHECK, user_id, rip, command_context.channel)
+                    is_valid = not bool_and_errors.result 
 
         if is_valid:
             result += format_rip(rip, command_context.channel.guild, False, spec_overdue_days, overdue_days) + vet_reacts
@@ -351,7 +350,17 @@ async def spicy(args: list[str], command_context: CommandContext):
 )
 async def saveqoc(args: list[str], command_context: CommandContext):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.SAVEQOC, \
-            not_found_message = "No rips can be saved with only one check. All is lost!")
+            not_found_message = "No rips can be approved with only one check. All is lost!")
+    await send_roundup(roundup_desc, command_context)
+
+@command(
+    command_type=CommandType.QOC,
+    brief="Show QoC rips where your new :check: would approve the rip",
+    desc="Shows rips you havne't checked that have two more checks than rejects, no fixes or alerts, and no stops unaccompanied by a goldencheck."
+)
+async def mysaveqoc(args: list[str], command_context: CommandContext):
+    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.MYSAVEQOC, \
+            not_found_message = "You cannot approve any rips with only one check!")
     await send_roundup(roundup_desc, command_context)
 
 
