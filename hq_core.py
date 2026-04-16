@@ -721,11 +721,18 @@ def react_is_one(reaction_type_list: List[ReactType], name: str) -> bool:
             return True
     return False
 
-def rip_has_react(reaction_type_list: List[ReactType], rip: Rip):
+def rip_has_react(reaction_type_list: List[ReactType], rip: Rip) -> bool:
     for react in rip.reacts:
         if react_is_one(reaction_type_list, react.name):
             return True
     return False
+
+def rip_react_count(reaction_type_list: List[ReactType], rip: Rip) -> int:
+    result = 0
+    for react in rip.reacts:
+        if react_is_one(reaction_type_list, react.name):
+            result += 1
+    return result 
 
 USER_REACT_CACHE: dict[int, dict[React, List[int]]] = {}
 
