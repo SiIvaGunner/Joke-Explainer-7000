@@ -55,9 +55,9 @@ async def help(args: list[str], command_context: CommandContext):
             desc += f'\n:small_blue_diamond: __**Details**__: {details}'
 
         if not command_info.public:
-            desc += f'\n\n{qoc_emote} *Only accessable in QoC channels.*' 
+            desc += f'\n\n{qoc_emote} *Only accessible in QoC channels.*' 
         if command_info.admin:
-            desc += f'\n\n:nerd: *Only accessable by admins of this discord server.*' 
+            desc += f'\n\n:nerd: *Only accessible by admins of this discord server.*' 
 
         desc += '\n'
 
