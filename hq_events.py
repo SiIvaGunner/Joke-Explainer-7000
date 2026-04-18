@@ -204,7 +204,8 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
 
                     #NOTE (Ahmayk) only lookup source info if rip has been posted recently
                     #this is unwanted if repinning an old rip
-                    if datetime.now(timezone.utc) - message.created_at < timedelta(minutes=30):
+                    auto_source_on_pin = get_config('auto_source_on_pin')
+                    if auto_source_on_pin and datetime.now(timezone.utc) - message.created_at < timedelta(minutes=30):
                         source_text = search_rip_sources(message.content)
                         await send_embed(source_text, channel, EmbedDesc(title="Sources"))
 
