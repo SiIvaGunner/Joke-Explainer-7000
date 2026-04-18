@@ -1365,44 +1365,55 @@ async def send_embed(text: str, channel: TextChannel | Thread, desc: EmbedDesc):
     embed_groups: List[List[discord.Embed]] = []
     for i, text_part in enumerate(split_messages):
 
-        split_subgroups: List[str] = [] 
-        if len(text_part) <= embed_character_limit_desc:
-            split_subgroups.append(text_part)
-        elif len(text_part) == 0:
-            continue
-        else:
-            #NOTE: (Ahmayk) split in half, assuming that half of the  
-            #max message character length (6000)
-            #will fit inside the max embed desc length (4096)
-            embed_desc_1 = "" 
-            embed_desc_2 = "" 
-            lines = text_part.split(desc.seperator)
-            for line_i, line in enumerate(lines):
+        if len(text_part):
 
-                to_add = line
-                if line_i != (len(lines) - 1):
-                    to_add += desc.seperator
-
-                if line_i < math.ceil(len(lines) / 2):
-                    embed_desc_1 += to_add 
-                else:
-                    embed_desc_2 += to_add 
-            split_subgroups.append(embed_desc_1)
-            split_subgroups.append(embed_desc_2)
-
-        embed_list: List[discord.Embed] = []
-        for k, subgroup in enumerate(split_subgroups):
-            embed = None
-            if i == 0 and k == 0: 
-                embed = discord.Embed(description=subgroup, color=color, title=title)
+            split_subgroups: List[str] = [] 
+            if len(text_part) <= embed_character_limit_desc:
+                split_subgroups.append(text_part)
             else:
-                embed = discord.Embed(description=subgroup, color=color)
+                #NOTE: (Ahmayk) split in half, assuming that half of the  
+                #max message character length (6000)
+                #will fit inside the max embed desc length (4096)
+                embed_desc_1 = "" 
+                embed_desc_2 = "" 
+                lines = text_part.split(desc.seperator)
+                lines_processed: list[str] = []
+                total_char_len = 0
+                total_char_len_at_halfway_line = 0
+                halfway_index = math.floor(len(lines) / 2)
+                for line_i, line in enumerate(lines):
+                    to_add = line
+                    if line_i != (len(lines) - 1):
+                        to_add += desc.seperator
+                    lines_processed.append(to_add)
+                    total_char_len += len(to_add)
+                    if line_i <= halfway_index:
+                        total_char_len_at_halfway_line += len(to_add)
+
+                len_iterator = 0
+                for line in lines_processed:
+                    len_iterator += len(line)
+                    if len_iterator < (total_char_len / 2.0):
+                        embed_desc_1 += line
+                    else:
+                        embed_desc_2 += line
+
+                split_subgroups.append(embed_desc_1)
+                split_subgroups.append(embed_desc_2)
+
+            embed_list: List[discord.Embed] = []
+            for k, subgroup in enumerate(split_subgroups):
+                embed = None
+                if i == 0 and k == 0: 
+                    embed = discord.Embed(description=subgroup, color=color, title=title)
+                else:
+                    embed = discord.Embed(description=subgroup, color=color)
+                
+                if i == len(split_messages) - 1 and k == len(split_subgroups) - 1: 
+                    embed.set_footer(text=desc.footer)
+                embed_list.append(embed)
             
-            if i == len(split_messages) - 1 and k == len(split_subgroups) - 1: 
-                embed.set_footer(text=desc.footer)
-            embed_list.append(embed)
-        
-        embed_groups.append(embed_list)
+            embed_groups.append(embed_list)
 
     for embed_group in embed_groups:
         try:
