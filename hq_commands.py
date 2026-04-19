@@ -7,6 +7,7 @@ from bot_secrets import YOUTUBE_API_KEY, YOUTUBE_CHANNEL_NAME
 from simpleQoC.qoc import performQoC, ffmpegExists, getFileMetadataMutagen, getFileMetadataFfprobe
 from simpleQoC.metadata import countDupe, isDupe
 from sourceFinder import search_rip_sources 
+from specialistFinder import search_specialists 
 
 from hq_core import *
 from hq_config import *
@@ -1734,19 +1735,36 @@ async def peek_url(args: list[str], command_context: CommandContext):
 async def source(args: list[str], command_context: CommandContext):
 
     if not len(args):
-        return await send("Error: Please provide a link to message.", command_context.channel)
+        return await send("Error: Please provide a link to message or text formatted as a rip title to search for.", command_context.channel)
 
     async with command_context.channel.typing():
 
-        text = " ".join(args)
-        message_link = extract_discord_link(args[0])
-        if len(message_link):
-            server, channel, message, status = await parse_message_link(message_link)
-            if message is None:
-                return await send(status, command_context.channel)
-            text = message.content
+        string_and_errors = await parse_channel_link_or_text(args[0])
+        if len(string_and_errors.error_strings):
+            return await send_if_errors("Unable to parse message link", string_and_errors.error_strings, command_context.channel)
 
-        text = search_rip_sources(text)
+        text = search_rip_sources(string_and_errors.string)
+        await send_embed(text, command_context.channel, EmbedDesc(title="Sources"))
+
+@command(
+    command_type=CommandType.SOURCE,
+    format='<message link | text>',
+    brief='Search for QoC specialists for a rip or source.',
+    aliases=['specialist'],
+    public=True
+)
+async def specalists(args: list[str], command_context: CommandContext):
+
+    if not len(args):
+        return await send("Error: Please provide a link to message or text formatted as a rip title to search for.", command_context.channel)
+
+    async with command_context.channel.typing():
+
+        string_and_errors = await parse_channel_link_or_text(args[0])
+        if len(string_and_errors.error_strings):
+            return await send_if_errors("Unable to parse message link", string_and_errors.error_strings, command_context.channel)
+
+        text = search_specialists(string_and_errors.string)
         await send_embed(text, command_context.channel, EmbedDesc(title="Sources"))
 
 
