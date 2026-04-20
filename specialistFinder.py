@@ -7,6 +7,44 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 from bot_secrets import SPECIALISTS_SPREADSHEET_ID 
+from hq_strings import extract_playlist_id 
+
+from typing import NamedTuple
+
+def get_sheet_data(sheet_name: str, row_start: int, last_column: str, creds: Credentials) -> list[list[str]]:
+    sheet_output = {} 
+    try:
+        service = build("sheets", "v4", credentials=creds)
+        sheet = service.spreadsheets()
+        sheet_output = (
+            sheet.get(
+                spreadsheetId=SPECIALISTS_SPREADSHEET_ID,
+                ranges=f'{sheet_name}!A{row_start}:{last_column}',
+                fields='sheets.data.rowData.values.formattedValue',
+                includeGridData=True
+            ).execute()
+        )
+    except HttpError as err:
+        print(err)
+
+    formatted_values = {} 
+    try:
+        formatted_values = sheet_output['sheets'][0]['data'][0]['rowData']
+    except (KeyError, IndexError):
+        pass
+
+    result: list[list[str]] = []
+    for row in formatted_values:
+        if 'values' in row:
+            cells = []
+            for cell in row['values']:
+                if 'formattedValue' in cell:
+                    cells.append(cell['formattedValue'])
+                else:
+                    cells.append("")
+            result.append(cells)
+
+    return result
 
 def search_specialists(text: str) -> str:
 
@@ -28,44 +66,40 @@ def search_specialists(text: str) -> str:
         with open("token.json", "w") as token:
             token.write(creds.to_json())
 
-    sheet_output = {} 
-    try:
-        sheet_name = "Game Strict Rules" 
-        service = build("sheets", "v4", credentials=creds)
-        sheet = service.spreadsheets()
+    class SpecialistEntry(NamedTuple):
+        source_string: str
+        specialists: str 
+        game_names: list[str] 
+        playlist_ids: list[str]
 
-        col_start = 'A'
-        row_start = 3
-        col_end = 'D'
-        row_end = row_start 
+    game_sheet_data = get_sheet_data("Game Strict Rules", 3, 'D', creds)
+    specialist_entries: list[SpecialistEntry] = []
+    for row in game_sheet_data:
 
-        sheet_data = (
-            sheet.get(
-                spreadsheetId=SPECIALISTS_SPREADSHEET_ID,
-                ranges=f'{sheet_name}',
-                fields='sheets.properties.gridProperties',
-                includeGridData=True
-            ).execute()
-        )
-        try:
-            row_end = sheet_data['sheets'][0]['properties']['gridProperties']['rowCount']
-        except (IndexError, KeyError):
-            pass
+        if len(row):
+            source_string = row[0] 
 
-        sheet_output = (
-            sheet.get(
-                spreadsheetId=SPECIALISTS_SPREADSHEET_ID,
-                ranges=f'{sheet_name}!{col_start}{row_start}:{col_end}{row_end}',
-                fields='sheets.data.rowData.values.formattedValue',
-                includeGridData=True
-            ).execute()
-        )
+            specialists = "" 
+            if len(source_string) > 1:
+                specialists = row[1]
 
-    except HttpError as err:
-        print(err)
+            game_names: list[str] = [] 
+            if len(row) > 2:
+                game_names = row[2].split(",")
 
-    print(sheet_output)
+            playlist_ids = []
+            if len(row) > 3:
+                for link in row[3].splitlines():
+                    playlist_id = extract_playlist_id(link)
+                    if len(playlist_id):
+                        playlist_ids.append(playlist_id)
+                    else:
+                        ##TODO: (Ahmayk) report invalid data
+                        playlist_ids.append("???")
+                        pass
 
-    result = str(sheet_output.values())
+            specialist_entries.append(SpecialistEntry(source_string, specialists, game_names, playlist_ids))
+            
+    result = str(specialist_entries) 
 
     return result 
