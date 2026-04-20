@@ -1012,13 +1012,13 @@ async def vet_rip_or_url(rip_text_or_url: str, desc: VetRipDesc) -> StringAndErr
 
     error_strings = []
     metadata_checks: List[QoCCheck] = []
+    advancedCheck = get_config('metadata')
     rip_message_link = "" 
     if len(rip_message_text):
         description = get_rip_description(rip_message_text)
         is_unusual_metadata = "unusual metadata" in rip_message_text.lower()
         if not is_unusual_metadata and len(description) > 0:
             playlistId = extract_playlist_id('\n'.join(rip_message_text.splitlines()[1:])) # ignore author line
-            advancedCheck = get_config('metadata')
             metadata_checks = await run_blocking(checkMetadata, description, YOUTUBE_CHANNEL_NAME, playlistId, \
                                                  YOUTUBE_API_KEY, desc.use_youtube_api, advancedCheck)
 
@@ -1063,7 +1063,7 @@ async def vet_rip_or_url(rip_text_or_url: str, desc: VetRipDesc) -> StringAndErr
 
             # Check for lines between the rip description and link - if it does not start with "Joke", add a warning
             # in order to minimize accidental joke lines when uploading
-            if len(qoced_url):
+            if len(qoced_url) and advancedCheck:
                 try:
                     for line in rip_message_text.split('```', 2)[2].splitlines():
                         line = "".join(c for c in line if c.isprintable())
