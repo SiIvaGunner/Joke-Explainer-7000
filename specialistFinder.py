@@ -9,7 +9,6 @@ from googleapiclient.errors import HttpError
 from bot_secrets import SPECIALISTS_SPREADSHEET_ID 
 from hq_strings import * 
 from simpleQoC.metadata import desc_to_dict, get_music_from_desc
-from hq_core import parse_emojis_in_string
 from discord import Guild
 
 from typing import NamedTuple
@@ -50,10 +49,11 @@ def get_sheet_data(sheet_name: str, row_start: int, last_column: str, creds: Cre
     return result
 
 class SpecialistEntry(NamedTuple):
-    source_string: str
     specialists: str 
-    game_names: list[str] 
-    playlist_ids: list[str]
+    game_title: str
+    alternate_game_titles: list[str] 
+    source: str
+    alternate_source_names: list[str]
 
 def get_specialist_data() -> list[SpecialistEntry]:
 
@@ -75,39 +75,35 @@ def get_specialist_data() -> list[SpecialistEntry]:
         with open("token.json", "w") as token:
             token.write(creds.to_json())
 
-
-    game_sheet_data = get_sheet_data("Game Strict Rules", 3, 'D', creds)
     specialist_entries: list[SpecialistEntry] = []
+
+    game_sheet_data = get_sheet_data("Game Strict Rules", 3, 'C', creds)
     for row in game_sheet_data:
-
         if len(row):
-            source_string = row[0] 
-
+            game_title = row[0] 
             specialists = "" 
-            if len(source_string) > 1:
+            if len(row) > 1:
                 specialists = row[1]
-
-            game_names: list[str] = [] 
+            alternate_game_titles: list[str] = [] 
             if len(row) > 2:
-                game_names = row[2].split(",")
+                alternate_game_titles = row[2].split("/")
+            specialist_entries.append(SpecialistEntry(specialists, game_title, alternate_game_titles, "", []))
 
-            playlist_ids = []
-            if len(row) > 3:
-                for link in row[3].splitlines():
-                    playlist_id = extract_playlist_id(link)
-                    if len(playlist_id):
-                        playlist_ids.append(playlist_id)
-                    else:
-                        ##TODO: (Ahmayk) report invalid data
-                        playlist_ids.append("???")
-                        pass
+    source_sheet_data = get_sheet_data("Source Strict Rules", 3, 'C', creds)
+    for row in source_sheet_data:
+        if len(row):
+            source_string = row[0]
+            specialists = "" 
+            if len(row) > 1:
+                specialists = row[1]
+            alternate_source_names = []
+            if len(row) > 2:
+                alternate_source_names = row[2].split("/") 
 
-            specialist_entries.append(SpecialistEntry(source_string, specialists, game_names, playlist_ids))
+            specialist_entries.append(SpecialistEntry(specialists, "", [], source_string, alternate_source_names))
             
     return specialist_entries 
 
-def format_specialist_line(type_match: str, specialist_entry: SpecialistEntry, stop_emoji: str) -> str:
-    return f'\n{stop_emoji} {specialist_entry.source_string} [{type_match}]: **{specialist_entry.specialists}**'
 
 def search_specialists(submissionText: str, specialist_entires: list[SpecialistEntry], guild: Guild) -> str:
     result = ""
@@ -119,29 +115,38 @@ def search_specialists(submissionText: str, specialist_entires: list[SpecialistE
     description = get_rip_description(submissionText)
     desc_dict, msgs = desc_to_dict(description, 1)
     track_string = get_music_from_desc(desc_dict)
-    playlist_id = extract_playlist_id(description)
     game_and_track_pairs = parseTitle(title, ' - ', track_string)
+
+    joke_input = submissionText 
+    chunks = submissionText.split('```')
+    if len(chunks) >= 2:
+        joke_input = chunks[2]
+    joke_input = joke_input.lower()
 
     stop_emoji = '🛑'
     for e in guild.emojis:
         if e.name.lower() == "stop":
             stop_emoji = str(e)
 
+    print(game_and_track_pairs)
+
     for specialist_entry in specialist_entires:
 
-        is_match = False
-
-        if playlist_id in specialist_entry.playlist_ids:
-            is_match = True
-            result += format_specialist_line('Playlist match', specialist_entry, stop_emoji)
+        for game_and_track_pair in game_and_track_pairs:
+            if len(specialist_entry.game_title) and specialist_entry.game_title == game_and_track_pair.game_name:
+                result += f'\n{stop_emoji} {specialist_entry.game_title}: **{specialist_entry.specialists}**'
+                break
+            for alternate_title in specialist_entry.alternate_game_titles:
+                if len(alternate_title) and alternate_title.lower() in game_and_track_pair.game_name.lower():
+                    result += f'\n{stop_emoji} {specialist_entry.game_title}: **{specialist_entry.specialists}** [{alternate_title}]'
+                    break
         
-        if not is_match:
-            for specialist_game_name in specialist_entry.game_names:
-                if len(specialist_game_name):
-                    for game_and_track_pair in game_and_track_pairs:
-                        if specialist_game_name in game_and_track_pair.game_name:
-                            is_match = True
-                            result += format_specialist_line('Game Title match', specialist_entry, stop_emoji)
+        if len(specialist_entry.source) and specialist_entry.source.lower() in joke_input:
+            result += f'\n{stop_emoji} {specialist_entry.source}: **{specialist_entry.specialists}**'
+        for alternate_source_name in specialist_entry.alternate_source_names:
+            if len(alternate_source_name) and alternate_source_name.lower() in joke_input:
+                result += f'\n{stop_emoji} {specialist_entry.source}: **{specialist_entry.specialists}** [{alternate_source_name}]'
+                break
 
     result = result.strip()
 

@@ -1766,7 +1766,10 @@ async def specalists(args: list[str], command_context: CommandContext):
 
         specialist_entires = await run_blocking(get_specialist_data)
         text = search_specialists(string_and_errors.string, specialist_entires, command_context.channel.guild)
-        await send_embed(text, command_context.channel, EmbedDesc(title="Specialists"))
+        if len(text):
+            await send_embed(text, command_context.channel, EmbedDesc(title="Specialists"))
+        else:
+            await send("No specialists found.", command_context.channel)
 
 
 @command(
