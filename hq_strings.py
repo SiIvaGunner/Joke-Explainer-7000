@@ -251,3 +251,62 @@ def search_with_parsed_input(text: str, parsed_search_input: ParsedSearchInput) 
     if parsed_search_input.is_not:
         is_valid = not is_valid 
     return is_valid
+
+
+class GameAndTrackPair(NamedTuple):
+    track_name: str
+    game_name: str
+
+def _parse_title_internal(title: str, divider: str, track_name: str) -> list[GameAndTrackPair]:
+    pairs: list[GameAndTrackPair] = []
+    for i in range(len(title)):
+        j = i+len(divider)
+        if (title[i:j] == divider):
+            before = title[0:i]
+            after = title[j-1:]
+            before = before.strip()
+            after = after.strip()
+
+            before_no_mixname = "" 
+            after_no_mixname = "" 
+            if (before.endswith(")") and "(" in before):
+                before_no_mixname = before[0:before.rindex("(")].strip()
+            if (after.endswith(")") and "(" in after):
+                after_no_mixname = after[0:after.rindex("(")].strip()
+
+            add_before_after = False
+            add_after_before = False
+
+            if len(track_name):
+                if before == track_name:
+                    add_before_after = True
+                if after == track_name:
+                    add_after_before = True
+            else:
+                add_before_after = True
+
+            if add_before_after:
+                pairs.append(GameAndTrackPair(before, after))
+                if len(before_no_mixname):
+                    pairs.append(GameAndTrackPair(before_no_mixname, after))
+                if len(after_no_mixname):
+                    pairs.append(GameAndTrackPair(before, after_no_mixname))
+            if add_after_before:
+                pairs.append(GameAndTrackPair(after, before))
+                if len(before_no_mixname):
+                    pairs.append(GameAndTrackPair(after, before_no_mixname))
+                if len(after_no_mixname):
+                    pairs.append(GameAndTrackPair(after_no_mixname, before))
+
+    return pairs
+
+def parseTitle(title: str, divider: str, track_name: str) -> list[GameAndTrackPair]:
+    pairs = [] 
+    if divider in title:
+        pairs = _parse_title_internal(title, divider, track_name)
+        #NOTE: (Ahmayk) if trying to match to a track_name doesn't turn up anything, repeat without matching to track_name
+        if not len(pairs) and len(track_name):
+            pairs = _parse_title_internal(title, divider, "")
+    else:
+        pairs.append(GameAndTrackPair(title, title))
+    return pairs

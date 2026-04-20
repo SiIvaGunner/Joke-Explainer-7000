@@ -7,7 +7,7 @@ from bot_secrets import YOUTUBE_API_KEY, YOUTUBE_CHANNEL_NAME
 from simpleQoC.qoc import performQoC, ffmpegExists, getFileMetadataMutagen, getFileMetadataFfprobe
 from simpleQoC.metadata import countDupe, isDupe
 from sourceFinder import search_rip_sources 
-from specialistFinder import search_specialists 
+from specialistFinder import get_specialist_data, search_specialists 
 
 from hq_core import *
 from hq_config import *
@@ -1764,8 +1764,9 @@ async def specalists(args: list[str], command_context: CommandContext):
         if len(string_and_errors.error_strings):
             return await send_if_errors("Unable to parse message link", string_and_errors.error_strings, command_context.channel)
 
-        text = search_specialists(string_and_errors.string)
-        await send_embed(text, command_context.channel, EmbedDesc(title="Sources"))
+        specialist_entires = await run_blocking(get_specialist_data)
+        text = search_specialists(string_and_errors.string, specialist_entires, command_context.channel.guild)
+        await send_embed(text, command_context.channel, EmbedDesc(title="Specialists"))
 
 
 @command(

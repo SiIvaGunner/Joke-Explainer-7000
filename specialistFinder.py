@@ -7,7 +7,10 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 from bot_secrets import SPECIALISTS_SPREADSHEET_ID 
-from hq_strings import extract_playlist_id 
+from hq_strings import * 
+from simpleQoC.metadata import desc_to_dict, get_music_from_desc
+from hq_core import parse_emojis_in_string
+from discord import Guild
 
 from typing import NamedTuple
 
@@ -46,7 +49,13 @@ def get_sheet_data(sheet_name: str, row_start: int, last_column: str, creds: Cre
 
     return result
 
-def search_specialists(text: str) -> str:
+class SpecialistEntry(NamedTuple):
+    source_string: str
+    specialists: str 
+    game_names: list[str] 
+    playlist_ids: list[str]
+
+def get_specialist_data() -> list[SpecialistEntry]:
 
     SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
     creds = None
@@ -66,11 +75,6 @@ def search_specialists(text: str) -> str:
         with open("token.json", "w") as token:
             token.write(creds.to_json())
 
-    class SpecialistEntry(NamedTuple):
-        source_string: str
-        specialists: str 
-        game_names: list[str] 
-        playlist_ids: list[str]
 
     game_sheet_data = get_sheet_data("Game Strict Rules", 3, 'D', creds)
     specialist_entries: list[SpecialistEntry] = []
@@ -100,6 +104,45 @@ def search_specialists(text: str) -> str:
 
             specialist_entries.append(SpecialistEntry(source_string, specialists, game_names, playlist_ids))
             
-    result = str(specialist_entries) 
+    return specialist_entries 
 
-    return result 
+def format_specialist_line(type_match: str, specialist_entry: SpecialistEntry, stop_emoji: str) -> str:
+    return f'\n{stop_emoji} {specialist_entry.source_string} [{type_match}]: **{specialist_entry.specialists}**'
+
+def search_specialists(submissionText: str, specialist_entires: list[SpecialistEntry], guild: Guild) -> str:
+    result = ""
+
+    title = get_raw_rip_title(submissionText)
+    if title is None: 
+        title = submissionText
+
+    description = get_rip_description(submissionText)
+    desc_dict, msgs = desc_to_dict(description, 1)
+    track_string = get_music_from_desc(desc_dict)
+    playlist_id = extract_playlist_id(description)
+    game_and_track_pairs = parseTitle(title, ' - ', track_string)
+
+    stop_emoji = '🛑'
+    for e in guild.emojis:
+        if e.name.lower() == "stop":
+            stop_emoji = str(e)
+
+    for specialist_entry in specialist_entires:
+
+        is_match = False
+
+        if playlist_id in specialist_entry.playlist_ids:
+            is_match = True
+            result += format_specialist_line('Playlist match', specialist_entry, stop_emoji)
+        
+        if not is_match:
+            for specialist_game_name in specialist_entry.game_names:
+                if len(specialist_game_name):
+                    for game_and_track_pair in game_and_track_pairs:
+                        if specialist_game_name in game_and_track_pair.game_name:
+                            is_match = True
+                            result += format_specialist_line('Game Title match', specialist_entry, stop_emoji)
+
+    result = result.strip()
+
+    return result
