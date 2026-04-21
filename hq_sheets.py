@@ -13,15 +13,18 @@ from discord import Guild
 
 from typing import NamedTuple
 
-# NOTE: (Ahmayk) login required in web browser to access google sheets doc
-# then token.json is created and saves login info
 CREDENTIALS = None
-def get_google_api_credentials() -> Credentials:
+
+def get_sheet_data(sheet_name: str, row_start: int, last_column: str) -> list[list[str]]:
+
+    result: list[list[str]] = []
 
     global CREDENTIALS
 
     if not CREDENTIALS:
 
+        # NOTE: (Ahmayk) login required in web browser to access google sheets doc
+        # then token.json is created and saves login info
         scopes = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
 
         if os.path.exists("token.json"):
@@ -37,44 +40,39 @@ def get_google_api_credentials() -> Credentials:
             with open("token.json", "w") as token:
                 token.write(CREDENTIALS.to_json())
 
-    return CREDENTIALS 
+    if CREDENTIALS:
 
+        sheet_output = {} 
 
-def get_sheet_data(sheet_name: str, row_start: int, last_column: str) -> list[list[str]]:
-    sheet_output = {} 
+        try:
+            service = build("sheets", "v4", credentials=CREDENTIALS)
+            sheet = service.spreadsheets()
+            sheet_output = (
+                sheet.get(
+                    spreadsheetId=SPECIALISTS_SPREADSHEET_ID,
+                    ranges=f'{sheet_name}!A{row_start}:{last_column}',
+                    fields='sheets.data.rowData.values.formattedValue',
+                    includeGridData=True
+                ).execute()
+            )
+        except HttpError as err:
+            print(err)
 
-    credentials = get_google_api_credentials()
+        formatted_values = {} 
+        try:
+            formatted_values = sheet_output['sheets'][0]['data'][0]['rowData']
+        except (KeyError, IndexError):
+            pass
 
-    try:
-        service = build("sheets", "v4", credentials=credentials)
-        sheet = service.spreadsheets()
-        sheet_output = (
-            sheet.get(
-                spreadsheetId=SPECIALISTS_SPREADSHEET_ID,
-                ranges=f'{sheet_name}!A{row_start}:{last_column}',
-                fields='sheets.data.rowData.values.formattedValue',
-                includeGridData=True
-            ).execute()
-        )
-    except HttpError as err:
-        print(err)
-
-    formatted_values = {} 
-    try:
-        formatted_values = sheet_output['sheets'][0]['data'][0]['rowData']
-    except (KeyError, IndexError):
-        pass
-
-    result: list[list[str]] = []
-    for row in formatted_values:
-        if 'values' in row:
-            cells = []
-            for cell in row['values']:
-                if 'formattedValue' in cell:
-                    cells.append(cell['formattedValue'])
-                else:
-                    cells.append("")
-            result.append(cells)
+        for row in formatted_values:
+            if 'values' in row:
+                cells = []
+                for cell in row['values']:
+                    if 'formattedValue' in cell:
+                        cells.append(cell['formattedValue'])
+                    else:
+                        cells.append("")
+                result.append(cells)
 
     return result
 
