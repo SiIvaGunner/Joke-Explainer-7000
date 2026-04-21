@@ -13,6 +13,7 @@ from enum import Enum, auto
 from requests.adapters import HTTPAdapter
 
 from hq_strings import *
+from hq_sheets import get_qoc_sheet_data
 from simpleQoC.metadata import desc_to_dict, get_music_from_desc
 
 requests_session = requests.Session()
@@ -547,19 +548,27 @@ def search_rip_sources(submissionText: str):
 
     # print(f'PAIRS: {game_and_track_pairs}')
 
-    result = ""
-    no_results_message = ""
+    qoc_sheet_data = get_qoc_sheet_data()
 
+    result = ""
+
+    no_results_message = ""
     skip_search = False
     skip_youtube_title_link = False
     for pair in game_and_track_pairs:
-        if pair.game_name == "Undertale" or pair.game_name == "Deltarune":
-            skip_search = True
+        match_found = False
+        for source_exclusion in qoc_sheet_data.source_exclusions:
+            if (
+                pair.game_name == source_exclusion.game_title
+                and (not len(source_exclusion.track_title) or source_exclusion.track_title == pair.track_name)
+            ):
+                skip_search = source_exclusion.skip_database_search
+                skip_youtube_title_link = source_exclusion.skip_youtube_search_link
+                no_results_message = source_exclusion.no_results_message
+                match_found = True
+                break
+        if match_found:
             break
-        if pair.game_name == "Five Nights at Freddy's" and pair.track_name == "Circus":
-            skip_search = True
-            skip_youtube_title_link = True
-            no_results_message = ":bear: :microphone2: har har"
 
     found_exact_match = False
     if not skip_search:

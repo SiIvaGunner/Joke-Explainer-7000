@@ -16,56 +16,58 @@ from datetime import datetime, timezone
 
 class SpecialistEntry(NamedTuple):
     specialists: str 
+    notes: str
     game_title: str
     alternate_game_titles: list[str] 
+    excluded_tracks: list[str]
     source: str
     alternate_source_names: list[str]
 
+class SourceExclusion(NamedTuple):
+    track_title: str
+    game_title: str
+    skip_database_search: bool
+    skip_youtube_search_link: bool
+    no_results_message: str
+    notes: str
+
 class QoCSheetData(NamedTuple):
     specialist_entries: list[SpecialistEntry]
+    source_exclusions: list[SourceExclusion]
 
 def get_raw_sheet_data(sheet_name: str, row_start: int, last_column: str, credentials: Credentials) -> list[list[str]]: 
-
     result: list[list[str]] = []
 
-    sheet_output = {} 
-
     try:
-        service_sheets = build("sheets", "v4", credentials=credentials)
-        sheet = service_sheets.spreadsheets()
-        sheet_output = (
-            sheet.get(
+        service = build("sheets", "v4", credentials=credentials)
+        output = (
+            service.spreadsheets()
+            .get(
                 spreadsheetId=SPECIALISTS_SPREADSHEET_ID,
-                ranges=f'{sheet_name}!A{row_start}:{last_column}',
-                fields='sheets.data.rowData.values.formattedValue',
-                includeGridData=True
-            ).execute()
+                ranges=f"{sheet_name}!A{row_start}:{last_column}",
+                fields="sheets.data.rowData.values.formattedValue",
+                includeGridData=True,
+            )
+            .execute()
         )
-    except HttpError as err:
-        print(err)
+        rows = output["sheets"][0]["data"][0]["rowData"]
+    except (HttpError, KeyError, IndexError):
+        return []
 
-    formatted_values = {} 
-    try:
-        formatted_values = sheet_output['sheets'][0]['data'][0]['rowData']
-    except (KeyError, IndexError):
-        pass
+    print(f"ROWS: {rows}")
 
-    for row in formatted_values:
-        if 'values' in row:
-            cells = []
-            for cell in row['values']:
-                if 'formattedValue' in cell:
-                    cells.append(cell['formattedValue'])
-                else:
-                    cells.append("")
-            result.append(cells)
+    for row in rows:
+        cells = []
+        for cell in row.get("values", []):
+            cells.append(cell.get("formattedValue", ""))
+        result.append(cells)
 
     return result
 
 
 CREDENTIALS = None
 SHEET_LAST_UPDATED: datetime = datetime.now(timezone.utc)
-QOC_SHEET_DATA: QoCSheetData = QoCSheetData([]) 
+QOC_SHEET_DATA: QoCSheetData = QoCSheetData([], []) 
 def get_qoc_sheet_data() -> QoCSheetData: 
 
     global CREDENTIALS
@@ -119,32 +121,56 @@ def get_qoc_sheet_data() -> QoCSheetData:
 
             specialist_entries: list[SpecialistEntry] = []
 
-            game_sheet_data = get_raw_sheet_data("Game Strict Rules", 3, 'C', CREDENTIALS)
+            game_sheet_data = get_raw_sheet_data("Game Strict Rules", 3, 'E', CREDENTIALS)
             for row in game_sheet_data:
-                if len(row):
+                if len(row) > 1:
                     game_title = row[0] 
-                    specialists = "" 
-                    if len(row) > 1:
-                        specialists = row[1]
+                    specialists = row[1]
                     alternate_game_titles: list[str] = [] 
                     if len(row) > 2:
                         alternate_game_titles = row[2].split("/")
-                    specialist_entries.append(SpecialistEntry(specialists, game_title, alternate_game_titles, "", []))
+                    excluded_tracks: list[str] = [] 
+                    if len(row) > 3:
+                        excluded_tracks = row[2].split("/")
+                    notes = "" 
+                    if len(row) > 4:
+                        notes = row[4]
+                    specialist_entries.append(SpecialistEntry(specialists, notes, game_title, alternate_game_titles, excluded_tracks, "", []))
 
-            source_sheet_data = get_raw_sheet_data("Source Strict Rules", 3, 'C', CREDENTIALS)
+            source_sheet_data = get_raw_sheet_data("Source Strict Rules", 3, 'D', CREDENTIALS)
             for row in source_sheet_data:
-                if len(row):
+                if len(row) > 1:
                     source_string = row[0]
-                    specialists = "" 
-                    if len(row) > 1:
-                        specialists = row[1]
+                    specialists = row[1]
                     alternate_source_names = []
                     if len(row) > 2:
                         alternate_source_names = row[2].split("/") 
+                    notes = "" 
+                    if len(row) > 3:
+                        notes = row[3]
+                    specialist_entries.append(SpecialistEntry(specialists, notes, "", [], [], source_string, alternate_source_names))
 
-                    specialist_entries.append(SpecialistEntry(specialists, "", [], source_string, alternate_source_names))
+            source_exclusions: list[SourceExclusion] = []
+            source_exclusion_sheet_data = get_raw_sheet_data("Source Exclusions", 3, 'F', CREDENTIALS)
+            for row in source_exclusion_sheet_data:
+                if len(row) > 1:
+                    track_title = row[0] 
+                    game_title = row[1]
+                    skip_database_search = False
+                    if len(row) > 2:
+                        skip_database_search = (row[2] == 'TRUE')
+                    skip_youtube_search_link = False
+                    if len(row) > 3:
+                        skip_youtube_search_link = (row[3] == 'TRUE')
+                    no_results_message = ""
+                    if len(row) > 4:
+                        no_results_message = row[4]
+                    notes = ""
+                    if len(row) > 5:
+                        notes = row[5]
+                    source_exclusions.append(SourceExclusion(track_title, game_title, skip_database_search, skip_youtube_search_link, no_results_message, notes))
 
-            result = QoCSheetData(specialist_entries)
+            result = QoCSheetData(specialist_entries, source_exclusions)
             QOC_SHEET_DATA = result
 
     return result
