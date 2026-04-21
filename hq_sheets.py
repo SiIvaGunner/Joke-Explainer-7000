@@ -12,12 +12,19 @@ from simpleQoC.metadata import desc_to_dict, get_music_from_desc
 from discord import Guild
 
 from typing import NamedTuple
+from datetime import datetime, timezone
 
 CREDENTIALS = None
+
+SHEET_LAST_UPDATED: datetime = datetime.now(timezone.utc)
+SHEET_CACHE: dict[str, list[list[str]]] = {}
 
 def get_sheet_data(sheet_name: str, row_start: int, last_column: str) -> list[list[str]]:
 
     result: list[list[str]] = []
+
+    if sheet_name in SHEET_CACHE:
+        result = SHEET_CACHE[sheet_name]
 
     global CREDENTIALS
 
@@ -25,7 +32,10 @@ def get_sheet_data(sheet_name: str, row_start: int, last_column: str) -> list[li
 
         # NOTE: (Ahmayk) login required in web browser to access google sheets doc
         # then token.json is created and saves login info
-        scopes = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
+        scopes = [
+            "https://www.googleapis.com/auth/spreadsheets.readonly",
+            "https://www.googleapis.com/auth/drive.readonly",
+        ]
 
         if os.path.exists("token.json"):
             CREDENTIALS = Credentials.from_authorized_user_file("token.json", scopes)
@@ -42,37 +52,59 @@ def get_sheet_data(sheet_name: str, row_start: int, last_column: str) -> list[li
 
     if CREDENTIALS:
 
-        sheet_output = {} 
+        call_sheet_api = not len(result)
 
         try:
-            service = build("sheets", "v4", credentials=CREDENTIALS)
-            sheet = service.spreadsheets()
-            sheet_output = (
-                sheet.get(
-                    spreadsheetId=SPECIALISTS_SPREADSHEET_ID,
-                    ranges=f'{sheet_name}!A{row_start}:{last_column}',
-                    fields='sheets.data.rowData.values.formattedValue',
-                    includeGridData=True
-                ).execute()
+            service_drive = build("drive", "v3", credentials=CREDENTIALS)
+            file = (
+                service_drive.files()
+                .get(fileId=SPECIALISTS_SPREADSHEET_ID, fields="id, name, modifiedTime")
+                .execute()
             )
-        except HttpError as err:
-            print(err)
+            modified_time = datetime.fromisoformat(file["modifiedTime"].replace("Z", "+00:00"))
+            global SHEET_LAST_UPDATED 
+            if modified_time > SHEET_LAST_UPDATED:
+                call_sheet_api = True
+                SHEET_LAST_UPDATED = modified_time
 
-        formatted_values = {} 
-        try:
-            formatted_values = sheet_output['sheets'][0]['data'][0]['rowData']
-        except (KeyError, IndexError):
-            pass
+        except HttpError as error:
+            print(f"An error occurred: {error}")
 
-        for row in formatted_values:
-            if 'values' in row:
-                cells = []
-                for cell in row['values']:
-                    if 'formattedValue' in cell:
-                        cells.append(cell['formattedValue'])
-                    else:
-                        cells.append("")
-                result.append(cells)
+        if call_sheet_api:
+
+            sheet_output = {} 
+
+            try:
+                service_sheets = build("sheets", "v4", credentials=CREDENTIALS)
+                sheet = service_sheets.spreadsheets()
+                sheet_output = (
+                    sheet.get(
+                        spreadsheetId=SPECIALISTS_SPREADSHEET_ID,
+                        ranges=f'{sheet_name}!A{row_start}:{last_column}',
+                        fields='sheets.data.rowData.values.formattedValue',
+                        includeGridData=True
+                    ).execute()
+                )
+            except HttpError as err:
+                print(err)
+
+            formatted_values = {} 
+            try:
+                formatted_values = sheet_output['sheets'][0]['data'][0]['rowData']
+            except (KeyError, IndexError):
+                pass
+
+            for row in formatted_values:
+                if 'values' in row:
+                    cells = []
+                    for cell in row['values']:
+                        if 'formattedValue' in cell:
+                            cells.append(cell['formattedValue'])
+                        else:
+                            cells.append("")
+                    result.append(cells)
+
+            SHEET_CACHE[sheet_name] = result
 
     return result
 
