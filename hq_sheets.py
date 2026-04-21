@@ -19,7 +19,6 @@ class SpecialistEntry(NamedTuple):
     notes: str
     game_title: str
     alternate_game_titles: list[str] 
-    excluded_tracks: list[str]
     source: str
     alternate_source_names: list[str]
 
@@ -54,12 +53,10 @@ def get_raw_sheet_data(sheet_name: str, row_start: int, last_column: str, creden
     except (HttpError, KeyError, IndexError):
         return []
 
-    print(f"ROWS: {rows}")
-
     for row in rows:
         cells = []
         for cell in row.get("values", []):
-            cells.append(cell.get("formattedValue", ""))
+            cells.append(cell.get("formattedValue", "").strip())
         result.append(cells)
 
     return result
@@ -110,6 +107,7 @@ def get_qoc_sheet_data() -> QoCSheetData:
             )
             modified_time = datetime.fromisoformat(file["modifiedTime"].replace("Z", "+00:00"))
             global SHEET_LAST_UPDATED 
+            print(f"SHEET_LAST_UPDATED: {str(SHEET_LAST_UPDATED)} modified time: {str(modified_time)}")
             if modified_time == SHEET_LAST_UPDATED:
                 call_sheet_api = False 
             SHEET_LAST_UPDATED = modified_time
@@ -121,21 +119,20 @@ def get_qoc_sheet_data() -> QoCSheetData:
 
             specialist_entries: list[SpecialistEntry] = []
 
-            game_sheet_data = get_raw_sheet_data("Game Strict Rules", 3, 'E', CREDENTIALS)
+            game_sheet_data = get_raw_sheet_data("Game Strict Rules", 3, 'D', CREDENTIALS)
             for row in game_sheet_data:
                 if len(row) > 1:
                     game_title = row[0] 
                     specialists = row[1]
                     alternate_game_titles: list[str] = [] 
                     if len(row) > 2:
-                        alternate_game_titles = row[2].split("/")
-                    excluded_tracks: list[str] = [] 
-                    if len(row) > 3:
-                        excluded_tracks = row[2].split("/")
+                        names = row[2].split("/")
+                        for name in names:
+                            alternate_game_titles.append(name.strip())
                     notes = "" 
-                    if len(row) > 4:
-                        notes = row[4]
-                    specialist_entries.append(SpecialistEntry(specialists, notes, game_title, alternate_game_titles, excluded_tracks, "", []))
+                    if len(row) > 3:
+                        notes = row[3]
+                    specialist_entries.append(SpecialistEntry(specialists, notes, game_title, alternate_game_titles, "", []))
 
             source_sheet_data = get_raw_sheet_data("Source Strict Rules", 3, 'D', CREDENTIALS)
             for row in source_sheet_data:
@@ -144,16 +141,18 @@ def get_qoc_sheet_data() -> QoCSheetData:
                     specialists = row[1]
                     alternate_source_names = []
                     if len(row) > 2:
-                        alternate_source_names = row[2].split("/") 
+                        names = row[2].split("/") 
+                        for name in names:
+                            alternate_source_names.append(name.strip())
                     notes = "" 
                     if len(row) > 3:
                         notes = row[3]
-                    specialist_entries.append(SpecialistEntry(specialists, notes, "", [], [], source_string, alternate_source_names))
+                    specialist_entries.append(SpecialistEntry(specialists, notes, "", [], source_string, alternate_source_names))
 
             source_exclusions: list[SourceExclusion] = []
             source_exclusion_sheet_data = get_raw_sheet_data("Source Exclusions", 3, 'F', CREDENTIALS)
             for row in source_exclusion_sheet_data:
-                if len(row) > 1:
+                if len(row) > 1 and len(row[1]):
                     track_title = row[0] 
                     game_title = row[1]
                     skip_database_search = False
@@ -198,8 +197,6 @@ def search_specialists(submissionText: str, guild: Guild) -> str:
     for e in guild.emojis:
         if e.name.lower() == "stop":
             stop_emoji = str(e)
-
-    print(game_and_track_pairs)
 
     qoc_sheet_data = get_qoc_sheet_data()
 
