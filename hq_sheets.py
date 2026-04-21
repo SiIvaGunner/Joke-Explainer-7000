@@ -112,7 +112,7 @@ def get_qoc_sheet_data() -> QoCSheetData:
             )
             modified_time = datetime.fromisoformat(file["modifiedTime"].replace("Z", "+00:00"))
             global SHEET_LAST_UPDATED 
-            print(f"SHEET_LAST_UPDATED: {str(SHEET_LAST_UPDATED)} modified time: {str(modified_time)}")
+            # print(f"SHEET_LAST_UPDATED: {str(SHEET_LAST_UPDATED)} modified time: {str(modified_time)}")
             if modified_time == SHEET_LAST_UPDATED:
                 call_sheet_api = False 
             SHEET_LAST_UPDATED = modified_time
@@ -150,7 +150,6 @@ def get_qoc_sheet_data() -> QoCSheetData:
                         for name in names:
                             alternate_composer_names.append(name.strip())
                     notes = "" 
-                    print(alternate_composer_names)
                     if len(row) > 3:
                         notes = row[3]
                     specialist_entries.append(SpecialistEntry(specialists, notes, "", [], composer_string, alternate_composer_names, "", []))
@@ -219,6 +218,8 @@ def search_specialists(submissionText: str, guild: Guild) -> str:
     for match in composer_matches:
         if match in desc_dict:
             composer_inputs.append(desc_dict[match].lower())
+    if not len(composer_inputs):
+        composer_inputs.append(submissionText.lower())
 
     stop_emoji = '🛑'
     for e in guild.emojis:
@@ -231,7 +232,7 @@ def search_specialists(submissionText: str, guild: Guild) -> str:
 
         is_match = False 
         for game_and_track_pair in game_and_track_pairs:
-            if len(specialist_entry.game_title) and specialist_entry.game_title == game_and_track_pair.game_name:
+            if len(specialist_entry.game_title) and specialist_entry.game_title.lower() == game_and_track_pair.game_name.lower():
                 result += f'\n{stop_emoji} {specialist_entry.game_title}: **{specialist_entry.specialists}**'
                 break
 
@@ -260,10 +261,6 @@ def search_specialists(submissionText: str, guild: Guild) -> str:
                     break
 
         if len(composer_inputs) and not is_match:
-            if len(specialist_entry.composer_name):
-                print(specialist_entry)
-                print(composer_inputs)
-
             for composer_input in composer_inputs:
                 if len(specialist_entry.composer_name) and specialist_entry.composer_name.lower() in composer_input:
                     result += f'\n{stop_emoji} {specialist_entry.composer_name}: **{specialist_entry.specialists}**'

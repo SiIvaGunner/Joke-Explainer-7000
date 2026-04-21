@@ -1739,7 +1739,7 @@ async def source(args: list[str], command_context: CommandContext):
 
     async with command_context.channel.typing():
 
-        string_and_errors = await parse_channel_link_or_text(args[0])
+        string_and_errors = await parse_channel_link_or_text(args)
         if len(string_and_errors.error_strings):
             return await send_if_errors("Unable to parse message link", string_and_errors.error_strings, command_context.channel)
 
@@ -1760,7 +1760,7 @@ async def specalists(args: list[str], command_context: CommandContext):
 
     async with command_context.channel.typing():
 
-        string_and_errors = await parse_channel_link_or_text(args[0])
+        string_and_errors = await parse_channel_link_or_text(args)
         if len(string_and_errors.error_strings):
             return await send_if_errors("Unable to parse message link", string_and_errors.error_strings, command_context.channel)
 

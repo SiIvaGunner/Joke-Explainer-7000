@@ -1273,15 +1273,16 @@ def parse_channel_link(link: str | None, types: typing.List[str], give_default: 
     else:
         return -1, "Error: Link is not a valid roundup channel."
 
-async def parse_channel_link_or_text(inputText: str) -> StringAndErrors:
-    text = " ".join(inputText)
+async def parse_channel_link_or_text(args: list[str]) -> StringAndErrors:
+    text = " ".join(args)
     error_strings = []
-    message_link = extract_discord_link(inputText)
-    if len(message_link):
-        server, channel, message, status = await parse_message_link(message_link)
-        if message is None:
-            error_strings.append(status)
-        text = message.content
+    if len(args):
+        message_link = extract_discord_link(args[0])
+        if len(message_link):
+            server, channel, message, status = await parse_message_link(message_link)
+            if message is None:
+                error_strings.append(status)
+            text = message.content
     return StringAndErrors(text, error_strings) 
 
 
