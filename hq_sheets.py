@@ -14,19 +14,64 @@ from discord import Guild
 from typing import NamedTuple
 from datetime import datetime, timezone
 
-CREDENTIALS = None
+class SpecialistEntry(NamedTuple):
+    specialists: str 
+    game_title: str
+    alternate_game_titles: list[str] 
+    source: str
+    alternate_source_names: list[str]
 
-SHEET_LAST_UPDATED: datetime = datetime.now(timezone.utc)
-SHEET_CACHE: dict[str, list[list[str]]] = {}
+class QoCSheetData(NamedTuple):
+    specialist_entries: list[SpecialistEntry]
 
-def get_sheet_data(sheet_name: str, row_start: int, last_column: str) -> list[list[str]]:
+def get_raw_sheet_data(sheet_name: str, row_start: int, last_column: str, credentials: Credentials) -> list[list[str]]: 
 
     result: list[list[str]] = []
 
-    if sheet_name in SHEET_CACHE:
-        result = SHEET_CACHE[sheet_name]
+    sheet_output = {} 
+
+    try:
+        service_sheets = build("sheets", "v4", credentials=credentials)
+        sheet = service_sheets.spreadsheets()
+        sheet_output = (
+            sheet.get(
+                spreadsheetId=SPECIALISTS_SPREADSHEET_ID,
+                ranges=f'{sheet_name}!A{row_start}:{last_column}',
+                fields='sheets.data.rowData.values.formattedValue',
+                includeGridData=True
+            ).execute()
+        )
+    except HttpError as err:
+        print(err)
+
+    formatted_values = {} 
+    try:
+        formatted_values = sheet_output['sheets'][0]['data'][0]['rowData']
+    except (KeyError, IndexError):
+        pass
+
+    for row in formatted_values:
+        if 'values' in row:
+            cells = []
+            for cell in row['values']:
+                if 'formattedValue' in cell:
+                    cells.append(cell['formattedValue'])
+                else:
+                    cells.append("")
+            result.append(cells)
+
+    return result
+
+
+CREDENTIALS = None
+SHEET_LAST_UPDATED: datetime = datetime.now(timezone.utc)
+QOC_SHEET_DATA: QoCSheetData = QoCSheetData([]) 
+def get_qoc_sheet_data() -> QoCSheetData: 
 
     global CREDENTIALS
+    global QOC_SHEET_DATA 
+
+    result = QOC_SHEET_DATA 
 
     if not CREDENTIALS:
 
@@ -52,7 +97,7 @@ def get_sheet_data(sheet_name: str, row_start: int, last_column: str) -> list[li
 
     if CREDENTIALS:
 
-        call_sheet_api = not len(result)
+        call_sheet_api = True 
 
         try:
             service_drive = build("drive", "v3", credentials=CREDENTIALS)
@@ -63,92 +108,49 @@ def get_sheet_data(sheet_name: str, row_start: int, last_column: str) -> list[li
             )
             modified_time = datetime.fromisoformat(file["modifiedTime"].replace("Z", "+00:00"))
             global SHEET_LAST_UPDATED 
-            if modified_time > SHEET_LAST_UPDATED:
-                call_sheet_api = True
-                SHEET_LAST_UPDATED = modified_time
+            if modified_time == SHEET_LAST_UPDATED:
+                call_sheet_api = False 
+            SHEET_LAST_UPDATED = modified_time
 
         except HttpError as error:
             print(f"An error occurred: {error}")
 
-        if call_sheet_api:
+        if call_sheet_api or not QOC_SHEET_DATA:
 
-            sheet_output = {} 
+            specialist_entries: list[SpecialistEntry] = []
 
-            try:
-                service_sheets = build("sheets", "v4", credentials=CREDENTIALS)
-                sheet = service_sheets.spreadsheets()
-                sheet_output = (
-                    sheet.get(
-                        spreadsheetId=SPECIALISTS_SPREADSHEET_ID,
-                        ranges=f'{sheet_name}!A{row_start}:{last_column}',
-                        fields='sheets.data.rowData.values.formattedValue',
-                        includeGridData=True
-                    ).execute()
-                )
-            except HttpError as err:
-                print(err)
+            game_sheet_data = get_raw_sheet_data("Game Strict Rules", 3, 'C', CREDENTIALS)
+            for row in game_sheet_data:
+                if len(row):
+                    game_title = row[0] 
+                    specialists = "" 
+                    if len(row) > 1:
+                        specialists = row[1]
+                    alternate_game_titles: list[str] = [] 
+                    if len(row) > 2:
+                        alternate_game_titles = row[2].split("/")
+                    specialist_entries.append(SpecialistEntry(specialists, game_title, alternate_game_titles, "", []))
 
-            formatted_values = {} 
-            try:
-                formatted_values = sheet_output['sheets'][0]['data'][0]['rowData']
-            except (KeyError, IndexError):
-                pass
+            source_sheet_data = get_raw_sheet_data("Source Strict Rules", 3, 'C', CREDENTIALS)
+            for row in source_sheet_data:
+                if len(row):
+                    source_string = row[0]
+                    specialists = "" 
+                    if len(row) > 1:
+                        specialists = row[1]
+                    alternate_source_names = []
+                    if len(row) > 2:
+                        alternate_source_names = row[2].split("/") 
 
-            for row in formatted_values:
-                if 'values' in row:
-                    cells = []
-                    for cell in row['values']:
-                        if 'formattedValue' in cell:
-                            cells.append(cell['formattedValue'])
-                        else:
-                            cells.append("")
-                    result.append(cells)
+                    specialist_entries.append(SpecialistEntry(specialists, "", [], source_string, alternate_source_names))
 
-            SHEET_CACHE[sheet_name] = result
+            result = QoCSheetData(specialist_entries)
+            QOC_SHEET_DATA = result
 
     return result
 
 
-class SpecialistEntry(NamedTuple):
-    specialists: str 
-    game_title: str
-    alternate_game_titles: list[str] 
-    source: str
-    alternate_source_names: list[str]
-
-def get_specialist_data() -> list[SpecialistEntry]:
-
-    specialist_entries: list[SpecialistEntry] = []
-
-    game_sheet_data = get_sheet_data("Game Strict Rules", 3, 'C')
-    for row in game_sheet_data:
-        if len(row):
-            game_title = row[0] 
-            specialists = "" 
-            if len(row) > 1:
-                specialists = row[1]
-            alternate_game_titles: list[str] = [] 
-            if len(row) > 2:
-                alternate_game_titles = row[2].split("/")
-            specialist_entries.append(SpecialistEntry(specialists, game_title, alternate_game_titles, "", []))
-
-    source_sheet_data = get_sheet_data("Source Strict Rules", 3, 'C')
-    for row in source_sheet_data:
-        if len(row):
-            source_string = row[0]
-            specialists = "" 
-            if len(row) > 1:
-                specialists = row[1]
-            alternate_source_names = []
-            if len(row) > 2:
-                alternate_source_names = row[2].split("/") 
-
-            specialist_entries.append(SpecialistEntry(specialists, "", [], source_string, alternate_source_names))
-            
-    return specialist_entries 
-
-
-def search_specialists(submissionText: str, specialist_entires: list[SpecialistEntry], guild: Guild) -> str:
+def search_specialists(submissionText: str, guild: Guild) -> str:
     result = ""
 
     title = get_raw_rip_title(submissionText)
@@ -173,7 +175,9 @@ def search_specialists(submissionText: str, specialist_entires: list[SpecialistE
 
     print(game_and_track_pairs)
 
-    for specialist_entry in specialist_entires:
+    qoc_sheet_data = get_qoc_sheet_data()
+
+    for specialist_entry in qoc_sheet_data.specialist_entries:
 
         for game_and_track_pair in game_and_track_pairs:
             if len(specialist_entry.game_title) and specialist_entry.game_title == game_and_track_pair.game_name:

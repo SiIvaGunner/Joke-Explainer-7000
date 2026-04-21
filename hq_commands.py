@@ -1764,8 +1764,7 @@ async def specalists(args: list[str], command_context: CommandContext):
         if len(string_and_errors.error_strings):
             return await send_if_errors("Unable to parse message link", string_and_errors.error_strings, command_context.channel)
 
-        specialist_entires = await run_blocking(get_specialist_data)
-        text = search_specialists(string_and_errors.string, specialist_entires, command_context.channel.guild)
+        text = await run_blocking(search_specialists, string_and_errors.string, command_context.channel.guild)
         if len(text):
             await send_embed(text, command_context.channel, EmbedDesc(title="Specialists"))
         else:
