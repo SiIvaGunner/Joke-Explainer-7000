@@ -195,7 +195,7 @@ def get_qoc_sheet_data() -> QoCSheetData:
     return result
 
 
-def search_specialists(submissionText: str, guild: Guild) -> str:
+def search_specialists(submissionText: str, qoc_sheet_data: QoCSheetData, guild: Guild) -> str:
     result = ""
 
     title = get_raw_rip_title(submissionText)
@@ -225,8 +225,6 @@ def search_specialists(submissionText: str, guild: Guild) -> str:
     for e in guild.emojis:
         if e.name.lower() == "stop":
             stop_emoji = str(e)
-
-    qoc_sheet_data = get_qoc_sheet_data()
 
     for specialist_entry in qoc_sheet_data.specialist_entries:
 

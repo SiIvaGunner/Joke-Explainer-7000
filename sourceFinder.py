@@ -13,7 +13,7 @@ from enum import Enum, auto
 from requests.adapters import HTTPAdapter
 
 from hq_strings import *
-from hq_sheets import get_qoc_sheet_data
+from hq_sheets import get_qoc_sheet_data, QoCSheetData
 from simpleQoC.metadata import desc_to_dict, get_music_from_desc
 
 requests_session = requests.Session()
@@ -530,7 +530,7 @@ def find_song(game_and_track_pairs: list[GameAndTrackPair]) -> FindSongResult:
 
 
 
-def search_rip_sources(submissionText: str):
+def search_rip_sources(submissionText: str, qoc_sheet_data: QoCSheetData) -> str:
 
     title = get_raw_rip_title(submissionText)
     if title is None: 
@@ -547,8 +547,6 @@ def search_rip_sources(submissionText: str):
     game_and_track_pairs = parseTitle(title, ' - ', track_string)
 
     # print(f'PAIRS: {game_and_track_pairs}')
-
-    qoc_sheet_data = get_qoc_sheet_data()
 
     result = ""
 

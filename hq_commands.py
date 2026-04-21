@@ -1743,13 +1743,14 @@ async def source(args: list[str], command_context: CommandContext):
         if len(string_and_errors.error_strings):
             return await send_if_errors("Unable to parse message link", string_and_errors.error_strings, command_context.channel)
 
-        text = search_rip_sources(string_and_errors.string)
+        qoc_sheet_data = await run_blocking(get_qoc_sheet_data)
+        text = search_rip_sources(string_and_errors.string, qoc_sheet_data)
         await send_embed(text, command_context.channel, EmbedDesc(title="Sources"))
 
 @command(
     command_type=CommandType.SOURCE,
     format='<message link | text>',
-    brief='Search for QoC specialists for a rip or source.',
+    brief='Search for QoC specialists',
     aliases=['specialist'],
     public=True
 )
@@ -1764,7 +1765,8 @@ async def specalists(args: list[str], command_context: CommandContext):
         if len(string_and_errors.error_strings):
             return await send_if_errors("Unable to parse message link", string_and_errors.error_strings, command_context.channel)
 
-        text = await run_blocking(search_specialists, string_and_errors.string, command_context.channel.guild)
+        qoc_sheet_data = await run_blocking(get_qoc_sheet_data)
+        text = search_specialists(string_and_errors.string, qoc_sheet_data, command_context.channel.guild)
         if len(text):
             await send_embed(text, command_context.channel, EmbedDesc(title="Specialists"))
         else:
