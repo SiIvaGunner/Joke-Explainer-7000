@@ -7,10 +7,10 @@ from bot_secrets import YOUTUBE_API_KEY, YOUTUBE_CHANNEL_NAME
 from simpleQoC.qoc import performQoC, ffmpegExists, getFileMetadataMutagen, getFileMetadataFfprobe
 from simpleQoC.metadata import countDupe, isDupe
 from sourceFinder import search_rip_sources 
-from specialistFinder import get_specialist_data, search_specialists 
 
 from hq_core import *
 from hq_config import *
+from hq_sheets import * 
 
 import re
 import typing

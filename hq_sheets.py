@@ -1,5 +1,4 @@
 import os.path
-
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -7,16 +6,47 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 from bot_secrets import SPECIALISTS_SPREADSHEET_ID 
+from hq_sheets import * 
 from hq_strings import * 
 from simpleQoC.metadata import desc_to_dict, get_music_from_desc
 from discord import Guild
 
 from typing import NamedTuple
 
-def get_sheet_data(sheet_name: str, row_start: int, last_column: str, creds: Credentials) -> list[list[str]]:
+# NOTE: (Ahmayk) login required in web browser to access google sheets doc
+# then token.json is created and saves login info
+CREDENTIALS = None
+def get_google_api_credentials() -> Credentials:
+
+    global CREDENTIALS
+
+    if not CREDENTIALS:
+
+        scopes = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
+
+        if os.path.exists("token.json"):
+            CREDENTIALS = Credentials.from_authorized_user_file("token.json", scopes)
+
+        if not CREDENTIALS or not CREDENTIALS.valid:
+            if CREDENTIALS and CREDENTIALS.expired and CREDENTIALS.refresh_token:
+                CREDENTIALS.refresh(Request())
+            else:
+                flow = InstalledAppFlow.from_client_secrets_file("credentials.json", scopes)
+                CREDENTIALS = flow.run_local_server(port=0)
+
+            with open("token.json", "w") as token:
+                token.write(CREDENTIALS.to_json())
+
+    return CREDENTIALS 
+
+
+def get_sheet_data(sheet_name: str, row_start: int, last_column: str) -> list[list[str]]:
     sheet_output = {} 
+
+    credentials = get_google_api_credentials()
+
     try:
-        service = build("sheets", "v4", credentials=creds)
+        service = build("sheets", "v4", credentials=credentials)
         sheet = service.spreadsheets()
         sheet_output = (
             sheet.get(
@@ -48,6 +78,7 @@ def get_sheet_data(sheet_name: str, row_start: int, last_column: str, creds: Cre
 
     return result
 
+
 class SpecialistEntry(NamedTuple):
     specialists: str 
     game_title: str
@@ -57,27 +88,9 @@ class SpecialistEntry(NamedTuple):
 
 def get_specialist_data() -> list[SpecialistEntry]:
 
-    SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
-    creds = None
-
-    # NOTE: (Ahmayk) login required in web browser to access google sheets doc
-    # then token.json is created and saves login info
-    if os.path.exists("token.json"):
-        creds = Credentials.from_authorized_user_file("token.json", SCOPES)
-
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file("credentials.json", SCOPES)
-            creds = flow.run_local_server(port=0)
-
-        with open("token.json", "w") as token:
-            token.write(creds.to_json())
-
     specialist_entries: list[SpecialistEntry] = []
 
-    game_sheet_data = get_sheet_data("Game Strict Rules", 3, 'C', creds)
+    game_sheet_data = get_sheet_data("Game Strict Rules", 3, 'C')
     for row in game_sheet_data:
         if len(row):
             game_title = row[0] 
@@ -89,7 +102,7 @@ def get_specialist_data() -> list[SpecialistEntry]:
                 alternate_game_titles = row[2].split("/")
             specialist_entries.append(SpecialistEntry(specialists, game_title, alternate_game_titles, "", []))
 
-    source_sheet_data = get_sheet_data("Source Strict Rules", 3, 'C', creds)
+    source_sheet_data = get_sheet_data("Source Strict Rules", 3, 'C')
     for row in source_sheet_data:
         if len(row):
             source_string = row[0]
