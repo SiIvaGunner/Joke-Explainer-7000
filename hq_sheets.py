@@ -206,16 +206,25 @@ def search_specialists(submissionText: str, guild: Guild) -> str:
             if len(specialist_entry.game_title) and specialist_entry.game_title == game_and_track_pair.game_name:
                 result += f'\n{stop_emoji} {specialist_entry.game_title}: **{specialist_entry.specialists}**'
                 break
+
+            is_match = False 
             for alternate_title in specialist_entry.alternate_game_titles:
                 if len(alternate_title) and alternate_title.lower() in game_and_track_pair.game_name.lower():
-                    result += f'\n{stop_emoji} {specialist_entry.game_title}: **{specialist_entry.specialists}** [{alternate_title}]'
+                    is_match = True
+                    result += f'\n{stop_emoji} {specialist_entry.game_title}: **{specialist_entry.specialists}**'
+                    if alternate_title.lower() not in specialist_entry.game_title.lower():
+                        result += f' [{alternate_title}]'
                     break
+            if is_match:
+                break
         
         if len(specialist_entry.source) and specialist_entry.source.lower() in joke_input:
             result += f'\n{stop_emoji} {specialist_entry.source}: **{specialist_entry.specialists}**'
         for alternate_source_name in specialist_entry.alternate_source_names:
             if len(alternate_source_name) and alternate_source_name.lower() in joke_input:
-                result += f'\n{stop_emoji} {specialist_entry.source}: **{specialist_entry.specialists}** [{alternate_source_name}]'
+                result += f'\n{stop_emoji} {specialist_entry.source}: **{specialist_entry.specialists}**'
+                if alternate_source_name not in specialist_entry.source:
+                    result += f' [{alternate_source_name}]'
                 break
 
     result = result.strip()
