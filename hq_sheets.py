@@ -19,6 +19,8 @@ class SpecialistEntry(NamedTuple):
     notes: str
     game_title: str
     alternate_game_titles: list[str] 
+    composer_name: str
+    alternate_composer_names: list[str] 
     source: str
     alternate_source_names: list[str]
 
@@ -99,6 +101,9 @@ def get_qoc_sheet_data() -> QoCSheetData:
         call_sheet_api = True 
 
         try:
+            ##NOTE: (Ahmayk) We check to see the last modified time and only fetch new info if the sheet appears to be updated.
+            # Google drive doesn't seem to update this very quickly, in testing it can take up to around 5 minutes,
+            # but this is 100% worth it for the speed boost since changes to the sheet don't really need to take effect immediatley
             service_drive = build("drive", "v3", credentials=CREDENTIALS)
             file = (
                 service_drive.files()
@@ -132,7 +137,23 @@ def get_qoc_sheet_data() -> QoCSheetData:
                     notes = "" 
                     if len(row) > 3:
                         notes = row[3]
-                    specialist_entries.append(SpecialistEntry(specialists, notes, game_title, alternate_game_titles, "", []))
+                    specialist_entries.append(SpecialistEntry(specialists, notes, game_title, alternate_game_titles, "", [], "", []))
+
+            composer_sheet_data = get_raw_sheet_data("Composer Strict Rules", 3, 'D', CREDENTIALS)
+            for row in composer_sheet_data:
+                if len(row) > 1:
+                    composer_string = row[0]
+                    specialists = row[1]
+                    alternate_composer_names = []
+                    if len(row) > 2:
+                        names = row[2].split("/") 
+                        for name in names:
+                            alternate_composer_names.append(name.strip())
+                    notes = "" 
+                    print(alternate_composer_names)
+                    if len(row) > 3:
+                        notes = row[3]
+                    specialist_entries.append(SpecialistEntry(specialists, notes, "", [], composer_string, alternate_composer_names, "", []))
 
             source_sheet_data = get_raw_sheet_data("Source Strict Rules", 3, 'D', CREDENTIALS)
             for row in source_sheet_data:
@@ -147,7 +168,7 @@ def get_qoc_sheet_data() -> QoCSheetData:
                     notes = "" 
                     if len(row) > 3:
                         notes = row[3]
-                    specialist_entries.append(SpecialistEntry(specialists, notes, "", [], source_string, alternate_source_names))
+                    specialist_entries.append(SpecialistEntry(specialists, notes, "", [], "", [], source_string, alternate_source_names))
 
             source_exclusions: list[SourceExclusion] = []
             source_exclusion_sheet_data = get_raw_sheet_data("Source Exclusions", 3, 'F', CREDENTIALS)
@@ -193,6 +214,12 @@ def search_specialists(submissionText: str, guild: Guild) -> str:
         joke_input = chunks[2]
     joke_input = joke_input.lower()
 
+    composer_inputs = [] 
+    composer_matches = ["Composer", "Composer", "Arrangement"]
+    for match in composer_matches:
+        if match in desc_dict:
+            composer_inputs.append(desc_dict[match].lower())
+
     stop_emoji = '🛑'
     for e in guild.emojis:
         if e.name.lower() == "stop":
@@ -202,6 +229,7 @@ def search_specialists(submissionText: str, guild: Guild) -> str:
 
     for specialist_entry in qoc_sheet_data.specialist_entries:
 
+        is_match = False 
         for game_and_track_pair in game_and_track_pairs:
             if len(specialist_entry.game_title) and specialist_entry.game_title == game_and_track_pair.game_name:
                 result += f'\n{stop_emoji} {specialist_entry.game_title}: **{specialist_entry.specialists}**'
@@ -217,15 +245,40 @@ def search_specialists(submissionText: str, guild: Guild) -> str:
                     break
             if is_match:
                 break
-        
-        if len(specialist_entry.source) and specialist_entry.source.lower() in joke_input:
-            result += f'\n{stop_emoji} {specialist_entry.source}: **{specialist_entry.specialists}**'
-        for alternate_source_name in specialist_entry.alternate_source_names:
-            if len(alternate_source_name) and alternate_source_name.lower() in joke_input:
+
+        if len(joke_input) and not is_match:
+            if len(specialist_entry.source) and specialist_entry.source.lower() in joke_input:
                 result += f'\n{stop_emoji} {specialist_entry.source}: **{specialist_entry.specialists}**'
-                if alternate_source_name not in specialist_entry.source:
-                    result += f' [{alternate_source_name}]'
                 break
+
+            for alternate_source_name in specialist_entry.alternate_source_names:
+                if len(alternate_source_name) and alternate_source_name.lower() in joke_input:
+                    is_match = True
+                    result += f'\n{stop_emoji} {specialist_entry.source}: **{specialist_entry.specialists}**'
+                    if alternate_source_name not in specialist_entry.source:
+                        result += f' [{alternate_source_name}]'
+                    break
+
+        if len(composer_inputs) and not is_match:
+            if len(specialist_entry.composer_name):
+                print(specialist_entry)
+                print(composer_inputs)
+
+            for composer_input in composer_inputs:
+                if len(specialist_entry.composer_name) and specialist_entry.composer_name.lower() in composer_input:
+                    result += f'\n{stop_emoji} {specialist_entry.composer_name}: **{specialist_entry.specialists}**'
+                    is_match = True
+                    break
+
+                for alternate_composer_name in specialist_entry.alternate_composer_names:
+                    if len(alternate_composer_name) and alternate_composer_name.lower() in composer_input:
+                        is_match = True
+                        result += f'\n{stop_emoji} {specialist_entry.composer_name}: **{specialist_entry.specialists}**'
+                        if alternate_composer_name not in specialist_entry.composer_name:
+                            result += f' [{alternate_composer_name}]'
+                        break
+                if is_match:
+                    break
 
     result = result.strip()
 
