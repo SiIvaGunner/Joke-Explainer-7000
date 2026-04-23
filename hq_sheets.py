@@ -8,7 +8,7 @@ from googleapiclient.errors import HttpError
 from bot_secrets import SPECIALISTS_SPREADSHEET_ID 
 from hq_sheets import * 
 from hq_strings import * 
-from simpleQoC.metadata import desc_to_dict, get_music_from_desc
+from simpleQoC.metadata import desc_to_dict, get_music_from_desc, remove_links
 from discord import Guild
 
 from typing import NamedTuple
@@ -214,11 +214,14 @@ def search_specialists(submissionText: str, qoc_sheet_data: QoCSheetData, guild:
     track_string = get_music_from_desc(desc_dict)
     game_and_track_pairs = parseTitle(title, ' - ', track_string)
 
-    joke_input = submissionText 
+    sources_input = submissionText 
     chunks = submissionText.split('```')
     if len(chunks) >= 2:
-        joke_input = chunks[2]
-    joke_input = joke_input.lower()
+        sources_input = chunks[2]
+        sources_input += get_raw_rip_author(submissionText)
+
+    sources_input = remove_links(sources_input)
+    sources_input = sources_input.lower()
 
     composer_inputs = [] 
     composer_matches = ["Composer", "Composer", "Arrangement"]
@@ -252,13 +255,13 @@ def search_specialists(submissionText: str, qoc_sheet_data: QoCSheetData, guild:
             if is_match:
                 break
 
-        if len(joke_input) and not is_match:
-            if len(specialist_entry.source) and specialist_entry.source.lower() in joke_input:
+        if len(sources_input) and not is_match:
+            if len(specialist_entry.source) and specialist_entry.source.lower() in sources_input:
                 result += f'\n{stop_emoji} {specialist_entry.source}: **{specialist_entry.specialists}**'
                 break
 
             for alternate_source_name in specialist_entry.alternate_source_names:
-                if len(alternate_source_name) and alternate_source_name.lower() in joke_input:
+                if len(alternate_source_name) and alternate_source_name.lower() in sources_input:
                     is_match = True
                     result += f'\n{stop_emoji} {specialist_entry.source}: **{specialist_entry.specialists}**'
                     if alternate_source_name not in specialist_entry.source:
