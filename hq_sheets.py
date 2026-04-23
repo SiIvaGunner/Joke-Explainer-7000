@@ -67,7 +67,11 @@ def get_raw_sheet_data(sheet_name: str, row_start: int, last_column: str, creden
 CREDENTIALS = None
 SHEET_LAST_UPDATED: datetime = datetime.now(timezone.utc)
 QOC_SHEET_DATA: QoCSheetData = QoCSheetData([], []) 
-def get_qoc_sheet_data() -> QoCSheetData: 
+
+class GetQoCSheetDataDesc(NamedTuple):
+    bypass_cache: bool = False
+
+def get_qoc_sheet_data(desc: GetQoCSheetDataDesc) -> QoCSheetData: 
 
     global CREDENTIALS
     global QOC_SHEET_DATA 
@@ -101,6 +105,7 @@ def get_qoc_sheet_data() -> QoCSheetData:
         call_sheet_api = True 
 
         try:
+
             ##NOTE: (Ahmayk) We check to see the last modified time and only fetch new info if the sheet appears to be updated.
             # Google drive doesn't seem to update this very quickly, in testing it can take up to around 5 minutes,
             # but this is 100% worth it for the speed boost since changes to the sheet don't really need to take effect immediatley
@@ -113,7 +118,9 @@ def get_qoc_sheet_data() -> QoCSheetData:
             modified_time = datetime.fromisoformat(file["modifiedTime"].replace("Z", "+00:00"))
             global SHEET_LAST_UPDATED 
             # print(f"SHEET_LAST_UPDATED: {str(SHEET_LAST_UPDATED)} modified time: {str(modified_time)}")
-            if modified_time == SHEET_LAST_UPDATED:
+            ##NOTE: (Ahmayk) If we do want changes to take effect immedatley (calling !specialist directly for instance) 
+            #then bypassing the skip will guarentee that we are showing updated data 
+            if modified_time == SHEET_LAST_UPDATED and not desc.bypass_cache:
                 call_sheet_api = False 
             SHEET_LAST_UPDATED = modified_time
 

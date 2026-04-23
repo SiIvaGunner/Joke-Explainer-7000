@@ -13,7 +13,7 @@ from enum import Enum, auto
 from requests.adapters import HTTPAdapter
 
 from hq_strings import *
-from hq_sheets import get_qoc_sheet_data, QoCSheetData
+from hq_sheets import QoCSheetData
 from simpleQoC.metadata import desc_to_dict, get_music_from_desc
 
 requests_session = requests.Session()
