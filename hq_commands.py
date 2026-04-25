@@ -1773,6 +1773,17 @@ async def specalists(args: list[str], command_context: CommandContext):
         else:
             await send("No specialists found.", command_context.channel)
 
+@command(
+    command_type=CommandType.SOURCE,
+    format='<message link | text>',
+    brief='Post link to QoC specialist spreadsheet.',
+    aliases=['specialistsheet', 'sheet'],
+)
+async def qocsheet(args: list[str], command_context: CommandContext):
+    if not SPECIALISTS_SPREADSHEET_ID:
+        await send("Specialist spreadsheet is not configured in bot.", command_context.channel)
+    link = f'https://docs.google.com/spreadsheets/d/{SPECIALISTS_SPREADSHEET_ID}/edit?usp=sharing'
+    await send(link, command_context.channel)
 
 @command(
     command_type=CommandType.MANAGEMENT,
