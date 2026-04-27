@@ -1,5 +1,5 @@
 ## A high-quality™ Discord bot
-by Eva, Olivia, DDA & Ahmayk
+by Eva, Olivia, DDA, Ahmayk, & Faces in the Clouds.
 
 _For use by SilvaGunner Quality of Control_
 
