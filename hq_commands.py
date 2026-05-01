@@ -139,6 +139,7 @@ class RoundupFilterType(Enum):
     HASREACT = auto()
     NOTHASREACT = auto()
     UNSENTFIXES = auto()
+    UNSENTTEAMFIXES = auto()
     NOSENDBACK = auto()
     OVERDUE = auto()
     RANDOM = auto()
@@ -228,6 +229,12 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
                 is_valid = not rip_has_react([roundup_desc.reaction_type], rip)
             case RoundupFilterType.UNSENTFIXES:
                 is_valid = rip_has_react([ReactType.FIX], rip) and not rip_has_react([ReactType.SENDBACK], rip)
+            case RoundupFilterType.UNSENTTEAMFIXES:
+                is_valid = False
+                is_unsent_fix = rip_has_react([ReactType.FIX], rip) and not rip_has_react([ReactType.SENDBACK], rip)
+                if is_unsent_fix:
+                    author = get_rip_author(rip.text, rip.message_author_name)
+                    is_valid = not search_with_parsed_input(author, parse_search_input(["email"])) 
             case RoundupFilterType.NOSENDBACK:
                 is_valid = not rip_has_react([ReactType.SENDBACK], rip) 
             case RoundupFilterType.SEARCH_REACTION:
@@ -491,6 +498,16 @@ async def nofixes(args: list[str], command_context: CommandContext):
 async def unsentfixes(args: list[str], command_context: CommandContext):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.UNSENTFIXES, \
                                not_found_message="No unsent fixes found. Good job!")
+    await send_roundup(roundup_desc, command_context)
+
+@command(
+    command_type=CommandType.QOC,
+    brief="Show non-email QoC rips with :fix: and not :sendback:",
+    aliases=['unsentteamwrenches', 'unsentfixesteam', 'unsentwrenchesteam']
+)
+async def unsentteamfixes(args: list[str], command_context: CommandContext):
+    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.UNSENTTEAMFIXES, \
+                               not_found_message="No non-email unsent fixes found. Good job, team!")
     await send_roundup(roundup_desc, command_context)
 
 @command(
