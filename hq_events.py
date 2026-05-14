@@ -64,7 +64,7 @@ async def on_ready():
     print('#################################')
 
     #NOTE: (Ahmayk) fetch sheet data on init to initialize credentials info and make sure that works
-    await run_blocking(get_qoc_sheet_data, GetQoCSheetDataDesc())
+    await get_qoc_sheet_data(GetQoCSheetDataDesc())
 
     await write_log("Good morning! Caching rips...")
     await rebuild_cache_all()
@@ -210,7 +210,7 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
                     #this is unwanted if repinning an old rip
                     auto_source_on_pin = get_config('auto_source_on_pin')
                     if auto_source_on_pin and datetime.now(timezone.utc) - message.created_at < timedelta(minutes=30):
-                        qoc_sheet_data = await run_blocking(get_qoc_sheet_data, GetQoCSheetDataDesc())
+                        qoc_sheet_data = await get_qoc_sheet_data(GetQoCSheetDataDesc())
                         source_text = search_rip_sources(message.content, qoc_sheet_data)
                         specialists_text = search_specialists(message.content, qoc_sheet_data, message.channel.guild)
                         await send_embed(f'{source_text}\n\n{specialists_text}', channel, EmbedDesc(title="Sources"))

@@ -3,9 +3,9 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
 
 from bot_secrets import SPECIALISTS_SPREADSHEET_ID 
+from hq_core import log_exception, write_log
 from hq_sheets import * 
 from hq_strings import * 
 from simpleQoC.metadata import desc_to_dict, get_music_from_desc, remove_links
@@ -36,7 +36,7 @@ class QoCSheetData(NamedTuple):
     specialist_entries: list[SpecialistEntry]
     source_exclusions: list[SourceExclusion]
 
-def get_raw_sheet_data(sheet_name: str, row_start: int, last_column: str, credentials: Credentials) -> list[list[str]]: 
+async def get_raw_sheet_data(sheet_name: str, row_start: int, last_column: str, credentials: Credentials) -> list[list[str]]: 
     result: list[list[str]] = []
 
     try:
@@ -52,14 +52,15 @@ def get_raw_sheet_data(sheet_name: str, row_start: int, last_column: str, creden
             .execute()
         )
         rows = output["sheets"][0]["data"][0]["rowData"]
-    except (HttpError, KeyError, IndexError):
-        return []
 
-    for row in rows:
-        cells = []
-        for cell in row.get("values", []):
-            cells.append(cell.get("formattedValue", "").strip())
-        result.append(cells)
+        for row in rows:
+            cells = []
+            for cell in row.get("values", []):
+                cells.append(cell.get("formattedValue", "").strip())
+            result.append(cells)
+
+    except Exception as error:
+        await log_exception(f"Failed get google sheet data from {sheet_name}", error, [], True)
 
     return result
 
@@ -71,22 +72,17 @@ QOC_SHEET_DATA: QoCSheetData = QoCSheetData([], [])
 class GetQoCSheetDataDesc(NamedTuple):
     bypass_cache: bool = False
 
-def get_qoc_sheet_data(desc: GetQoCSheetDataDesc) -> QoCSheetData: 
-
+async def refresh_credentials():
     global CREDENTIALS
-    global QOC_SHEET_DATA 
 
-    result = QOC_SHEET_DATA 
+    # NOTE: (Ahmayk) login required in web browser to access google sheets doc
+    # then token.json is created and saves login info
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets.readonly",
+        "https://www.googleapis.com/auth/drive.readonly",
+    ]
 
-    if not CREDENTIALS:
-
-        # NOTE: (Ahmayk) login required in web browser to access google sheets doc
-        # then token.json is created and saves login info
-        scopes = [
-            "https://www.googleapis.com/auth/spreadsheets.readonly",
-            "https://www.googleapis.com/auth/drive.readonly",
-        ]
-
+    try: 
         if os.path.exists("token.json"):
             CREDENTIALS = Credentials.from_authorized_user_file("token.json", scopes)
 
@@ -100,38 +96,57 @@ def get_qoc_sheet_data(desc: GetQoCSheetDataDesc) -> QoCSheetData:
             with open("token.json", "w") as token:
                 token.write(CREDENTIALS.to_json())
 
-    if CREDENTIALS:
+    except Exception as error:
+        await log_exception("Failed to set up google sheets credentials", error, [], True)
 
-        call_sheet_api = True 
 
-        try:
+async def should_call_sheet_api(bypass_cache: bool) -> bool:
+    try:
+        result =True 
+        ##NOTE: (Ahmayk) We check to see the last modified time and only fetch new info if the sheet appears to be updated.
+        # Google drive doesn't seem to update this very quickly, in testing it can take up to around 5 minutes,
+        # but this is 100% worth it for the speed boost since changes to the sheet don't really need to take effect immediatley
+        service_drive = build("drive", "v3", credentials=CREDENTIALS)
+        file = (
+            service_drive.files()
+            .get(fileId=SPECIALISTS_SPREADSHEET_ID, fields="id, name, modifiedTime")
+            .execute()
+        )
+        modified_time = datetime.fromisoformat(file["modifiedTime"].replace("Z", "+00:00"))
+        global SHEET_LAST_UPDATED 
+        # print(f"SHEET_LAST_UPDATED: {str(SHEET_LAST_UPDATED)} modified time: {str(modified_time)}")
+        ##NOTE: (Ahmayk) If we do want changes to take effect immedatley (calling !specialist directly for instance) 
+        #then bypassing the skip will guarentee that we are showing updated data 
+        if modified_time == SHEET_LAST_UPDATED and not bypass_cache:
+            result = False 
+        SHEET_LAST_UPDATED = modified_time
+    except Exception as error:
+        await log_exception("Failed to get modified time from google sheet", error, [], True)
+    return result
 
-            ##NOTE: (Ahmayk) We check to see the last modified time and only fetch new info if the sheet appears to be updated.
-            # Google drive doesn't seem to update this very quickly, in testing it can take up to around 5 minutes,
-            # but this is 100% worth it for the speed boost since changes to the sheet don't really need to take effect immediatley
-            service_drive = build("drive", "v3", credentials=CREDENTIALS)
-            file = (
-                service_drive.files()
-                .get(fileId=SPECIALISTS_SPREADSHEET_ID, fields="id, name, modifiedTime")
-                .execute()
-            )
-            modified_time = datetime.fromisoformat(file["modifiedTime"].replace("Z", "+00:00"))
-            global SHEET_LAST_UPDATED 
-            # print(f"SHEET_LAST_UPDATED: {str(SHEET_LAST_UPDATED)} modified time: {str(modified_time)}")
-            ##NOTE: (Ahmayk) If we do want changes to take effect immedatley (calling !specialist directly for instance) 
-            #then bypassing the skip will guarentee that we are showing updated data 
-            if modified_time == SHEET_LAST_UPDATED and not desc.bypass_cache:
-                call_sheet_api = False 
-            SHEET_LAST_UPDATED = modified_time
 
-        except HttpError as error:
-            print(f"An error occurred: {error}")
+async def get_qoc_sheet_data(desc: GetQoCSheetDataDesc) -> QoCSheetData: 
+
+    global CREDENTIALS
+    global QOC_SHEET_DATA 
+
+    result = QOC_SHEET_DATA 
+
+    if not CREDENTIALS:
+        await refresh_credentials()
+
+    if CREDENTIALS and not CREDENTIALS.valid:
+        await write_log(":warning: **Google sheet credentials not valid.**")
+
+    if CREDENTIALS and CREDENTIALS.valid:
+
+        call_sheet_api = await should_call_sheet_api(desc.bypass_cache)
 
         if call_sheet_api or not QOC_SHEET_DATA:
 
             specialist_entries: list[SpecialistEntry] = []
 
-            game_sheet_data = get_raw_sheet_data("Game Strict Rules", 3, 'D', CREDENTIALS)
+            game_sheet_data = await get_raw_sheet_data("Game Strict Rules", 3, 'D', CREDENTIALS)
             for row in game_sheet_data:
                 if len(row) > 1:
                     game_title = row[0] 
@@ -146,7 +161,7 @@ def get_qoc_sheet_data(desc: GetQoCSheetDataDesc) -> QoCSheetData:
                         notes = row[3]
                     specialist_entries.append(SpecialistEntry(specialists, notes, game_title, alternate_game_titles, "", [], "", []))
 
-            composer_sheet_data = get_raw_sheet_data("Composer Strict Rules", 3, 'D', CREDENTIALS)
+            composer_sheet_data = await get_raw_sheet_data("Composer Strict Rules", 3, 'D', CREDENTIALS)
             for row in composer_sheet_data:
                 if len(row) > 1:
                     composer_string = row[0]
@@ -161,7 +176,7 @@ def get_qoc_sheet_data(desc: GetQoCSheetDataDesc) -> QoCSheetData:
                         notes = row[3]
                     specialist_entries.append(SpecialistEntry(specialists, notes, "", [], composer_string, alternate_composer_names, "", []))
 
-            source_sheet_data = get_raw_sheet_data("Source Strict Rules", 3, 'D', CREDENTIALS)
+            source_sheet_data = await get_raw_sheet_data("Source Strict Rules", 3, 'D', CREDENTIALS)
             for row in source_sheet_data:
                 if len(row) > 1:
                     source_string = row[0]
@@ -177,7 +192,7 @@ def get_qoc_sheet_data(desc: GetQoCSheetDataDesc) -> QoCSheetData:
                     specialist_entries.append(SpecialistEntry(specialists, notes, "", [], "", [], source_string, alternate_source_names))
 
             source_exclusions: list[SourceExclusion] = []
-            source_exclusion_sheet_data = get_raw_sheet_data("Source Exclusions", 3, 'F', CREDENTIALS)
+            source_exclusion_sheet_data = await get_raw_sheet_data("Source Exclusions", 3, 'F', CREDENTIALS)
             for row in source_exclusion_sheet_data:
                 if len(row) > 1 and len(row[1]):
                     track_title = row[0] 

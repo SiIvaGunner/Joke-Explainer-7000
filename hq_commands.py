@@ -1760,7 +1760,7 @@ async def source(args: list[str], command_context: CommandContext):
         if len(string_and_errors.error_strings):
             return await send_if_errors("Unable to parse message link", string_and_errors.error_strings, command_context.channel)
 
-        qoc_sheet_data = await run_blocking(get_qoc_sheet_data, GetQoCSheetDataDesc())
+        qoc_sheet_data = await get_qoc_sheet_data(GetQoCSheetDataDesc())
         text = search_rip_sources(string_and_errors.string, qoc_sheet_data)
         await send_embed(text, command_context.channel, EmbedDesc(title="Sources"))
 
@@ -1783,7 +1783,7 @@ async def specalists(args: list[str], command_context: CommandContext):
             return await send_if_errors("Unable to parse message link", string_and_errors.error_strings, command_context.channel)
 
         #NOTE: (Ahmayk) bypass cache so that we are guarenteed to get what is on the sheet right now
-        qoc_sheet_data = await run_blocking(get_qoc_sheet_data, GetQoCSheetDataDesc(bypass_cache=True))
+        qoc_sheet_data = await get_qoc_sheet_data(GetQoCSheetDataDesc(bypass_cache=True))
         text = search_specialists(string_and_errors.string, qoc_sheet_data, command_context.channel.guild)
         if len(text):
             await send_embed(text, command_context.channel, EmbedDesc(title="Specialists"))
