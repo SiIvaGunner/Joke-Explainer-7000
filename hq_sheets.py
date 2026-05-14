@@ -141,10 +141,10 @@ async def get_qoc_sheet_data(desc: GetQoCSheetDataDesc) -> QoCSheetData:
 
     result = QOC_SHEET_DATA 
 
-    if not CREDENTIALS:
+    if not CREDENTIALS or not CREDENTIALS.valid or CREDENTIALS.expired:
         await refresh_credentials()
 
-    if CREDENTIALS and not CREDENTIALS.valid:
+    if not CREDENTIALS or not CREDENTIALS.valid:
         await write_log(":warning: **Google sheet credentials not valid.**")
 
     if CREDENTIALS and CREDENTIALS.valid:
