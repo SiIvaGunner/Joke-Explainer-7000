@@ -1,24 +1,18 @@
-import requests
+from curl_cffi import requests
 import re
 import threading
 import string
 import numpy 
 from bs4 import BeautifulSoup, Tag
 from urllib.parse import quote, quote_plus, urljoin
-from urllib3.util.retry import Retry
 from difflib import SequenceMatcher
-from typing import Any
-from collections.abc import Iterable
 from enum import Enum, auto
-from requests.adapters import HTTPAdapter
 
 from hq_strings import *
 from hq_sheets import QoCSheetData
 from simpleQoC.metadata import desc_to_dict, get_music_from_desc
 
-requests_session = requests.Session()
-adapter = HTTPAdapter(max_retries=0, pool_connections=50, pool_maxsize=50)
-requests_session.mount("https://", adapter)
+requests_session: requests.Session = requests.Session(impersonate="chrome124")
 
 class VGM_SITE(Enum):
     ZOPHAR = auto()
@@ -56,9 +50,7 @@ def scan_vgm_site(url: str, vgm_site: VGM_SITE, scan_result_type: ScanResultType
     response = None
     soup = None
     try:
-        agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        headers = {'User-Agent': agent}
-        response = requests_session.get(url, headers=headers, timeout=5)
+        response = requests_session.get(url, timeout=10)
         ##NOTE: (Ahmayk) better error handling where we pass things up the chain and show to user
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
