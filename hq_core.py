@@ -1224,7 +1224,7 @@ async def parse_message_link(link: str):
         server_id = int(ids[4])
         channel_id = int(ids[5])
         msg_id = int(ids[6])
-    except IndexError:
+    except (IndexError, ValueError):
         return None, None, None, "Error: Cannot parse argument - make sure it is a valid link to message (right click > Copy Link)."
 
     server = bot.get_guild(server_id)
