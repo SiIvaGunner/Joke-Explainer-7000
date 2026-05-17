@@ -175,7 +175,7 @@ def get_rip_joke(text: str) -> str:
     after_desc = text
     chunks = text.split('```')
     if len(chunks) >= 2:
-        after_desc = chunks[2]
+        after_desc = chunks[1]
     for line in after_desc.splitlines():
         if ':' in line and ('oke:' in line or 'okes:' in line or 'joke' in line):
             result = (line[line.index(':')+1:]).lstrip()
