@@ -89,12 +89,13 @@ async def refresh_credentials():
         if not CREDENTIALS or not CREDENTIALS.valid:
             if CREDENTIALS and CREDENTIALS.expired and CREDENTIALS.refresh_token:
                 try:
-                    await write_log("Refreshing Google Api token...")
                     CREDENTIALS.refresh(Request())
                 except Exception as error:
                     await write_log(f"Failed to refresh google api token: {str(error)}")
 
+            should_tell_success = False
             if CREDENTIALS and not CREDENTIALS.valid:
+                should_tell_success = True 
                 await write_log("Creating new Google Api token...")
                 flow = InstalledAppFlow.from_client_secrets_file("credentials.json", scopes)
                 CREDENTIALS = flow.run_local_server(port=0)
@@ -102,7 +103,7 @@ async def refresh_credentials():
             with open("token.json", "w") as token:
                 token.write(CREDENTIALS.to_json())
 
-            if CREDENTIALS and CREDENTIALS.valid:
+            if CREDENTIALS and CREDENTIALS.valid and should_tell_success:
                 await write_log("Google API credentials set up successfully.")
 
     except Exception as error:
