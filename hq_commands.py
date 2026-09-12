@@ -29,6 +29,7 @@ import json
 import os
 import random
 import dateparser
+import pytz
 
 class CommandType(Enum):
     NULL = auto()
@@ -2525,11 +2526,16 @@ async def process_reminder_input(args: list[str], is_countdown: bool, command_co
     remind_times = []
     if not len(input_errors):
         for timeString in time_strings:
-            remind_time = dateparser.parse(timeString, settings={'TIMEZONE': 'UTC', 'RETURN_AS_TIMEZONE_AWARE': True, 'PREFER_DATES_FROM': 'future'})
-            if remind_time is None:
-                input_errors.append(f'Intriguing. What time is **"{input_split[0].strip(" ")}"** supposed to be?') 
+            remind_time = dateparser.parse(timeString, settings={'TIMEZONE': 'US/Pacific', 'RETURN_AS_TIMEZONE_AWARE': True, 'PREFER_DATES_FROM': 'future'})
+            if remind_time:
+                remind_time = remind_time.astimezone(pytz.UTC)
+                if remind_time >= set_time:
+                    remind_times.append(remind_time)
+                else:
+                    timestamp = datetime_to_relative_timestamp(remind_time)
+                    input_errors.append(f'{timestamp} is in the past! How would that work? (or maybe I misunderstood?)') 
             else:
-                remind_times.append(remind_time)
+                input_errors.append(f'Intriguing. What time is **"{input_split[0].strip(" ")}"** supposed to be?') 
 
     if len(input_errors):
         return await send_list_of_input_errors(input_errors, command_context.channel)
