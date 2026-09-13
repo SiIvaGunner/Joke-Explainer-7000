@@ -2533,7 +2533,7 @@ async def process_reminder_input(args: list[str], is_countdown: bool, command_co
                     remind_times.append(remind_time)
                 else:
                     timestamp = datetime_to_relative_timestamp(remind_time)
-                    input_errors.append(f'{timestamp} is in the past! How would that work? (or maybe I misunderstood?)') 
+                    input_errors.append(f'{timestamp} is in the past! How would that work? (Or maybe I misunderstood?)') 
             else:
                 input_errors.append(f'Intriguing. What time is **"{input_split[0].strip(" ")}"** supposed to be?') 
 
@@ -2558,30 +2558,21 @@ async def process_reminder_input(args: list[str], is_countdown: bool, command_co
     text_truncated = discord.utils.escape_mentions(text_truncated)
     text_truncated = text_truncated.replace(str(command_context.user.id), str(command_context.user.global_name))
     
-    timestamp_remind = "" 
+    timestring_remind = "" 
     for i, reminder in enumerate(reminders): 
-        timestamp_remind += datetime_to_relative_timestamp(reminder.remind_time)
+        timestring_remind += datetime_to_relative_timestamp(reminder.remind_time)
+        timestring_remind += f' - {format_to_explicit_pst_time(reminder.remind_time)}'
         if i is not len(reminders) - 1:
-            timestamp_remind += ', '
+            timestring_remind += ', '
 
-    return_message = f'Will send here {timestamp_remind}: `{text_truncated}`'
+    return_message = f':point_up::nerd: Will send here {timestring_remind}: `{text_truncated}`'
     if is_countdown:
         if reminders[0].next_countdown_delta:
-            countdown_timestamps_string = ""
-            countdown_index = 0
-            for i, delta in enumerate(REMINDER_COUNTDOWN_LIST):
-                if delta is reminders[0].next_countdown_delta:
-                    countdown_index = i 
-                    break
-            for i in range(countdown_index, -1, -1):
-                mid_time = reminders[0].remind_time - REMINDER_COUNTDOWN_LIST[i]
-                countdown_timestamps_string += datetime_to_relative_timestamp(mid_time)
-                countdown_timestamps_string += ', ' 
-            countdown_timestamps_string += timestamp_remind
-            return_message = f'Countdown started. The countdown ends {timestamp_remind}, sending here each time: `{text_truncated}`\n-# Reminders will be sent: {countdown_timestamps_string}'
+            countdown_timestamps_string = get_next_countdown_reminders(reminder) 
+            return_message = f':point_up::alarm_clock: Countdown started. The countdown ends {timestring_remind}, sending here each time: `{text_truncated}`\n-# {countdown_timestamps_string}'
         else:
             ##TODO: (Ahmayk) programatically determine minimum. Or just remember to change this text if it changes lol
-            return_message = f'Countdown started. But the given time is too soon countdown (Minimum is 1 hour). No reminders will be given other than at the final time {timestamp_remind}, sending here each time: `{text_truncated}`'
+            return_message = f':point_up::alarm_clock: Countdown started. But the given time is too soon countdown (Minimum is 1 hour). No reminders will be given other than at the final time {timestring_remind}, sending here each time: `{text_truncated}`'
 
     try:
         await command_context.channel.send(return_message)
@@ -2613,14 +2604,10 @@ async def countdown(args: list[str], command_context: CommandContext):
 def format_reminders(reminders: list[Reminder], include_numbers: bool) -> str:
     result = ""
     for i, reminder in enumerate(reminders): 
-        timestamp_remind = datetime_to_relative_timestamp(reminder.remind_time)
-        timestamp_set = datetime_to_relative_timestamp(reminder.set_time) 
-        message_truncated = truncate_string(reminder.text, 100)
-        user_string = get_name_of_user(reminder.user_id)
-        digit = ""
+        result += "\n\n"
         if include_numbers:
-            digit = f'**{str(i + 1)}.** ' 
-        result += f"\n\n{digit}{timestamp_remind}: {message_truncated}\n-# Reminder by {user_string} scheduled at {timestamp_set}"
+            result += f'**{str(i + 1)}.** ' 
+        result += format_reminder(reminder)
     return result
 
 

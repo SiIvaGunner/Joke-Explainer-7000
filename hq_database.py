@@ -5,10 +5,12 @@ import numpy
 from typing import NamedTuple
 from enum import StrEnum
 from datetime import datetime, timedelta, timezone
+import pytz
+from dateutil import tz
 
-from hq_strings import TitleType, score_title_similarity 
+from hq_strings import TitleType, score_title_similarity, truncate_string
 from hq_config import get_config
-from hq_discord import FloatAndErrors, StringAndErrors, ChannelsAndErrors, MessagesAndErrors, get_channels_of_types, discord_find_channel, discord_delete_messages, discord_get_channel_messages, discord_fetch_message
+from hq_discord import FloatAndErrors, StringAndErrors, ChannelsAndErrors, MessagesAndErrors, get_channels_of_types, discord_find_channel, discord_delete_messages, discord_get_channel_messages, discord_fetch_message, datetime_to_relative_timestamp, get_name_of_user
 from hq_qoc import getAudioLengthInSecondsFFprobe 
 from hq_youtube import PlaylistVideo 
 
@@ -300,6 +302,52 @@ REMINDER_COUNTDOWN_LIST = [
     timedelta(weeks=1),
     timedelta(weeks=4),
 ]
+
+def format_to_explicit_pst_time(time: datetime) -> str:
+    time_local = time.astimezone(tz.gettz('America/Los_Angeles'))
+    result = f'{time_local.strftime("%b %d, %I:%M %p PST")}' 
+    return result
+
+def get_next_countdown_reminders(reminder: Reminder) -> str:
+    result = ""
+    if datetime.now(timezone.utc) > reminder.remind_time:
+        result += f':boom: Final reminder: now!'
+    elif not reminder.next_countdown_delta:
+        next_timestamp = datetime_to_relative_timestamp(reminder.remind_time)
+        result += f':bangbang: Final reminder: {next_timestamp}'
+    else:
+        result += f'Next reminders: '
+        countdown_index = 0
+        for i, delta in enumerate(REMINDER_COUNTDOWN_LIST):
+            if delta >= reminder.next_countdown_delta:
+                countdown_index = i 
+                break
+        for i in range(countdown_index, -1, -1):
+            mid_time = reminder.remind_time - REMINDER_COUNTDOWN_LIST[i]
+            result += datetime_to_relative_timestamp(mid_time)
+            result += ', ' 
+        result += datetime_to_relative_timestamp(reminder.remind_time) 
+    return result
+
+def format_reminder(reminder: Reminder) -> str:
+    header = ":point_up::nerd: Reminder"
+    if reminder.is_countdown:
+        header = ":point_up::alarm_clock: Countdown"
+    message_truncated = truncate_string(reminder.text, 100)
+    timestamp_set = datetime_to_relative_timestamp(reminder.set_time)
+    timestring_remind = "now"
+    if datetime.now(timezone.utc) < reminder.remind_time:
+        timestring_remind = datetime_to_relative_timestamp(reminder.remind_time)
+    timestring_remind += f' - {format_to_explicit_pst_time(reminder.remind_time)}'
+    user_string = get_name_of_user(reminder.user_id)
+    remind_verb = "for"
+    if reminder.is_countdown:
+        remind_verb = "ends"
+    result = f"{message_truncated}\n-# {header} scheduled by {user_string} {timestamp_set}\n-# {remind_verb} {timestring_remind}" 
+    if reminder.is_countdown:
+        result += f'\n-# {get_next_countdown_reminders(reminder)}'
+    return result
+
 
 async def add_reminders_to_database(reminders: list[Reminder]):
     if JEDatabaseKey.REMINDER not in JE_DATABASE:

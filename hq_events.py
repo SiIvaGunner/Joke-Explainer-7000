@@ -17,6 +17,7 @@ from hq_embed import *
 from hq_commands import CommandContext, CommandType, find_command_info
 from hq_source import search_rip_sources 
 from hq_specialist import * 
+from hq_database import format_reminder
 
 #===============================================#
 #                    EVENTS                     #
@@ -87,14 +88,6 @@ async def post_reminders() -> None:
         for reminder in reminders_to_send:
             channel_and_errors = await discord_find_channel(reminder.channel_id)
             if channel_and_errors.channel:
-                user_string = get_name_of_user(reminder.user_id) 
-                set_timestamp = datetime_to_relative_timestamp(reminder.set_time) 
-
-                subject_string = "Reminder"
-                if reminder.is_countdown:
-                    subject_string = "Countdown reminder"
-
-                text = f'{reminder.text}\n-# {subject_string} by {user_string} set {set_timestamp}'
                 if reminder.is_countdown:
                     new_delta = None
                     if now < reminder.remind_time: 
@@ -105,17 +98,7 @@ async def post_reminders() -> None:
                                 break
                         reminder = reminder._replace(next_countdown_delta = new_delta)
                         new_countdowns.append(reminder)
-
-                        if reminder.next_countdown_delta:
-                            next_reminder_time = reminder.remind_time - reminder.next_countdown_delta
-                            next_timestamp = datetime_to_relative_timestamp(next_reminder_time)
-                            text += f'\n-# Next reminder: {next_timestamp}'
-                        else:
-                            next_timestamp = datetime_to_relative_timestamp(reminder.remind_time)
-                            text += f'\n-# Final reminder: {next_timestamp}'
-                    else:
-                        text += f'\n-# Final reminder: now!'
-
+                text = format_reminder(reminder) 
                 texts = split_long_message(text, 2000, True)
                 for t in texts:
                     try:
