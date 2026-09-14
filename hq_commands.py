@@ -441,7 +441,7 @@ async def mypins(args: list[str], command_context: CommandContext):
 @command(
     command_type=CommandType.QOC,
     brief="Show QoC rips you've wrenched :fix: :alert:",
-    aliases=['mywrenches'],
+    aliases=['mywrenches', 'myfix'],
 )
 async def myfixes(args: list[str], command_context: CommandContext):
     roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.MYFIXES, 
