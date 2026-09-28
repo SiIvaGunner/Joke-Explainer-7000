@@ -71,6 +71,7 @@ class CommandInfo(NamedTuple):
     command_type: CommandType
     public: bool 
     admin: bool 
+    disable: bool
     brief: str
     desc: str
     format: str
@@ -84,6 +85,7 @@ def command(
     command_type: CommandType = CommandType.NULL,
     public: bool = False,
     admin: bool = False,
+    disable: bool = False,
     brief: str = "",
     desc: str = "",
     format: str = "",
@@ -97,6 +99,7 @@ def command(
             command_type=command_type,
             public=public,
             admin=admin,
+            disable=disable,
             brief=brief,
             desc=desc,
             format=format,
@@ -116,6 +119,8 @@ def find_command_info(input: str) -> CommandInfo | None:
             if input in info.aliases:
                 command_info = info
                 break
+    if command_info and command_info.disable:
+        command_info = None
     return command_info 
 
 
@@ -185,6 +190,9 @@ async def help(args: list[str], command_context: CommandContext):
             result += f'\n\n:small_blue_diamond: __**{enum.name}**__ — *{COMMAND_TYPE_DATA[enum].desc}*'
 
             for name, info in COMMANDS.items():
+
+                if info.disable:
+                    continue
 
                 if info.command_type == enum:
 
@@ -2583,6 +2591,7 @@ async def process_reminder_input(args: list[str], is_countdown: bool, command_co
 @command(
     command_type=CommandType.REMIND,
     public=True,
+    disable=True,
     format="[engish time phrases seperated by commas] '/' [message]",
     brief="Schedules one or multiple reminders in that channel",
     aliases=['reminder', "remind_je"]
@@ -2594,6 +2603,7 @@ async def remind(args: list[str], command_context: CommandContext):
 @command(
     command_type=CommandType.REMIND,
     public=True,
+    disable=True,
     format="[engish time phrase] '/' [message]",
     brief="Schedules an increasingly frequent reminder in that channel",
 )
@@ -2614,6 +2624,7 @@ def format_reminders(reminders: list[Reminder], include_numbers: bool) -> str:
 @command(
     command_type=CommandType.REMIND,
     public=True,
+    disable=True,
     brief="Shows scheduled reminders for this channel"
 )
 async def reminders(args: list[str], command_context: CommandContext):
@@ -2632,6 +2643,7 @@ async def reminders(args: list[str], command_context: CommandContext):
 @command(
     command_type=CommandType.REMIND,
     public=True,
+    disable=True,
     format="(insert number after prompt)",
     brief="Stops a reminder for this channel",
     aliases=["stop_reminders", "stopreminder", "stopreminders" "reminder_stop", "reminderstop", "remindersstop"]
