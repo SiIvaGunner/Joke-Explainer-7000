@@ -2847,7 +2847,7 @@ async def testsource(args: list[str], command_context: CommandContext):
 
 @command(
     command_type=CommandType.SECRET,
-    admin=True,
+    public=True
 )
 async def refresh_thumbnails(args: list[str], command_context: CommandContext):
 
@@ -2866,7 +2866,7 @@ async def refresh_thumbnails(args: list[str], command_context: CommandContext):
 
 @command(
     command_type=CommandType.SECRET,
-    admin=True,
+    public=True
 )
 async def search_frames(args: list[str], command_context: CommandContext):
 
