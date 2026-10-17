@@ -25,7 +25,7 @@ from hq_database import format_reminder
 
 
 times = []
-times.append(time(hour=6, tzinfo=timezone.utc))
+times.append(time(hour=1, tzinfo=timezone.utc))
 @tasks.loop(time=times)
 async def regular_checkup():
 
@@ -64,7 +64,7 @@ async def cleanup_embeds_regularly():
         await send_crash(f'ERROR on scheduled embed cleanup', error, None)
 
 
-@tasks.loop(seconds=1)
+# @tasks.loop(seconds=1)
 async def post_reminders() -> None:
 
     try:
@@ -124,7 +124,9 @@ async def on_ready():
     await write_log("Good morning! Connecting to Google Sheets API...")
 
     cleanup_embeds_regularly.start()
-    post_reminders.start()
+    
+    ##NOTE: (Ahmayk) reminer system disabled for now
+    # post_reminders.start()
 
     #NOTE: (Ahmayk) fetch sheet data on init to initialize credentials info and make sure that works
     credentials_and_errors = await refresh_credentials()
