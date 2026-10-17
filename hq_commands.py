@@ -894,6 +894,7 @@ class SubOrQueueRipFilterType(Enum):
     RANDOM = auto()
     RANDOM_AUTHOR = auto()
     SORTBYLENGTH = auto()
+    UNPULLED = auto()
 
 class SendSubOrQueueDesc(NamedTuple):
     suborqueue_rip_filter_type: SubOrQueueRipFilterType = SubOrQueueRipFilterType.NULL 
@@ -997,6 +998,8 @@ async def send_suborqueue_rips(desc: SendSubOrQueueDesc, command_context: Comman
                     is_valid = rip.message_id in selected_rip_message_ids
                 case SubOrQueueRipFilterType.SORTBYLENGTH:
                     is_valid = True
+                case SubOrQueueRipFilterType.UNPULLED:
+                    is_valid = not rip_has_react([ReactType.QOC], rip)
                 case _:
                     assert "Unimplemented SubOrQueueRipFilterType"
 
@@ -1632,6 +1635,20 @@ async def viberank_subs(args: list[str], command_context: CommandContext):
 async def subs_all(args: list[str], command_context: CommandContext):
     desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.ALL, \
                               channel_types = ['SUBS', 'SUBS_PIN', 'SUBS_THREAD'])
+    await send_suborqueue_rips(desc, command_context)
+
+@command(
+    command_type=CommandType.SUBS,
+    brief='Show all subbed rips in the primary sub channel without :qoc:',
+    aliases=['unpulled_gubs', 'unpulled_sub', 'unpulledsub', 'unpulledsub'],
+)
+async def unpulled(args: list[str], command_context: CommandContext):
+    channel_and_errors = await get_default_config_channel_of_type("SUBS")
+    if len(channel_and_errors.error_strings):
+        return await send_if_errors("Unable to get unpulled rips", channel_and_errors.error_strings, command_context.channel)
+
+    desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.UNPULLED, \
+                              channels = [channel_and_errors.channel])
     await send_suborqueue_rips(desc, command_context)
 
 
