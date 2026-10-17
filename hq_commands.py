@@ -271,6 +271,8 @@ class RoundupFilterType(Enum):
     OVERDUE = auto()
     RANDOM = auto()
     RANDOM_AUTHOR = auto()
+    RANDOM_FRESH = auto()
+    RANDOM_MYFRESH = auto()
     SAVEQOC = auto()
     MYSAVEQOC = auto()
     SORTBYLENGTH = auto()
@@ -287,6 +289,8 @@ class RoundupDesc(NamedTuple):
     not_found_message: str = ""
     parsed_random_input: ParsedRandomInput = ParsedRandomInput(0, ParsedSearchInput([], [], False, "", ""), "", False, "")
 
+#TODO: (Ahmayk) Integrating randomness is starting to make this a bit of a mess.
+# converting this to a combinatoric system might simplify things (submit an array of RoundupFilterTypes)
 async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContext):
     """
     Sends a roundup message of all rips that the roundup channel the message was sent in points to.
@@ -310,35 +314,43 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
     ##TODO: (Ahmayk) fuzzy username input (ie typing "ahmayk" and matching to their username or display name)
     user_id = command_context.user.id
 
-    selected_rip_message_ids = [] 
-    if roundup_desc.roundup_filter_type == RoundupFilterType.RANDOM:
-        selected_rip_message_ids = choose_random_rips(rips_and_errors.rips, 
-                                                      roundup_desc.parsed_random_input.random_count,
-                                                      roundup_desc.parsed_random_input.parsed_search_input, 
-                                                      False)
+    filter_type = roundup_desc.roundup_filter_type
+    parsed_search_input = roundup_desc.parsed_search_input
+    
+    is_random_type = False
+    if (
+        len(roundup_desc.parsed_random_input.parsed_search_input.search_keys)
+        or len(roundup_desc.parsed_random_input.parsed_search_input.regex_search_keys)
+    ):
+        if roundup_desc.roundup_filter_type == RoundupFilterType.RANDOM:
+            filter_type = RoundupFilterType.SEARCH_TITLE
+            is_random_type = True
+        if roundup_desc.roundup_filter_type == RoundupFilterType.RANDOM_AUTHOR:
+            filter_type = RoundupFilterType.SEARCH_AUTHOR
+            is_random_type = True
 
-    if roundup_desc.roundup_filter_type == RoundupFilterType.RANDOM_AUTHOR:
-        selected_rip_message_ids = choose_random_rips(rips_and_errors.rips, 
-                                                      roundup_desc.parsed_random_input.random_count,
-                                                      roundup_desc.parsed_random_input.parsed_search_input, 
-                                                      True)
+    if roundup_desc.roundup_filter_type == RoundupFilterType.RANDOM_FRESH:
+            filter_type = RoundupFilterType.FRESH
+            is_random_type = True
+    if roundup_desc.roundup_filter_type == RoundupFilterType.RANDOM_MYFRESH:
+            filter_type = RoundupFilterType.MYFRESH
+            is_random_type = True
 
+    if is_random_type:
+        parsed_search_input = roundup_desc.parsed_random_input.parsed_search_input
 
     if roundup_desc.roundup_filter_type == RoundupFilterType.SORTBYLENGTH:
         errors = await sort_rips_by_duration(rips)
         error_strings.extend(errors)
 
-    readability_line = "━━━━━━━━━━━━━━━━━━\n"
-
-    result = ""
-
+    filtered_rips = []
     valid_count = 0
     for rip in rips:
 
         vet_reacts = ""
 
         is_valid = True
-        match (roundup_desc.roundup_filter_type):
+        match (filter_type):
             case RoundupFilterType.MYPINS:
                 is_valid = rip.message_author_id == roundup_desc.message_author_id
             case RoundupFilterType.MYFIXES:
@@ -351,6 +363,8 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
                 bool_and_errors = await user_is_react(UserReactCheckType.REVIEW, user_id, rip, command_context.channel)
                 is_valid = not bool_and_errors.result 
                 error_strings.extend(bool_and_errors.error_strings)
+                if is_random_type and parsed_search_input.is_not:
+                    is_valid = not is_valid
             case RoundupFilterType.MYCHECKS:
                 bool_and_errors = await user_is_react(UserReactCheckType.CHECK, user_id, rip, command_context.channel)
                 is_valid = bool_and_errors.result 
@@ -361,6 +375,8 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
                 error_strings.extend(bool_and_errors.error_strings)
             case RoundupFilterType.FRESH:
                 is_valid = not rip_has_react(REVIEW_REACT_LIST, rip)
+                if is_random_type and parsed_search_input.is_not:
+                    is_valid = not is_valid
             case RoundupFilterType.SPICY:
                 is_valid = rip_has_react([ReactType.CHECK], rip) and \
                             rip_has_react([ReactType.REJECT], rip)
@@ -368,10 +384,10 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
                 is_valid = False 
                 title = get_rip_title(rip.text)
                 if title:
-                    is_valid = search_with_parsed_input(title, roundup_desc.parsed_search_input) 
+                    is_valid = search_with_parsed_input(title, parsed_search_input) 
             case RoundupFilterType.SEARCH_AUTHOR:
                 author = get_rip_author(rip.text, rip.message_author_name)
-                is_valid = search_with_parsed_input(author, roundup_desc.parsed_search_input) 
+                is_valid = search_with_parsed_input(author, parsed_search_input) 
             case RoundupFilterType.HASREACT:
                 is_valid = rip_has_react([roundup_desc.reaction_type], rip)
             case RoundupFilterType.NOTHASREACT:
@@ -395,10 +411,6 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
             case RoundupFilterType.OVERDUE:
                 is_overdue = (datetime.now(timezone.utc) - rip.created_at) > timedelta(days=overdue_days)
                 is_valid = is_overdue
-            case RoundupFilterType.RANDOM:
-                is_valid = rip.message_id in selected_rip_message_ids
-            case RoundupFilterType.RANDOM_AUTHOR:
-                is_valid = rip.message_id in selected_rip_message_ids
             case RoundupFilterType.SAVEQOC:
                 is_valid = rip_is_one_check_away_from_accept(rip) 
             case RoundupFilterType.MYSAVEQOC:
@@ -408,12 +420,32 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
                     is_valid = not bool_and_errors.result 
 
         if is_valid:
-            string_and_errors = await get_formatted_rip_length(rip.text, False, False, command_context.channel.guild)
-            error_strings.extend(string_and_errors.error_strings)
+            filtered_rips.append(rip)
 
-            result += format_rip(rip, string_and_errors.string, command_context.channel.guild, False, spec_overdue_days, overdue_days) + vet_reacts
-            result += readability_line 
-            valid_count += 1
+    if (
+        roundup_desc.roundup_filter_type == RoundupFilterType.RANDOM
+        or roundup_desc.roundup_filter_type == RoundupFilterType.RANDOM_AUTHOR
+        or roundup_desc.roundup_filter_type == RoundupFilterType.RANDOM_FRESH
+        or roundup_desc.roundup_filter_type == RoundupFilterType.RANDOM_MYFRESH
+    ):
+        random.shuffle(filtered_rips)
+        ##NOTE: (Ahmayk) consider default 0 as 1, clamp by rip size
+        clamped_count = min(max(1, roundup_desc.parsed_random_input.random_count), len(filtered_rips))
+        chosen_rips = []
+        for i in range(clamped_count):
+            chosen_rips.append(filtered_rips[i])
+        filtered_rips = chosen_rips
+
+    result = ""
+    readability_line = "━━━━━━━━━━━━━━━━━━\n"
+
+    for rip in filtered_rips:
+        string_and_errors = await get_formatted_rip_length(rip.text, False, False, command_context.channel.guild)
+        error_strings.extend(string_and_errors.error_strings)
+
+        result += format_rip(rip, string_and_errors.string, command_context.channel.guild, False, spec_overdue_days, overdue_days) + vet_reacts
+        result += readability_line 
+        valid_count += 1
 
     if result != "":
         footer = f'#{channel_and_errors.channel.name}   -   {valid_count} of {len(rips)} Rips'
@@ -773,6 +805,26 @@ async def randompull(args: list[str], command_context: CommandContext):
 )
 async def random_event(args: list[str], command_context: CommandContext):
     await roundup_random(RoundupFilterType.RANDOM_AUTHOR, args, command_context)
+
+
+@command(
+    command_type=CommandType.QOC,
+    brief=f'Show a random QOC rip that no one\'s reviewed',
+    format="[count] [NOT]",
+    aliases=['randomfresh', 'freshrandom', 'fresh_random']
+)
+async def random_fresh(args: list[str], command_context: CommandContext):
+    await roundup_random(RoundupFilterType.RANDOM_FRESH, args, command_context)
+
+
+@command(
+    command_type=CommandType.QOC,
+    brief=f'Show a random QOC rip that you haven\'t reviewed',
+    format="[count] [NOT]",
+    aliases=['randommyfresh', 'myfreshrandom', 'myfresh_random', 'grind', 'oknext', 'potato', 'iamaslavetothesystem']
+)
+async def random_myfresh(args: list[str], command_context: CommandContext):
+    await roundup_random(RoundupFilterType.RANDOM_MYFRESH, args, command_context)
 
 
 async def current_or_qoc_channel(channel: TextChannel | Thread) -> ChannelAndErrors:
