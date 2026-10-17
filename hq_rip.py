@@ -387,11 +387,14 @@ def get_react_counts(rip: Rip) -> dict[React, int]:
 async def validate_cache_all() -> StringAndErrors:
     return_string = ""
     channels_and_errors = await get_channels_of_types(['QOC', 'SUBS', 'SUBS_PIN', 'SUBS_THREAD', 'QUEUE'], [])
+    validate_errors = []
     error_strings = channels_and_errors.error_strings 
     for channel in channels_and_errors.channels:
         string_and_errors = await process_rip_channel(channel, True, None)
-        return_string = string_and_errors.string
-        error_strings = string_and_errors.error_strings
+        validate_errors.append(string_and_errors.string)
+        error_strings.extend(string_and_errors.error_strings)
+    if len(validate_errors):
+        return_string = "\n".join(validate_errors)
     return StringAndErrors(return_string, error_strings) 
 
 
