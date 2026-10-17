@@ -1554,7 +1554,7 @@ async def send_viberank(rips: List[Rip], react_name: str, max_rips: int, command
 async def viberank(args: list[str], command_context: CommandContext):
 
     if not len(args): 
-        return await send("Error: Please include an emoji to search for. I'll show QoC rips that have the most of that emoji", command_context.channel)
+        return await send("Error: Please include an emoji to search for. I'll show QoC rips that have the most of that emoji. (Did you mean `!vibecheck`?)", command_context.channel)
 
     channel_and_errors = await get_qoc_channel(command_context.channel)
     if len(channel_and_errors.error_strings):
@@ -1585,7 +1585,7 @@ async def viberank(args: list[str], command_context: CommandContext):
 async def viberank_q(args: list[str], command_context: CommandContext):
 
     if not len(args): 
-        return await send("Error: Please include an emoji to search for. I'll show queued rips that have the most of that emoji", command_context.channel)
+        return await send("Error: Please include an emoji to search for. I'll show queued rips that have the most of that emoji. (Did you mean `!vibecheck`?)", command_context.channel)
 
     react_input = emoji_to_react_name_if_emoji(args[0])
 
@@ -1610,7 +1610,7 @@ async def viberank_q(args: list[str], command_context: CommandContext):
 async def viberank_subs(args: list[str], command_context: CommandContext):
 
     if not len(args): 
-        return await send("Error: Please include an emoji to search for. I'll show subbed rips that have the most of that emoji", command_context.channel)
+        return await send("Error: Please include an emoji to search for. I'll show subbed rips that have the most of that emoji. (Did you mean `!vibecheck`?)", command_context.channel)
 
     react_input = emoji_to_react_name_if_emoji(args[0])
 
