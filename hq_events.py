@@ -24,9 +24,7 @@ from hq_database import format_reminder
 #===============================================#
 
 
-times = []
-times.append(time(hour=1, tzinfo=timezone.utc))
-@tasks.loop(time=times)
+@tasks.loop(hours=1)
 async def regular_checkup():
 
     try:
@@ -39,7 +37,7 @@ async def regular_checkup():
     except Exception as error:
         await send_crash(f'ERROR on scheduled cache revalidation', error, None)
 
-    rips_and_errors = await get_rips_of_channel_types(['QOC', 'SUBS', 'SUBS_PIN', 'SUBS_THREAD', 'QUEUE', 'INACTIVE_QUEUE'])
+    rips_and_errors = await get_rips_of_channel_types(['QOC', 'SUBS', 'SUBS_PIN', 'SUBS_THREAD', 'QUEUE', 'INACTIVE_QUEUE'], None)
 
     stored_urls = list(JE_DATABASE[JEDatabaseKey.RIP_LENGTH].keys())
     for rip in rips_and_errors.rips:

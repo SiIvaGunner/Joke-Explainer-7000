@@ -391,7 +391,8 @@ async def validate_cache_all() -> StringAndErrors:
     error_strings = channels_and_errors.error_strings 
     for channel in channels_and_errors.channels:
         string_and_errors = await process_rip_channel(channel, True, None)
-        validate_errors.append(string_and_errors.string)
+        if len(string_and_errors.string):
+            validate_errors.append(string_and_errors.string)
         error_strings.extend(string_and_errors.error_strings)
     if len(validate_errors):
         return_string = "\n".join(validate_errors)
