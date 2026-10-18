@@ -329,14 +329,20 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
             await send_crash(f'ERROR on QOC Pin:', error, channel)
 
 
+VERBOSE_RECT_LOGGING = True
+
 @bot.event
 async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     try:
         error_strings: list[str] = []
 
+        verbose_log = ""
+
         channel_and_errors = await discord_find_channel(payload.channel_id)
         channel = channel_and_errors.channel
+
         if channel:
+
             is_qoc_channel = channel_is_types(channel, ['QOC'])
             is_suborqueue_channel = channel_is_types(channel, ['QUEUE', 'SUBS', 'SUBS_THREAD', 'SUBS_PIN'])
 
@@ -344,9 +350,15 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             in_cache = False
             if is_qoc_channel or is_suborqueue_channel:
 
+                if VERBOSE_RECT_LOGGING:
+                    verbose_log += f'\n- {payload.emoji} react heard in qoc or sub channel on message id {payload.message_id}'
+
                 async with lock_channel(payload.channel_id, error_strings, None):
                     in_cache = payload.channel_id in RIP_CACHE and payload.message_id in RIP_CACHE[payload.channel_id]
                     if in_cache: 
+
+                        if VERBOSE_RECT_LOGGING:
+                            verbose_log += f'\n- message is in rip cache'
 
                         async with lock_message(payload.message_id, error_strings, None):
 
@@ -357,8 +369,15 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                             message = message_and_errors.message
 
                             if message:
+
+                                if VERBOSE_RECT_LOGGING:
+                                    verbose_log += f'\n- Message fetched! Link: {message.jump_url}'
+
                                 rip = cache_rip_in_message(message)
                                 if is_qoc_channel and message.pinned:
+
+                                    if VERBOSE_RECT_LOGGING:
+                                        verbose_log += f'\n- Message is QOC and pinned! Adding to user react cache'
 
                                     if rip.message_id not in USER_REACT_CACHE: 
                                         USER_REACT_CACHE[rip.message_id] = {} 
@@ -368,6 +387,13 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                                         USER_REACT_CACHE[rip.message_id][react] = [] 
 
                                     USER_REACT_CACHE[rip.message_id][react].append(payload.user_id) 
+                            else:
+                                log_channel = await get_log_channel()
+                                await send_and_if_errors(f'ERROR on raw reaction add: Failed to fetch message with id: {payload.message_id}', "", message_and_errors.error_strings, log_channel)
+
+        if VERBOSE_RECT_LOGGING and len(verbose_log):
+            await write_log(verbose_log)
+
     except Exception as error:
         await send_crash(f'ERROR on raw reaction add:', error, None)
 
