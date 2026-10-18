@@ -30,28 +30,31 @@ async def regular_checkup():
     try:
         string_and_errors = await validate_cache_all()
         if len(string_and_errors.string):
-            await write_log(f'**Cache validation had issues:**\n{string_and_errors.string}')
+            s = f'**Cache validation had issues:**\n{string_and_errors.string}'
+            await write_log(s)
+            print(s)
         else:
             today = datetime.now()
             print(f"{today.strftime('%m/%d/%y %I:%M %p')}  Cache revalidated. No issues found.")
+
+        rips_and_errors = await get_rips_of_channel_types(['QOC', 'SUBS', 'SUBS_PIN', 'SUBS_THREAD', 'QUEUE', 'INACTIVE_QUEUE'], None)
+
+        stored_urls = list(JE_DATABASE[JEDatabaseKey.RIP_LENGTH].keys())
+        for rip in rips_and_errors.rips:
+            urls = extract_rip_link(rip.text)
+            for url in urls:
+                if url in stored_urls:
+                    stored_urls.remove(url)
+                    break
+
+        await remove_urls_from_database(stored_urls)
+
+        await cleanup_sent_embeds_in_expire_database()
+
+        await cleanup_expired_playlist_video_cache()
+
     except Exception as error:
-        await send_crash(f'ERROR on scheduled cache revalidation', error, None)
-
-    rips_and_errors = await get_rips_of_channel_types(['QOC', 'SUBS', 'SUBS_PIN', 'SUBS_THREAD', 'QUEUE', 'INACTIVE_QUEUE'], None)
-
-    stored_urls = list(JE_DATABASE[JEDatabaseKey.RIP_LENGTH].keys())
-    for rip in rips_and_errors.rips:
-        urls = extract_rip_link(rip.text)
-        for url in urls:
-            if url in stored_urls:
-                stored_urls.remove(url)
-                break
-
-    await remove_urls_from_database(stored_urls)
-
-    await cleanup_sent_embeds_in_expire_database()
-
-    await cleanup_expired_playlist_video_cache()
+        await send_crash(f'ERROR on regular checkup', error, None)
     
 
 @tasks.loop(minutes=1)
@@ -123,7 +126,7 @@ async def on_ready():
 
     cleanup_embeds_regularly.start()
     
-    ##NOTE: (Ahmayk) reminer system disabled for now
+    ##NOTE: (Ahmayk) reminder system disabled for now
     # post_reminders.start()
 
     #NOTE: (Ahmayk) fetch sheet data on init to initialize credentials info and make sure that works
@@ -328,43 +331,46 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
 
 @bot.event
 async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
+    try:
+        error_strings: list[str] = []
 
-    error_strings: list[str] = []
+        channel_and_errors = await discord_find_channel(payload.channel_id)
+        channel = channel_and_errors.channel
+        if channel:
+            is_qoc_channel = channel_is_types(channel, ['QOC'])
+            is_suborqueue_channel = channel_is_types(channel, ['QUEUE', 'SUBS', 'SUBS_THREAD', 'SUBS_PIN'])
 
-    channel_and_errors = await discord_find_channel(payload.channel_id)
-    channel = channel_and_errors.channel
-    if channel:
-        is_qoc_channel = channel_is_types(channel, ['QOC'])
-        is_suborqueue_channel = channel_is_types(channel, ['QUEUE', 'SUBS', 'SUBS_THREAD', 'SUBS_PIN'])
+            message = None 
+            in_cache = False
+            if is_qoc_channel or is_suborqueue_channel:
 
-        message = None 
-        in_cache = False
-        if is_qoc_channel or is_suborqueue_channel:
+                async with lock_channel(payload.channel_id, error_strings, None):
+                    in_cache = payload.channel_id in RIP_CACHE and payload.message_id in RIP_CACHE[payload.channel_id]
+                    if in_cache: 
 
-            async with lock_channel(payload.channel_id, error_strings, None):
-                in_cache = payload.channel_id in RIP_CACHE and payload.message_id in RIP_CACHE[payload.channel_id]
-                if in_cache: 
+                        async with lock_message(payload.message_id, error_strings, None):
 
-                    async with lock_message(payload.message_id, error_strings, None):
+                            ##NOTE: (Ahmayk) could skip this if we wanted to, but
+                            ##we don't really lose much from doing a fetch here.
+                            ##It guarentees that all reactions are accurate 
+                            message_and_errors = await discord_fetch_message(payload.message_id, channel)
+                            message = message_and_errors.message
 
-                        ##NOTE: (Ahmayk) could skip this if we wanted to, but
-                        ##we don't really lose much from doing a fetch here.
-                        ##It guarentees that all reactions are accurate 
-                        message_and_errors = await discord_fetch_message(payload.message_id, channel)
-                        message = message_and_errors.message
+                            if message:
+                                rip = cache_rip_in_message(message)
+                                if is_qoc_channel and message.pinned:
 
-                        if message:
-                            rip = cache_rip_in_message(message)
-                            if is_qoc_channel and message.pinned:
+                                    if rip.message_id not in USER_REACT_CACHE: 
+                                        USER_REACT_CACHE[rip.message_id] = {} 
 
-                                if rip.message_id not in USER_REACT_CACHE: 
-                                    USER_REACT_CACHE[rip.message_id] = {} 
+                                    react = React(payload.emoji.id or 0, payload.emoji.name, str(payload.emoji))
+                                    if react not in USER_REACT_CACHE[rip.message_id]: 
+                                        USER_REACT_CACHE[rip.message_id][react] = [] 
 
-                                react = React(payload.emoji.id or 0, payload.emoji.name, str(payload.emoji))
-                                if react not in USER_REACT_CACHE[rip.message_id]: 
-                                    USER_REACT_CACHE[rip.message_id][react] = [] 
+                                    USER_REACT_CACHE[rip.message_id][react].append(payload.user_id) 
+    except Exception as error:
+        await send_crash(f'ERROR on raw reaction add:', error, None)
 
-                                USER_REACT_CACHE[rip.message_id][react].append(payload.user_id) 
 
 
 
@@ -377,29 +383,32 @@ async def process_suborqueue_rip_caching(message: Message):
 
 
 async def remove_reaction_from_cache(channel_id: int, message_id: int, emoji: discord.PartialEmoji, user_id: int | None, remove_all: bool):
-    in_rip_cache = channel_id in RIP_CACHE and message_id in RIP_CACHE[channel_id]
-    in_user_react_cache = message_id in USER_REACT_CACHE
-    if in_rip_cache or in_user_react_cache:
-        async with lock_message(message_id, [], None):
+    try:
+        in_rip_cache = channel_id in RIP_CACHE and message_id in RIP_CACHE[channel_id]
+        in_user_react_cache = message_id in USER_REACT_CACHE
+        if in_rip_cache or in_user_react_cache:
+            async with lock_message(message_id, [], None):
 
-            react = React(emoji.id or 0, emoji.name, str(emoji))
+                react = React(emoji.id or 0, emoji.name, str(emoji))
 
-            if in_rip_cache:
-                rip = RIP_CACHE[channel_id][message_id]
-                for cached_react in rip.reacts:
-                    if cached_react == react:
-                        rip.reacts.remove(cached_react)
-                        if not remove_all:
-                            break
+                if in_rip_cache:
+                    rip = RIP_CACHE[channel_id][message_id]
+                    for cached_react in rip.reacts:
+                        if cached_react == react:
+                            rip.reacts.remove(cached_react)
+                            if not remove_all:
+                                break
 
-            if in_user_react_cache: 
-                if user_id and \
-                    react in USER_REACT_CACHE[message_id] and \
-                    user_id in USER_REACT_CACHE[message_id][react]:
-                    USER_REACT_CACHE[message_id][react].remove(user_id)
-                
-                if remove_all or not len(USER_REACT_CACHE[message_id]):
-                    USER_REACT_CACHE.pop(message_id)
+                if in_user_react_cache: 
+                    if user_id and \
+                        react in USER_REACT_CACHE[message_id] and \
+                        user_id in USER_REACT_CACHE[message_id][react]:
+                        USER_REACT_CACHE[message_id][react].remove(user_id)
+                    
+                    if remove_all or not len(USER_REACT_CACHE[message_id]):
+                        USER_REACT_CACHE.pop(message_id)
+    except Exception as error:
+        await send_crash(f'ERROR on raw reaction remove:', error, None)
 
 @bot.event
 async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
@@ -411,77 +420,89 @@ async def on_raw_reaction_clear_emoji(payload: discord.RawReactionClearEmojiEven
 
 @bot.event
 async def on_raw_reaction_clear(payload: discord.RawReactionClearEvent):
-    in_rip_cache = payload.channel_id in RIP_CACHE and payload.message_id in RIP_CACHE[payload.channel_id]
-    in_user_react_cache = payload.message_id in USER_REACT_CACHE
-    if in_rip_cache or in_user_react_cache:
-        async with lock_message(payload.message_id, [], None):
-            if in_rip_cache: 
-                RIP_CACHE[payload.channel_id][payload.message_id].reacts.clear()
-            if in_user_react_cache: 
-                USER_REACT_CACHE.pop(payload.message_id)
+    try:
+        in_rip_cache = payload.channel_id in RIP_CACHE and payload.message_id in RIP_CACHE[payload.channel_id]
+        in_user_react_cache = payload.message_id in USER_REACT_CACHE
+        if in_rip_cache or in_user_react_cache:
+            async with lock_message(payload.message_id, [], None):
+                if in_rip_cache: 
+                    RIP_CACHE[payload.channel_id][payload.message_id].reacts.clear()
+                if in_user_react_cache: 
+                    USER_REACT_CACHE.pop(payload.message_id)
+    except Exception as error:
+        await send_crash(f'ERROR on raw reaction clear:', error, None)
 
 
 @bot.event
 async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
-    await remove_rip_from_cache(payload.message_id, payload.channel_id)
+    try:
+        await remove_rip_from_cache(payload.message_id, payload.channel_id)
+    except Exception as error:
+        await send_crash(f'ERROR on raw message delete:', error, None)
 
 
 @bot.event
 async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
-    if payload.channel_id in RIP_CACHE and payload.message_id in RIP_CACHE[payload.channel_id]: 
-        error_strings: list[str] = []
-        async with lock_message(payload.message_id, error_strings, None):
-            rip = RIP_CACHE[payload.channel_id][payload.message_id]
-            old_text = rip.text
-            rip = rip._replace(text = payload.message.content)
-            RIP_CACHE[payload.channel_id][payload.message_id] = rip
-        if len(error_strings):
-            await send_if_errors("Error on updating edited rip:", error_strings, payload.message.channel)
+    try:
+        if payload.channel_id in RIP_CACHE and payload.message_id in RIP_CACHE[payload.channel_id]: 
+            error_strings: list[str] = []
+            async with lock_message(payload.message_id, error_strings, None):
+                rip = RIP_CACHE[payload.channel_id][payload.message_id]
+                old_text = rip.text
+                rip = rip._replace(text = payload.message.content)
+                RIP_CACHE[payload.channel_id][payload.message_id] = rip
+            if len(error_strings):
+                await send_if_errors("Error on updating edited rip:", error_strings, payload.message.channel)
 
-        if channel_is_types(payload.message.channel, ['QOC']) and payload.message.pinned:
-            async with payload.message.channel.typing():
-                try:
-                    desc = VetRipDesc(message=payload.message, past_rip_message_content=old_text)
-                    vet_report = await vet_rip_or_url(payload.message.content, desc, payload.message.guild)
-                    await send_if_errors("Errors while vetting:", vet_report.error_strings, payload.message.channel)
-                except Exception as error:
-                    await send_crash(f'ERROR on rip vet after pin:', error, payload.message.channel)
+            if channel_is_types(payload.message.channel, ['QOC']) and payload.message.pinned:
+                async with payload.message.channel.typing():
+                    try:
+                        desc = VetRipDesc(message=payload.message, past_rip_message_content=old_text)
+                        vet_report = await vet_rip_or_url(payload.message.content, desc, payload.message.guild)
+                        await send_if_errors("Errors while vetting:", vet_report.error_strings, payload.message.channel)
+                    except Exception as error:
+                        await send_crash(f'ERROR on rip vet after pin:', error, payload.message.channel)
+    except Exception as error:
+        await send_crash(f'ERROR on raw message edit:', error, None)
 
 
 @bot.event
 async def on_message(message: Message):
-    if message.author == bot.user:
-        return
+    try:
+        if message.author == bot.user:
+            return
 
-    prefix = get_config("prefix")
-    await process_suborqueue_rip_caching(message)
+        prefix = get_config("prefix")
+        await process_suborqueue_rip_caching(message)
 
-    if not message.content.startswith(prefix):
-        return
+        if not message.content.startswith(prefix):
+            return
 
-    args = message.content.split(' ')
-    command_name = args[0][len(prefix):].lower()
-    command_info = find_command_info(command_name)
+        args = message.content.split(' ')
+        command_name = args[0][len(prefix):].lower()
+        command_info = find_command_info(command_name)
 
-    if not command_info:
-        return
+        if not command_info:
+            return
 
-    if not command_info.public and not channel_is_types(message.channel, ['QOC', 'PROXY_QOC']):
-        ##NOTE: (Ahmayk) consider giving feedback on a command not being avaliable
-        # if not having any feedback is confusing, probably is fine tho
-        return
-    
-    if not type(message.author) is discord.Member:
-        if command_info.command_type != CommandType.SECRET:
-            return await send("Error: Working commands can only be executed within servers.", message.channel)
-    elif command_info.admin:
-        if not message.author.guild_permissions.administrator:
-            return await send("Error: Only users with admin access in this server can use this command.", message.channel)
+        if not command_info.public and not channel_is_types(message.channel, ['QOC', 'PROXY_QOC']):
+            ##NOTE: (Ahmayk) consider giving feedback on a command not being avaliable
+            # if not having any feedback is confusing, probably is fine tho
+            return
+        
+        if not type(message.author) is discord.Member:
+            if command_info.command_type != CommandType.SECRET:
+                return await send("Error: Working commands can only be executed within servers.", message.channel)
+        elif command_info.admin:
+            if not message.author.guild_permissions.administrator:
+                return await send("Error: Only users with admin access in this server can use this command.", message.channel)
 
-    command_context = CommandContext(message.channel, message.author, message.reference)
+        command_context = CommandContext(message.channel, message.author, message.reference)
 
-    today = datetime.now() # Technically not useful, but it looks gorgeous on my CRT monitor
-    print(f"{today.strftime('%m/%d/%y %I:%M %p')}  ~~~  Heard {command_name} command from {message.author.name}!")
+        today = datetime.now() # Technically not useful, but it looks gorgeous on my CRT monitor
+        print(f"{today.strftime('%m/%d/%y %I:%M %p')}  ~~~  Heard {command_name} command from {message.author.name}!")
+    except Exception as error:
+        await send_crash(f'ERROR on message: {message.jump_url}:', error, None)
 
     try:
         await command_info.func(args[1:], command_context)
