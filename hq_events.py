@@ -329,7 +329,6 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
             await send_crash(f'ERROR on QOC Pin:', error, channel)
 
 
-VERBOSE_RECT_LOGGING = True
 
 @bot.event
 async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
@@ -337,6 +336,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         error_strings: list[str] = []
 
         verbose_log = ""
+        VERBOSE_RECT_LOGGING = False
 
         channel_and_errors = await discord_find_channel(payload.channel_id)
         channel = channel_and_errors.channel
@@ -349,6 +349,10 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             message = None 
             in_cache = False
             if is_qoc_channel or is_suborqueue_channel:
+
+                react_type = react_name_to_react_type(payload.emoji.name)
+                if react_type in REVIEW_REACT_LIST or react_type in FIX_REACT_LIST:
+                    VERBOSE_RECT_LOGGING = True
 
                 if VERBOSE_RECT_LOGGING:
                     verbose_log += f'\n- {payload.emoji} react heard in qoc or sub channel on message id {payload.message_id}'
