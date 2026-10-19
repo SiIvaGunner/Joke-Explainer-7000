@@ -340,48 +340,36 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
         channel_and_errors = await discord_find_channel(payload.channel_id)
         channel = channel_and_errors.channel
-
         if channel:
-
             is_qoc_channel = channel_is_types(channel, ['QOC'])
             is_suborqueue_channel = channel_is_types(channel, ['QUEUE', 'SUBS', 'SUBS_THREAD', 'SUBS_PIN'])
 
-            message = None 
-            in_cache = False
             if is_qoc_channel or is_suborqueue_channel:
+                async with lock_message(payload.message_id, error_strings, None):
 
-                react_type = react_name_to_react_type(payload.emoji.name)
-                if react_type in REVIEW_REACT_LIST or react_type in FIX_REACT_LIST:
-                    VERBOSE_RECT_LOGGING = True
+                    react_type = react_name_to_react_type(payload.emoji.name)
+                    if react_type in REVIEW_REACT_LIST or react_type in FIX_REACT_LIST:
+                        # VERBOSE_RECT_LOGGING = True
+                        pass
+                    if VERBOSE_RECT_LOGGING:
+                        verbose_log += f'\n- {payload.emoji} react heard on rip in qoc or sub channel on message id {payload.message_id}'
 
-                if VERBOSE_RECT_LOGGING:
-                    verbose_log += f'\n- {payload.emoji} react heard in qoc or sub channel on message id {payload.message_id}'
-
-                async with lock_channel(payload.channel_id, error_strings, None):
-                    in_cache = payload.channel_id in RIP_CACHE and payload.message_id in RIP_CACHE[payload.channel_id]
-                    if in_cache: 
-
+                    message_and_errors = await discord_fetch_message(payload.message_id, channel)
+                    message = message_and_errors.message
+                    if message:
                         if VERBOSE_RECT_LOGGING:
-                            verbose_log += f'\n- message is in rip cache'
+                            verbose_log += f'\n- Message fetched! Link: {message.jump_url}'
 
-                        async with lock_message(payload.message_id, error_strings, None):
-
-                            ##NOTE: (Ahmayk) could skip this if we wanted to, but
-                            ##we don't really lose much from doing a fetch here.
-                            ##It guarentees that all reactions are accurate 
-                            message_and_errors = await discord_fetch_message(payload.message_id, channel)
-                            message = message_and_errors.message
-
-                            if message:
-
+                        if is_message_rip(message):
+                            async with lock_channel(payload.channel_id, error_strings, None):
                                 if VERBOSE_RECT_LOGGING:
-                                    verbose_log += f'\n- Message fetched! Link: {message.jump_url}'
+                                    verbose_log += f'\n- Message is rip'
 
                                 rip = cache_rip_in_message(message)
-                                if is_qoc_channel and message.pinned:
+                                if is_qoc_channel:
 
                                     if VERBOSE_RECT_LOGGING:
-                                        verbose_log += f'\n- Message is QOC and pinned! Adding to user react cache'
+                                        verbose_log += f'\n- Message is QOC! Adding to user react cache'
 
                                     if rip.message_id not in USER_REACT_CACHE: 
                                         USER_REACT_CACHE[rip.message_id] = {} 
@@ -391,9 +379,9 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                                         USER_REACT_CACHE[rip.message_id][react] = [] 
 
                                     USER_REACT_CACHE[rip.message_id][react].append(payload.user_id) 
-                            else:
-                                log_channel = await get_log_channel()
-                                await send_and_if_errors(f'ERROR on raw reaction add: Failed to fetch message with id: {payload.message_id}', "", message_and_errors.error_strings, log_channel)
+                    else:
+                        log_channel = await get_log_channel()
+                        await send_and_if_errors(f'ERROR on raw reaction add: Failed to fetch message with id: {payload.message_id}', "", message_and_errors.error_strings, log_channel)
 
         if VERBOSE_RECT_LOGGING and len(verbose_log):
             await write_log(verbose_log)
@@ -401,15 +389,6 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     except Exception as error:
         await send_crash(f'ERROR on raw reaction add:', error, None)
 
-
-
-
-async def process_suborqueue_rip_caching(message: Message):
-    is_queue_channel = channel_is_types(message.channel, ['QUEUE']) 
-    is_sub_channel = channel_is_types(message.channel, ['SUBS', 'SUBS_THREAD'])
-    if (is_queue_channel or is_sub_channel) and is_message_rip(message): 
-        cache_rip_in_message(message)
-        await process_jingle_status(message)
 
 
 async def remove_reaction_from_cache(channel_id: int, message_id: int, emoji: discord.PartialEmoji, user_id: int | None, remove_all: bool):
@@ -503,7 +482,9 @@ async def on_message(message: Message):
             return
 
         prefix = get_config("prefix")
-        await process_suborqueue_rip_caching(message)
+        if is_message_rip(message):
+            cache_rip_in_message(message)
+            await process_jingle_status(message)
 
         if not message.content.startswith(prefix):
             return

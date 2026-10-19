@@ -20,11 +20,46 @@ def init_channel_cache(channel_id: int):
     if channel_id not in RIP_CACHE:
         RIP_CACHE[channel_id] = {}
 
+
 def cache_rip_in_message(message: Message):
     rip = init_rip(message)
     init_channel_cache(message.channel.id)
     RIP_CACHE[message.channel.id][message.id] = rip
     return rip
+
+
+async def process_jingle_status(message: Message) -> list[str]:
+    error_strings = []
+    jingle_length_in_seconds = get_config("jingle_length_in_seconds")
+    urls = extract_rip_link(message.content)
+    if len(urls):
+        floatAndErrors = await get_rip_url_length(urls[0], GetRipUrlLengthDesc())
+        if not len(floatAndErrors.error_strings) and floatAndErrors.result > 0:
+            if floatAndErrors.result <= jingle_length_in_seconds:
+                await update_rip_status_reacts(message, [ReactType.JINGLE], [], message.guild)
+            else:
+                await update_rip_status_reacts(message, [], [ReactType.JINGLE], message.guild)
+        else:
+            error_strings.extend(floatAndErrors.error_strings)
+    return error_strings
+
+
+def is_message_rip(message: Message) -> bool:
+    result = False
+    has_quotes = '```' in message.content
+    if has_quotes:
+        rip_links = extract_rip_link(message.content)
+        if len(rip_links) > 0 or len(message.attachments):
+            if not result:
+                result = channel_is_types(message.channel, ['QOC']) and message.pinned
+            if not result:
+                result = channel_is_types(message.channel, ['QUEUE'])
+            if not result:
+                result = channel_is_types(message.channel, ['SUBS', 'SUBS_THREAD'])
+            if not result:
+                result = channel_is_types(message.channel, ['SUBS_PIN']) and message.pinned
+    return result 
+
 
 def cache_user_react_data(user_react_data: dict[React, List[int]], message_id: int):
     if len(user_react_data):
@@ -34,6 +69,7 @@ def cache_user_react_data(user_react_data: dict[React, List[int]], message_id: i
             USER_REACT_CACHE[message_id][react] = []
             for user_id in user_ids:
                 USER_REACT_CACHE[message_id][react].append(user_id) 
+
 
 CACHE_LOCK_CHANNEL: dict[int, asyncio.Lock] = {}
 CACHE_LOCK_MESSAGE: dict[int, asyncio.Lock] = {}
@@ -115,16 +151,6 @@ def init_rip(message) -> Rip:
             str(message.author), reacts, message.created_at)
 
 
-def is_message_rip(message: Message) -> bool:
-    result = False
-    has_quotes = '```' in message.content
-    if has_quotes:
-        rip_links = extract_rip_link(message.content)
-        if len(rip_links) > 0 or len(message.attachments):
-            result = True
-    return result
-
-
 def react_needs_user_cache(react: React) -> bool:
     result = False
     for enum in UserReactCheckType:
@@ -192,20 +218,6 @@ def validate_rip_message(message: Message, user_react_data: dict[React, List[int
 
     return result
 
-async def process_jingle_status(message: Message) -> list[str]:
-    error_strings = []
-    jingle_length_in_seconds = get_config("jingle_length_in_seconds")
-    urls = extract_rip_link(message.content)
-    if len(urls):
-        floatAndErrors = await get_rip_url_length(urls[0], GetRipUrlLengthDesc())
-        if not len(floatAndErrors.error_strings) and floatAndErrors.result > 0:
-            if floatAndErrors.result <= jingle_length_in_seconds:
-                await update_rip_status_reacts(message, [ReactType.JINGLE], [], message.guild)
-            else:
-                await update_rip_status_reacts(message, [], [ReactType.JINGLE], message.guild)
-        else:
-            error_strings.extend(floatAndErrors.error_strings)
-    return error_strings
 
 async def process_rip_message(message: Message, refetch_message: bool, is_validate_message: bool, \
                               typing_channel: TextChannel | Thread | None) -> StringAndErrors:
