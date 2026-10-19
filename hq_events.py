@@ -338,21 +338,28 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         verbose_log = ""
         VERBOSE_RECT_LOGGING = False
 
+        react_type = react_name_to_react_type(payload.emoji.name)
+        if react_type in REVIEW_REACT_LIST or react_type in FIX_REACT_LIST:
+            VERBOSE_RECT_LOGGING = True
+
+        if VERBOSE_RECT_LOGGING:
+            verbose_log += f'\n- {payload.emoji} react heard on message id {payload.message_id}'
+
         channel_and_errors = await discord_find_channel(payload.channel_id)
         channel = channel_and_errors.channel
         if channel:
+
+            if VERBOSE_RECT_LOGGING:
+                verbose_log += f'\n- Channel found: {channel.jump_url}'
+
             is_qoc_channel = channel_is_types(channel, ['QOC'])
             is_suborqueue_channel = channel_is_types(channel, ['QUEUE', 'SUBS', 'SUBS_THREAD', 'SUBS_PIN'])
 
             if is_qoc_channel or is_suborqueue_channel:
                 async with lock_message(payload.message_id, error_strings, None):
 
-                    react_type = react_name_to_react_type(payload.emoji.name)
-                    if react_type in REVIEW_REACT_LIST or react_type in FIX_REACT_LIST:
-                        VERBOSE_RECT_LOGGING = True
-                        # pass
                     if VERBOSE_RECT_LOGGING:
-                        verbose_log += f'\n- {payload.emoji} react heard on rip in qoc or sub channel on message id {payload.message_id}'
+                        verbose_log += f'\n- Channel is valid rip channel'
 
                     message_and_errors = await discord_fetch_message(payload.message_id, channel)
                     message = message_and_errors.message
@@ -382,6 +389,10 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                     else:
                         log_channel = await get_log_channel()
                         await send_and_if_errors(f'ERROR on raw reaction add: Failed to fetch message with id: {payload.message_id}', "", message_and_errors.error_strings, log_channel)
+
+        else:
+            log_channel = await get_log_channel()
+            await send_and_if_errors(f'ERROR on raw reaction add: Failed to fetch channel with id: {payload.channel_id}', "", channel_and_errors.error_strings, log_channel)
 
         if VERBOSE_RECT_LOGGING and len(verbose_log):
             await write_log(verbose_log)
