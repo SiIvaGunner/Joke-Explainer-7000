@@ -1691,16 +1691,17 @@ async def subs_all(args: list[str], command_context: CommandContext):
 
 @command(
     command_type=CommandType.SUBS,
-    brief='Show all subbed rips in the primary sub channel without :qoc:',
+    brief='Show all subbed rips in non-qoc sub channels without :qoc:',
     aliases=['unpulled_gubs', 'unpulled_sub', 'unpulledsub', 'unpulledsub'],
 )
 async def unpulled(args: list[str], command_context: CommandContext):
-    channel_and_errors = await get_default_config_channel_of_type("SUBS")
-    if len(channel_and_errors.error_strings):
-        return await send_if_errors("Unable to get unpulled rips", channel_and_errors.error_strings, command_context.channel)
+
+    channels_and_errors = await get_channels_of_types(["SUBS", "SUBS_PIN", "SUBS_THREAD"], ["QOC"])
+    if len(channels_and_errors.error_strings):
+        return await send_if_errors("Unable to get unpulled rips", channels_and_errors.error_strings, command_context.channel)
 
     desc = SendSubOrQueueDesc(suborqueue_rip_filter_type = SubOrQueueRipFilterType.UNPULLED, \
-                              channels = [channel_and_errors.channel])
+                              channels = channels_and_errors.channels)
     await send_suborqueue_rips(desc, command_context)
 
 
