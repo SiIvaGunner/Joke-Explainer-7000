@@ -349,8 +349,8 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
                     react_type = react_name_to_react_type(payload.emoji.name)
                     if react_type in REVIEW_REACT_LIST or react_type in FIX_REACT_LIST:
-                        # VERBOSE_RECT_LOGGING = True
-                        pass
+                        VERBOSE_RECT_LOGGING = True
+                        # pass
                     if VERBOSE_RECT_LOGGING:
                         verbose_log += f'\n- {payload.emoji} react heard on rip in qoc or sub channel on message id {payload.message_id}'
 
