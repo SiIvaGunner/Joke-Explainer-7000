@@ -404,14 +404,25 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
 async def remove_reaction_from_cache(channel_id: int, message_id: int, emoji: discord.PartialEmoji, user_id: int | None, remove_all: bool):
     try:
+        verbose_log = ""
+        VERBOSE_RECT_LOGGING = True 
+
+        if VERBOSE_RECT_LOGGING:
+            verbose_log += f'\n- :x: {emoji} react removal heard on message id {message_id}'
+
         in_rip_cache = channel_id in RIP_CACHE and message_id in RIP_CACHE[channel_id]
         in_user_react_cache = message_id in USER_REACT_CACHE
         if in_rip_cache or in_user_react_cache:
+
             async with lock_message(message_id, [], None):
 
                 react = React(emoji.id or 0, emoji.name, str(emoji))
 
                 if in_rip_cache:
+
+                    if VERBOSE_RECT_LOGGING:
+                        verbose_log += f'\n- is in rip cache. Removing from rip cache'
+
                     rip = RIP_CACHE[channel_id][message_id]
                     for cached_react in rip.reacts:
                         if cached_react == react:
@@ -420,6 +431,10 @@ async def remove_reaction_from_cache(channel_id: int, message_id: int, emoji: di
                                 break
 
                 if in_user_react_cache: 
+
+                    if VERBOSE_RECT_LOGGING:
+                        verbose_log += f'\n- is in user react cache. Removing from user react cache'
+
                     if user_id and \
                         react in USER_REACT_CACHE[message_id] and \
                         user_id in USER_REACT_CACHE[message_id][react]:
@@ -427,6 +442,9 @@ async def remove_reaction_from_cache(channel_id: int, message_id: int, emoji: di
                     
                     if remove_all or not len(USER_REACT_CACHE[message_id]):
                         USER_REACT_CACHE.pop(message_id)
+
+        if VERBOSE_RECT_LOGGING and len(verbose_log):
+            await write_log(verbose_log)
     except Exception as error:
         await send_crash(f'ERROR on raw reaction remove:', error, None)
 
