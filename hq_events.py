@@ -405,7 +405,10 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 async def remove_reaction_from_cache(channel_id: int, message_id: int, emoji: discord.PartialEmoji, user_id: int | None, remove_all: bool):
     try:
         verbose_log = ""
-        VERBOSE_RECT_LOGGING = True 
+        VERBOSE_RECT_LOGGING = False
+        react_type = react_name_to_react_type(emoji.name)
+        if react_type in REVIEW_REACT_LIST or react_type in FIX_REACT_LIST:
+            VERBOSE_RECT_LOGGING = True
 
         if VERBOSE_RECT_LOGGING:
             verbose_log += f'\n- :x: {emoji} react removal heard on message id {message_id}'
