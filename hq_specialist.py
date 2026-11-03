@@ -189,23 +189,22 @@ def search_specialists(submissionText: str, qoc_sheet_data: QoCSheetData, guild:
 
     for specialist_entry in qoc_sheet_data.specialist_entries:
 
-        is_match = False 
         for game_and_track_pair in game_and_track_pairs:
             if len(specialist_entry.game_title) and specialist_entry.game_title.lower() == game_and_track_pair.game_name.lower():
                 result += f'\n{stop_emoji} {specialist_entry.game_title}: **{specialist_entry.specialists}**'
                 break
 
+            match_found = False
             for alternate_title in specialist_entry.alternate_game_titles:
                 if len(alternate_title) and alternate_title.lower() in game_and_track_pair.game_name.lower():
-                    is_match = True
+                    match_found = True 
                     result += f'\n{stop_emoji} {specialist_entry.game_title}: **{specialist_entry.specialists}**'
                     if alternate_title.lower() not in specialist_entry.game_title.lower():
                         result += f' [{alternate_title}]'
                     break
-
-        if is_match:
-            continue
-
+            if match_found:
+                break
+                
         if len(sources_input):
             if len(specialist_entry.source) and specialist_entry.source.lower() in sources_input:
                 result += f'\n{stop_emoji} {specialist_entry.source}: **{specialist_entry.specialists}**'
@@ -213,30 +212,26 @@ def search_specialists(submissionText: str, qoc_sheet_data: QoCSheetData, guild:
 
         for alternate_source_name in specialist_entry.alternate_source_names:
             if len(alternate_source_name) and alternate_source_name.lower() in sources_input:
-                is_match = True
                 result += f'\n{stop_emoji} {specialist_entry.source}: **{specialist_entry.specialists}**'
                 if alternate_source_name not in specialist_entry.source:
                     result += f' [{alternate_source_name}]'
                 break
 
-        if is_match:
-            continue
-
         if len(composer_inputs):
             for composer_input in composer_inputs:
                 if len(specialist_entry.composer_name) and specialist_entry.composer_name.lower() in composer_input:
                     result += f'\n{stop_emoji} {specialist_entry.composer_name}: **{specialist_entry.specialists}**'
-                    is_match = True
                     break
 
+                match_found = False
                 for alternate_composer_name in specialist_entry.alternate_composer_names:
                     if len(alternate_composer_name) and alternate_composer_name.lower() in composer_input:
-                        is_match = True
+                        match_found = True
                         result += f'\n{stop_emoji} {specialist_entry.composer_name}: **{specialist_entry.specialists}**'
                         if alternate_composer_name not in specialist_entry.composer_name:
                             result += f' [{alternate_composer_name}]'
                         break
-                if is_match:
+                if match_found:
                     break
 
     result = result.strip()
