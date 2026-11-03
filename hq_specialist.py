@@ -152,6 +152,19 @@ async def get_qoc_sheet_data(desc: GetQoCSheetDataDesc, credentials: Credentials
 
     return qoc_sheet_data 
 
+def format_specialist(subject_string: str, alt_subject_string: str, specialist_entry: SpecialistEntry, emoji_string: str) -> str:
+    result = f'\n{emoji_string} {subject_string}: **{specialist_entry.specialists}**'
+    if len(alt_subject_string) and alt_subject_string not in subject_string:
+        result += f' [{alt_subject_string}]'
+    return result
+
+def format_valid_alternate(alt_names: list[str], subject_input: str, subject_string: str, specialist_entry: SpecialistEntry, stop_emoji: str) -> str:
+    result = "" 
+    for alt_string in alt_names: 
+        if len(alt_string) and alt_string.lower() in subject_input.lower():
+            result = format_specialist(subject_string, alt_string, specialist_entry, stop_emoji)
+            break
+    return result
 
 def search_specialists(submissionText: str, qoc_sheet_data: QoCSheetData, guild: Guild) -> str:
     result = ""
@@ -191,47 +204,33 @@ def search_specialists(submissionText: str, qoc_sheet_data: QoCSheetData, guild:
 
         for game_and_track_pair in game_and_track_pairs:
             if len(specialist_entry.game_title) and specialist_entry.game_title.lower() == game_and_track_pair.game_name.lower():
-                result += f'\n{stop_emoji} {specialist_entry.game_title}: **{specialist_entry.specialists}**'
+                result += format_specialist(specialist_entry.game_title, "", specialist_entry, stop_emoji)
                 break
 
-            match_found = False
-            for alternate_title in specialist_entry.alternate_game_titles:
-                if len(alternate_title) and alternate_title.lower() in game_and_track_pair.game_name.lower():
-                    match_found = True 
-                    result += f'\n{stop_emoji} {specialist_entry.game_title}: **{specialist_entry.specialists}**'
-                    if alternate_title.lower() not in specialist_entry.game_title.lower():
-                        result += f' [{alternate_title}]'
-                    break
-            if match_found:
+            alt_name_match_string = format_valid_alternate(specialist_entry.alternate_game_titles, game_and_track_pair.game_name, specialist_entry.game_title, specialist_entry, stop_emoji)
+            if len(alt_name_match_string):
+                result += alt_name_match_string 
                 break
                 
         if len(sources_input):
             if len(specialist_entry.source) and specialist_entry.source.lower() in sources_input:
-                result += f'\n{stop_emoji} {specialist_entry.source}: **{specialist_entry.specialists}**'
+                result += format_specialist(specialist_entry.source, "", specialist_entry, stop_emoji)
                 continue
 
         for alternate_source_name in specialist_entry.alternate_source_names:
             if len(alternate_source_name) and alternate_source_name.lower() in sources_input:
-                result += f'\n{stop_emoji} {specialist_entry.source}: **{specialist_entry.specialists}**'
-                if alternate_source_name not in specialist_entry.source:
-                    result += f' [{alternate_source_name}]'
+                result += format_specialist(specialist_entry.source, alternate_source_name, specialist_entry, stop_emoji)
                 break
 
         if len(composer_inputs):
             for composer_input in composer_inputs:
                 if len(specialist_entry.composer_name) and specialist_entry.composer_name.lower() in composer_input:
-                    result += f'\n{stop_emoji} {specialist_entry.composer_name}: **{specialist_entry.specialists}**'
+                    result += format_specialist(specialist_entry.composer_name, "", specialist_entry, stop_emoji)
                     break
 
-                match_found = False
-                for alternate_composer_name in specialist_entry.alternate_composer_names:
-                    if len(alternate_composer_name) and alternate_composer_name.lower() in composer_input:
-                        match_found = True
-                        result += f'\n{stop_emoji} {specialist_entry.composer_name}: **{specialist_entry.specialists}**'
-                        if alternate_composer_name not in specialist_entry.composer_name:
-                            result += f' [{alternate_composer_name}]'
-                        break
-                if match_found:
+                alt_name_match_string = format_valid_alternate(specialist_entry.alternate_composer_names, composer_input, specialist_entry.composer_name, specialist_entry, stop_emoji)
+                if len(alt_name_match_string):
+                    result += alt_name_match_string 
                     break
 
     result = result.strip()
