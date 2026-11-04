@@ -210,7 +210,6 @@ def search_specialists(submissionText: str, qoc_sheet_data: QoCSheetData, guild:
         sources_input = chunks[2]
         sources_input += get_raw_rip_author(submissionText)
 
-    sources_input = remove_links(sources_input)
     sources_input = sources_input.lower()
 
     composer_inputs = [] 
@@ -294,7 +293,7 @@ def search_specialists(submissionText: str, qoc_sheet_data: QoCSheetData, guild:
                 f"{user_key} has a plushie from",
                 f"{user_key} has a body pillow from",
                 f"If {user_key} could have one wish, it would be to create a giant inflatable thanksgiving parade baloon of their favorite character from",
-                f"This makes {user_key} comes to mind.",
+                f"This makes {user_key} come to mind.",
                 f"Please help, {user_key} might kill another hostage if they don't get more rips of",
                 f"{user_key} is considering getting a tattoo of something from",
             ]
