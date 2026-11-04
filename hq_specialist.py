@@ -301,7 +301,7 @@ def search_specialists(submissionText: str, qoc_sheet_data: QoCSheetData, guild:
             quip = quip.replace(user_key, f'**{interested_entry.user}**')
             result += f'\n:eye: {quip}' 
             if alt_match_string:
-                result += f' *({interested_entry.subject} [{alt_match_string}])*'
+                result += f' *(**{interested_entry.subject}** [{alt_match_string}])*'
             else:
                 result += f' *({interested_entry.subject})*'
             if len(interested_entry.notes):
