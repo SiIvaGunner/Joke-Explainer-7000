@@ -275,7 +275,7 @@ def search_specialists(submissionText: str, qoc_sheet_data: QoCSheetData, guild:
             interested_quips = [
                 f"{user_key} might want to see this.",
                 f"I'd just love it if there was a {user_key} right here!",
-                f"Has anyone seen {user_key} lately?"
+                f"Has anyone seen {user_key} lately?",
                 f"I sense {user_key} rapidly approaching this location.",
                 f"Danger: A wild {user_key} might appear!",
                 f"It's not a party without {user_key}",
@@ -294,9 +294,9 @@ def search_specialists(submissionText: str, qoc_sheet_data: QoCSheetData, guild:
                 f"{user_key} has a plushie from",
                 f"{user_key} has a body pillow from",
                 f"If {user_key} could have one wish, it would be to create a giant inflatable thanksgiving parade baloon of their favorite character from",
-                f"This makes {user_key} comes to mind."
-                f"Please help, {user_key} might kill another hostage if they don't get more rips of"
-                f"{user_key} is considering getting a tattoo of something from"
+                f"This makes {user_key} comes to mind.",
+                f"Please help, {user_key} might kill another hostage if they don't get more rips of",
+                f"{user_key} is considering getting a tattoo of something from",
             ]
             quip = random.choice(interested_quips)
             quip = quip.replace(user_key, f'**{interested_entry.user}**')
