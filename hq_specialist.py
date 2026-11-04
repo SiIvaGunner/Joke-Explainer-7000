@@ -158,7 +158,7 @@ async def get_qoc_sheet_data(desc: GetQoCSheetDataDesc, credentials: Credentials
         interested_entries: list[InterestedEntry] = []
         if not len(error_strings):
             for row in batch_values_get_result.batches[4]:
-                if len(row) > 1 and len(row[1]):
+                if len(row) > 1 and len(row[0]) and len(row[1]):
                     subject = row[0] 
                     user = row[1]
                     alternate_matches = []
