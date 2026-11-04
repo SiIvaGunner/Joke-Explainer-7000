@@ -304,6 +304,9 @@ def search_specialists(submissionText: str, qoc_sheet_data: QoCSheetData, guild:
                 result += f' *({interested_entry.subject} [{alt_match_string}])*'
             else:
                 result += f' *({interested_entry.subject})*'
+            if len(interested_entry.notes):
+                result += f'\n-# *{interested_entry.notes}*'
+            
 
     result = result.strip()
 
