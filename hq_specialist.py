@@ -204,12 +204,12 @@ def search_specialists(submissionText: str, qoc_sheet_data: QoCSheetData, guild:
     track_string = get_music_from_desc(desc_dict)
     game_and_track_pairs = parseTitle(title, ' - ', track_string)
 
+    full_metadata = submissionText.lower()
     sources_input = submissionText 
     chunks = submissionText.split('```')
     if len(chunks) >= 2:
         sources_input = chunks[2]
         sources_input += get_raw_rip_author(submissionText)
-
     sources_input = sources_input.lower()
 
     composer_inputs = [] 
@@ -262,10 +262,10 @@ def search_specialists(submissionText: str, qoc_sheet_data: QoCSheetData, guild:
     for interested_entry in qoc_sheet_data.interested_entries:
         is_match = False
         alt_match_string = ""
-        if interested_entry.subject.lower() in sources_input:
+        if interested_entry.subject.lower() in full_metadata:
             is_match = True
         for alt_match in interested_entry.alternate_matches:
-            if len(alt_match) and alt_match.lower() in sources_input:
+            if len(alt_match) and alt_match.lower() in full_metadata:
                 alt_match_string = alt_match
                 is_match = True
                 break
@@ -306,6 +306,7 @@ def search_specialists(submissionText: str, qoc_sheet_data: QoCSheetData, guild:
                 result += f' *({interested_entry.subject})*'
             if len(interested_entry.notes):
                 result += f'\n-# *{interested_entry.notes}*'
+            result += f'\n' 
             
 
     result = result.strip()
