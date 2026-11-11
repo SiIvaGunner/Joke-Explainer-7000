@@ -93,8 +93,8 @@ async def get_qoc_sheet_data(desc: GetQoCSheetDataDesc, credentials: Credentials
         if not len(error_strings):
             for row in batch_values_get_result.batches[0]:
                 if len(row) > 1:
-                    game_title = row[0] 
-                    specialists = row[1]
+                    game_title = row[0].strip()
+                    specialists = row[1].strip()
                     alternate_game_titles: list[str] = [] 
                     if len(row) > 2:
                         names = row[2].split("/")
@@ -108,8 +108,8 @@ async def get_qoc_sheet_data(desc: GetQoCSheetDataDesc, credentials: Credentials
         if not len(error_strings):
             for row in batch_values_get_result.batches[1]:
                 if len(row) > 1:
-                    composer_string = row[0]
-                    specialists = row[1]
+                    composer_string = row[0].strip()
+                    specialists = row[1].strip()
                     alternate_matches = []
                     if len(row) > 2:
                         names = row[2].split("/") 
@@ -123,8 +123,8 @@ async def get_qoc_sheet_data(desc: GetQoCSheetDataDesc, credentials: Credentials
         if not len(error_strings):
             for row in batch_values_get_result.batches[2]:
                 if len(row) > 1:
-                    source_string = row[0]
-                    specialists = row[1]
+                    source_string = row[0].strip()
+                    specialists = row[1].strip()
                     alternate_source_names = []
                     if len(row) > 2:
                         names = row[2].split("/") 
@@ -132,15 +132,15 @@ async def get_qoc_sheet_data(desc: GetQoCSheetDataDesc, credentials: Credentials
                             alternate_source_names.append(name.strip())
                     notes = "" 
                     if len(row) > 3:
-                        notes = row[3]
+                        notes = row[3].strip()
                     specialist_entries.append(SpecialistEntry(specialists, notes, "", [], "", [], source_string, alternate_source_names))
 
         source_exclusions: list[SourceExclusion] = []
         if not len(error_strings):
             for row in batch_values_get_result.batches[3]:
                 if len(row) > 1 and len(row[1]):
-                    track_title = row[0] 
-                    game_title = row[1]
+                    track_title = row[0].strip() 
+                    game_title = row[1].strip()
                     skip_database_search = False
                     if len(row) > 2:
                         skip_database_search = (row[2] == 'TRUE')
@@ -149,18 +149,18 @@ async def get_qoc_sheet_data(desc: GetQoCSheetDataDesc, credentials: Credentials
                         skip_youtube_search_link = (row[3] == 'TRUE')
                     no_results_message = ""
                     if len(row) > 4:
-                        no_results_message = row[4]
+                        no_results_message = row[4].strip()
                     notes = ""
                     if len(row) > 5:
-                        notes = row[5]
+                        notes = row[5].strip()
                     source_exclusions.append(SourceExclusion(track_title, game_title, skip_database_search, skip_youtube_search_link, no_results_message, notes))
 
         interested_entries: list[InterestedEntry] = []
         if not len(error_strings):
             for row in batch_values_get_result.batches[4]:
                 if len(row) > 1 and len(row[0]) and len(row[1]):
-                    subject = row[0] 
-                    user = row[1]
+                    subject = row[0].strip() 
+                    user = row[1].strip()
                     alternate_matches = []
                     if len(row) > 2:
                         names = row[2].split("/") 
