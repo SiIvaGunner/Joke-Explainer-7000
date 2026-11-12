@@ -23,7 +23,9 @@ DEFAULT_ALERT = '❗'
 DEFAULT_QOC = '🛃'
 DEFAULT_METADATA = '📝'
 DEFAULT_THUMBNAIL = '🖼️'
+DEFAULT_WRITEUP = '✏️' 
 DEFAULT_SENDBACK = '➡️'
+DEFAULT_UPDATED = '🤛'
 DEFAULT_CALENDAR_1 = '📆'
 DEFAULT_CALENDAR_2 = '📅'
 DEFAULT_CALENDAR_3 = '🗓️' 
@@ -51,7 +53,9 @@ class ReactType(Enum):
     THUMBNAIL = auto()
     EMAILSENT = auto()
     ANTIMAIL = auto()
+    WRITEUP = auto()
     SENDBACK = auto()
+    UPDATED = auto()
     CALENDAR = auto()
     BITRATE = auto()
     CLIPPING = auto()
@@ -77,7 +81,9 @@ REACT_INFOS: dict[ReactType, ReactInfo] = {
     ReactType.THUMBNAIL: ReactInfo([DEFAULT_THUMBNAIL], ["thumbnail"]),
     ReactType.EMAILSENT: ReactInfo([""], ["emailsent"]),
     ReactType.ANTIMAIL: ReactInfo([""], ["antimail"]),
+    ReactType.WRITEUP: ReactInfo([DEFAULT_WRITEUP], ["writeup"]),
     ReactType.SENDBACK: ReactInfo([DEFAULT_SENDBACK], ["sendback"]),
+    ReactType.UPDATED: ReactInfo([DEFAULT_UPDATED], ["updated"]),
     ReactType.CALENDAR: ReactInfo([DEFAULT_CALENDAR_1, DEFAULT_CALENDAR_2, DEFAULT_CALENDAR_3], ["calendar"]),
     ReactType.BITRATE: ReactInfo([QOC_DEFAULT_BITRATE], ["bitrate"]),
     ReactType.CLIPPING: ReactInfo([QOC_DEFAULT_CLIPPING], ["clipping"]),

@@ -670,6 +670,43 @@ async def nosendback(args: list[str], command_context: CommandContext):
 
 @command(
     command_type=CommandType.QOC,
+    brief="Show QoC rips with :writeup:",
+    aliases=['']
+)
+async def writeups(args: list[str], command_context: CommandContext):
+    roundup_desc = RoundupDesc(flags = RoundupFlag.HAS_REACT_TYPE,
+                               has_react_types = [ReactType.WRITEUP],
+                               not_found_message="No writeups! Time to get writing?")
+    await send_roundup(roundup_desc, command_context)
+
+
+@command(
+    command_type=CommandType.QOC,
+    brief="Show QoC rips with :fix: and not :writeup: or :sendback:",
+    aliases=['needswriteup', 'needs_writeup']
+)
+async def unwritten(args: list[str], command_context: CommandContext):
+    roundup_desc = RoundupDesc(flags = RoundupFlag.HAS_REACT_TYPE | RoundupFlag.NOT_HAS_REACT_TYPE,
+                               has_react_types = [ReactType.FIX],
+                               not_has_react_types = [ReactType.WRITEUP, ReactType.SENDBACK],
+                               not_found_message="No writeups needed!")
+    await send_roundup(roundup_desc, command_context)
+
+
+@command(
+    command_type=CommandType.QOC,
+    brief="Show QoC rips with :updated:",
+    aliases=['updates']
+)
+async def updated(args: list[str], command_context: CommandContext):
+    roundup_desc = RoundupDesc(flags = RoundupFlag.HAS_REACT_TYPE,
+                               has_react_types = [ReactType.UPDATED],
+                               not_found_message="No updated rips. Someone needs to cook first.")
+    await send_roundup(roundup_desc, command_context)
+
+
+@command(
+    command_type=CommandType.QOC,
     brief="Show QoC rips with :stop:",
 )
 async def stops(args: list[str], command_context: CommandContext):
