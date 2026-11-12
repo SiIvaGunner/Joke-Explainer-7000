@@ -304,7 +304,6 @@ async def send_roundup(desc: RoundupDesc, command_context: CommandContext):
 
     filtered_rips = []
     valid_count = 0
-    totalSaveQocRips = 0
     for rip in rips:
 
         is_valid = True 
@@ -355,10 +354,7 @@ async def send_roundup(desc: RoundupDesc, command_context: CommandContext):
             is_valid &= (datetime.now(timezone.utc) - rip.created_at) > timedelta(days=overdue_days)
 
         if is_valid and desc.flags & RoundupFlag.SAVEQOC:
-            is_valid = False
-            if rip_is_one_check_away_from_accept(rip):
-                is_valid = True
-                totalSaveQocRips += 1
+            is_valid &= rip_is_one_check_away_from_accept(rip)
 
         if is_valid:
             filtered_rips.append(rip)
@@ -393,6 +389,10 @@ async def send_roundup(desc: RoundupDesc, command_context: CommandContext):
             not_found_message = desc.not_found_message
 
         if desc.flags & (RoundupFlag.SAVEQOC | RoundupFlag.USER_REACT_CHECK_TYPE):
+            totalSaveQocRips = 0
+            for rip in rips:
+                if rip_is_one_check_away_from_accept(rip):
+                    totalSaveQocRips += 1
             prefix = get_config('prefix')
             not_found_message += f' Total `{prefix}saveqoc` rips: **{totalSaveQocRips}**'
 
@@ -503,9 +503,9 @@ async def saveqoc(args: list[str], command_context: CommandContext):
     desc="Shows rips you havne't checked that have two more checks than rejects, no fixes or alerts, and no stops unaccompanied by a goldencheck."
 )
 async def mysaveqoc(args: list[str], command_context: CommandContext):
-    roundup_desc = RoundupDesc(flags = RoundupFlag.SAVEQOC | RoundupFlag.USER_REACT_CHECK_TYPE,
-                               user_react_check_types= [UserReactCheckType.CHECK],
-                               not_found_message = "No rips can be approved with only one check. All is lost!")
+    roundup_desc = RoundupDesc(flags = RoundupFlag.SAVEQOC | RoundupFlag.NOT_USER_REACT_CHECK_TYPE,
+                               not_user_react_check_types = [UserReactCheckType.CHECK],
+                               not_found_message = "You cannot approve any rips with only one check!")
     await send_roundup(roundup_desc, command_context)
 
 
