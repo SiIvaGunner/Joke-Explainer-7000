@@ -345,6 +345,7 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
 
     filtered_rips = []
     valid_count = 0
+    totalSaveQocRips = 0
     for rip in rips:
 
         vet_reacts = ""
@@ -416,6 +417,7 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
             case RoundupFilterType.MYSAVEQOC:
                 is_valid = False
                 if rip_is_one_check_away_from_accept(rip):
+                    totalSaveQocRips += 1
                     bool_and_errors = await user_is_react(UserReactCheckType.CHECK, user_id, rip, command_context.channel)
                     is_valid = not bool_and_errors.result 
 
@@ -455,6 +457,12 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
         not_found_message = "No rips."
         if len(roundup_desc.not_found_message):
             not_found_message = roundup_desc.not_found_message
+
+        match (roundup_desc.roundup_filter_type):
+            case RoundupFilterType.MYSAVEQOC:
+                prefix = get_config('prefix')
+                not_found_message += f' Total `{prefix}saveqoc` rips: **{totalSaveQocRips}**'
+
         await send_and_if_errors(not_found_message, "Roundup had errors.", error_strings, command_context.channel)
 
 
