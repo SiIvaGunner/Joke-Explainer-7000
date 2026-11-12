@@ -209,19 +209,20 @@ class UserReactCheckType(Enum):
     CHECK = auto()
     REJECT = auto()
 
-def user_react_check_type_to_react_list(user_react_check_type: UserReactCheckType) -> List[ReactType]:
+def user_react_check_types_to_react_list(user_react_check_types: list[UserReactCheckType]) -> List[ReactType]:
     react_list = []
-    match(user_react_check_type):
-        case UserReactCheckType.REVIEW: 
-            react_list = REVIEW_REACT_LIST 
-        case UserReactCheckType.FIX:
-            react_list = FIX_REACT_LIST 
-        case UserReactCheckType.CHECK:
-            react_list = [ReactType.CHECK] 
-        case UserReactCheckType.REJECT:
-            react_list = [ReactType.REJECT] 
-        case _:
-            assert f'Unimplemented UserReactCheckType {user_react_check_type}'
+    for user_react_check_type in user_react_check_types:
+        match(user_react_check_type):
+            case UserReactCheckType.REVIEW: 
+                react_list.extend(REVIEW_REACT_LIST)
+            case UserReactCheckType.FIX:
+                react_list.extend(FIX_REACT_LIST)
+            case UserReactCheckType.CHECK:
+                react_list.append(ReactType.CHECK)
+            case UserReactCheckType.REJECT:
+                react_list.append(ReactType.REJECT)
+            case _:
+                assert f'Unimplemented UserReactCheckType {user_react_check_type}'
     return react_list
 
 

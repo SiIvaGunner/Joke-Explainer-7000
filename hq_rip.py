@@ -154,7 +154,7 @@ def init_rip(message) -> Rip:
 def react_needs_user_cache(react: React) -> bool:
     result = False
     for enum in UserReactCheckType:
-        react_list = user_react_check_type_to_react_list(enum)
+        react_list = user_react_check_types_to_react_list([enum])
         if react_is_one(react_list, react.name):
             result = True
             break
@@ -237,7 +237,7 @@ async def process_rip_message(message: Message, refetch_message: bool, is_valida
             if channel_info.is_cache_qoc:
                 react_list = []
                 for enum in UserReactCheckType:
-                    reacts_of_check_type = user_react_check_type_to_react_list(enum)
+                    reacts_of_check_type = user_react_check_types_to_react_list([enum])
                     for react in reacts_of_check_type:
                         if react not in react_list:
                             react_list.append(react)
@@ -467,7 +467,7 @@ async def remove_rip_from_cache(message_id: int, channel_id: int):
     CACHE_LOCK_MESSAGE.pop(message_id)
 
 
-async def user_is_react(user_react_check_type: UserReactCheckType, user_id: int, rip: Rip,\
+async def user_is_react(user_react_check_types: list[UserReactCheckType], user_id: int, rip: Rip,\
                         typing_channel: TextChannel | Thread | None) -> BoolAndErrors:
     result = False
     error_strings: list[str] = []
@@ -477,7 +477,7 @@ async def user_is_react(user_react_check_type: UserReactCheckType, user_id: int,
         if rip.message_id not in USER_REACT_CACHE:
             USER_REACT_CACHE[rip.message_id] = {} 
 
-        react_list = user_react_check_type_to_react_list(user_react_check_type)
+        react_list = user_react_check_types_to_react_list(user_react_check_types)
 
         fetch_user_ids = False 
         for react in rip.reacts:

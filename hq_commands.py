@@ -24,7 +24,7 @@ from hq_specialist import *
 import re
 import typing
 from typing import NamedTuple, List, Tuple
-from enum import Enum, auto
+from enum import Enum, auto, IntFlag
 import json
 import os
 import random
@@ -250,52 +250,36 @@ def choose_random_rips(rips: List[Rip], random_count: int, parsed_search_input: 
         result.append(valid_rips[i].message_id)
     return result
 
-class RoundupFilterType(Enum):
+#NOTE: (Ahamyk) These are flags that can be combined any which way (mostly)
+class RoundupFlag(IntFlag):
     NULL = auto()
+    HAS_REACT_TYPE = auto()
+    NOT_HAS_REACT_TYPE = auto()
+    HAS_ALL_REACT_TYPE = auto()
+    USER_REACT_CHECK_TYPE = auto()
+    NOT_USER_REACT_CHECK_TYPE = auto()
     MYPINS = auto()
-    MYFIXES = auto()
-    NOFIXES = auto()
-    MYFRESH = auto()
-    MYCHECKS = auto()
-    MYREJECTS = auto()
-    FRESH = auto()
-    SPICY = auto()
+    RANDOM = auto()
     SEARCH_TITLE = auto()
     SEARCH_AUTHOR = auto()
-    SEARCH_REACTION = auto()
-    HASREACT = auto()
-    NOTHASREACT = auto()
-    UNSENTFIXES = auto()
-    UNSENTTEAMFIXES = auto()
-    NOSENDBACK = auto()
+    SEARCH_REACT = auto()
     OVERDUE = auto()
-    RANDOM = auto()
-    RANDOM_AUTHOR = auto()
-    RANDOM_FRESH = auto()
-    RANDOM_MYFRESH = auto()
     SAVEQOC = auto()
-    MYSAVEQOC = auto()
     SORTBYLENGTH = auto()
 
 class RoundupDesc(NamedTuple):
-    roundup_filter_type: RoundupFilterType = RoundupFilterType.NULL
-    message_author_id: int = 0 
-    message_author_name: str = ""
-    user_id: int = 0 
-    conditional_string: str = ""
+    flags: int
+    has_react_types: list[ReactType] = []
+    not_has_react_types: list[ReactType] = []
+    has_all_react_types: list[ReactType] = []
+    user_react_check_types: list[UserReactCheckType] = [] 
+    not_user_react_check_types: list[UserReactCheckType] = [] 
     parsed_search_input: ParsedSearchInput = ParsedSearchInput([], [], False, "", "") 
-    react_name: str = "" 
-    reaction_type: ReactType = ReactType.NULL 
+    search_react_name: str = "" 
     not_found_message: str = ""
     parsed_random_input: ParsedRandomInput = ParsedRandomInput(0, ParsedSearchInput([], [], False, "", ""), "", False, "")
 
-#TODO: (Ahmayk) Integrating randomness is starting to make this a bit of a mess.
-# converting this to a combinatoric system might simplify things (submit an array of RoundupFilterTypes)
-async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContext):
-    """
-    Sends a roundup message of all rips that the roundup channel the message was sent in points to.
-    The roundup_filter_type describes how the roundup will be filtered.
-    """
+async def send_roundup(desc: RoundupDesc, command_context: CommandContext):
 
     channel_and_errors = await get_qoc_channel(command_context.channel)
     if len(channel_and_errors.error_strings):
@@ -314,32 +298,7 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
     ##TODO: (Ahmayk) fuzzy username input (ie typing "ahmayk" and matching to their username or display name)
     user_id = command_context.user.id
 
-    filter_type = roundup_desc.roundup_filter_type
-    parsed_search_input = roundup_desc.parsed_search_input
-    
-    is_random_type = False
-    if (
-        len(roundup_desc.parsed_random_input.parsed_search_input.search_keys)
-        or len(roundup_desc.parsed_random_input.parsed_search_input.regex_search_keys)
-    ):
-        if roundup_desc.roundup_filter_type == RoundupFilterType.RANDOM:
-            filter_type = RoundupFilterType.SEARCH_TITLE
-            is_random_type = True
-        if roundup_desc.roundup_filter_type == RoundupFilterType.RANDOM_AUTHOR:
-            filter_type = RoundupFilterType.SEARCH_AUTHOR
-            is_random_type = True
-
-    if roundup_desc.roundup_filter_type == RoundupFilterType.RANDOM_FRESH:
-            filter_type = RoundupFilterType.FRESH
-            is_random_type = True
-    if roundup_desc.roundup_filter_type == RoundupFilterType.RANDOM_MYFRESH:
-            filter_type = RoundupFilterType.MYFRESH
-            is_random_type = True
-
-    if is_random_type:
-        parsed_search_input = roundup_desc.parsed_random_input.parsed_search_input
-
-    if roundup_desc.roundup_filter_type == RoundupFilterType.SORTBYLENGTH:
+    if desc.flags & RoundupFlag.SORTBYLENGTH:
         errors = await sort_rips_by_duration(rips)
         error_strings.extend(errors)
 
@@ -348,91 +307,66 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
     totalSaveQocRips = 0
     for rip in rips:
 
-        vet_reacts = ""
+        is_valid = True 
 
-        is_valid = True
-        match (filter_type):
-            case RoundupFilterType.MYPINS:
-                is_valid = rip.message_author_id == roundup_desc.message_author_id
-            case RoundupFilterType.MYFIXES:
-                bool_and_errors = await user_is_react(UserReactCheckType.FIX, user_id, rip, command_context.channel)
-                is_valid = bool_and_errors.result 
-                error_strings.extend(bool_and_errors.error_strings)
-            case RoundupFilterType.NOFIXES:
-                is_valid = not rip_has_react(FIX_REACT_LIST, rip)
-            case RoundupFilterType.MYFRESH:
-                bool_and_errors = await user_is_react(UserReactCheckType.REVIEW, user_id, rip, command_context.channel)
-                is_valid = not bool_and_errors.result 
-                error_strings.extend(bool_and_errors.error_strings)
-                if is_random_type and parsed_search_input.is_not:
-                    is_valid = not is_valid
-            case RoundupFilterType.MYCHECKS:
-                bool_and_errors = await user_is_react(UserReactCheckType.CHECK, user_id, rip, command_context.channel)
-                is_valid = bool_and_errors.result 
-                error_strings.extend(bool_and_errors.error_strings)
-            case RoundupFilterType.MYREJECTS:
-                bool_and_errors = await user_is_react(UserReactCheckType.REJECT, user_id, rip, command_context.channel)
-                is_valid = bool_and_errors.result 
-                error_strings.extend(bool_and_errors.error_strings)
-            case RoundupFilterType.FRESH:
-                is_valid = not rip_has_react(REVIEW_REACT_LIST, rip)
-                if is_random_type and parsed_search_input.is_not:
-                    is_valid = not is_valid
-            case RoundupFilterType.SPICY:
-                is_valid = rip_has_react([ReactType.CHECK], rip) and \
-                            rip_has_react([ReactType.REJECT], rip)
-            case RoundupFilterType.SEARCH_TITLE:
-                is_valid = False 
-                title = get_rip_title(rip.text)
-                if title:
-                    is_valid = search_with_parsed_input(title, parsed_search_input) 
-            case RoundupFilterType.SEARCH_AUTHOR:
-                author = get_rip_author(rip.text, rip.message_author_name)
-                is_valid = search_with_parsed_input(author, parsed_search_input) 
-            case RoundupFilterType.HASREACT:
-                is_valid = rip_has_react([roundup_desc.reaction_type], rip)
-            case RoundupFilterType.NOTHASREACT:
-                is_valid = not rip_has_react([roundup_desc.reaction_type], rip)
-            case RoundupFilterType.UNSENTFIXES:
-                is_valid = rip_has_react([ReactType.FIX], rip) and not rip_has_react([ReactType.SENDBACK], rip)
-            case RoundupFilterType.UNSENTTEAMFIXES:
-                is_valid = False
-                is_unsent_fix = rip_has_react([ReactType.FIX], rip) and not rip_has_react([ReactType.SENDBACK], rip)
-                if is_unsent_fix:
-                    author = get_rip_author(rip.text, rip.message_author_name)
-                    is_valid = not search_with_parsed_input(author, parse_search_input(["email"])) 
-            case RoundupFilterType.NOSENDBACK:
-                is_valid = not rip_has_react([ReactType.SENDBACK], rip) 
-            case RoundupFilterType.SEARCH_REACTION:
-                is_valid = False 
-                for react in rip.reacts:
-                    if roundup_desc.react_name == react.name:
-                        is_valid = True 
-                        break
-            case RoundupFilterType.OVERDUE:
-                is_overdue = (datetime.now(timezone.utc) - rip.created_at) > timedelta(days=overdue_days)
-                is_valid = is_overdue
-            case RoundupFilterType.SAVEQOC:
-                is_valid = rip_is_one_check_away_from_accept(rip) 
-            case RoundupFilterType.MYSAVEQOC:
-                is_valid = False
-                if rip_is_one_check_away_from_accept(rip):
-                    totalSaveQocRips += 1
-                    bool_and_errors = await user_is_react(UserReactCheckType.CHECK, user_id, rip, command_context.channel)
-                    is_valid = not bool_and_errors.result 
+        if is_valid and desc.flags & RoundupFlag.HAS_REACT_TYPE:
+            is_valid &= rip_has_react(desc.has_react_types, rip)
+
+        if is_valid and desc.flags & RoundupFlag.NOT_HAS_REACT_TYPE:
+            is_valid &= not rip_has_react(desc.not_has_react_types, rip)
+
+        if is_valid and desc.flags & RoundupFlag.HAS_ALL_REACT_TYPE:
+            for react in desc.has_all_react_types:
+                is_valid &= rip_has_react([react], rip)
+
+        if is_valid and desc.flags & RoundupFlag.USER_REACT_CHECK_TYPE:
+            bool_and_errors = await user_is_react(desc.user_react_check_types, user_id, rip, command_context.channel)
+            is_valid &= bool_and_errors.result 
+            error_strings.extend(bool_and_errors.error_strings)
+
+        if is_valid and desc.flags & RoundupFlag.NOT_USER_REACT_CHECK_TYPE:
+            bool_and_errors = await user_is_react(desc.not_user_react_check_types, user_id, rip, command_context.channel)
+            is_valid &= not bool_and_errors.result 
+            error_strings.extend(bool_and_errors.error_strings)
+
+        if is_valid and desc.flags & RoundupFlag.MYPINS:
+            is_valid &= rip.message_author_id == user_id 
+
+        if is_valid and desc.flags & RoundupFlag.SEARCH_TITLE:
+            is_valid = False
+            title = get_rip_title(rip.text)
+            if title:
+                is_valid = search_with_parsed_input(title, desc.parsed_search_input) 
+
+        if is_valid and desc.flags & RoundupFlag.SEARCH_AUTHOR:
+            is_valid = False
+            author = get_rip_author(rip.text, rip.message_author_name)
+            if author:
+                is_valid = search_with_parsed_input(author, desc.parsed_search_input) 
+
+        if is_valid and desc.flags & RoundupFlag.SEARCH_REACT:
+            is_valid = False
+            for react in rip.reacts:
+                if desc.search_react_name == react.name:
+                    is_valid = True 
+                    break
+
+        if is_valid and desc.flags & RoundupFlag.OVERDUE:
+            is_valid &= (datetime.now(timezone.utc) - rip.created_at) > timedelta(days=overdue_days)
+
+        if is_valid and desc.flags & RoundupFlag.SAVEQOC:
+            is_valid = False
+            if rip_is_one_check_away_from_accept(rip):
+                is_valid = True
+                totalSaveQocRips += 1
 
         if is_valid:
             filtered_rips.append(rip)
 
-    if (
-        roundup_desc.roundup_filter_type == RoundupFilterType.RANDOM
-        or roundup_desc.roundup_filter_type == RoundupFilterType.RANDOM_AUTHOR
-        or roundup_desc.roundup_filter_type == RoundupFilterType.RANDOM_FRESH
-        or roundup_desc.roundup_filter_type == RoundupFilterType.RANDOM_MYFRESH
-    ):
+    if desc.flags & RoundupFlag.RANDOM:
         random.shuffle(filtered_rips)
         ##NOTE: (Ahmayk) consider default 0 as 1, clamp by rip size
-        clamped_count = min(max(1, roundup_desc.parsed_random_input.random_count), len(filtered_rips))
+        clamped_count = min(max(1, desc.parsed_random_input.random_count), len(filtered_rips))
         chosen_rips = []
         for i in range(clamped_count):
             chosen_rips.append(filtered_rips[i])
@@ -445,7 +379,7 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
         string_and_errors = await get_formatted_rip_length(rip.text, False, False, command_context.channel.guild)
         error_strings.extend(string_and_errors.error_strings)
 
-        result += format_rip(rip, string_and_errors.string, command_context.channel.guild, False, spec_overdue_days, overdue_days) + vet_reacts
+        result += format_rip(rip, string_and_errors.string, command_context.channel.guild, False, spec_overdue_days, overdue_days)
         result += readability_line 
         valid_count += 1
 
@@ -455,13 +389,12 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
         await send_if_errors("Roundup had errors", error_strings, command_context.channel)
     else:
         not_found_message = "No rips."
-        if len(roundup_desc.not_found_message):
-            not_found_message = roundup_desc.not_found_message
+        if len(desc.not_found_message):
+            not_found_message = desc.not_found_message
 
-        match (roundup_desc.roundup_filter_type):
-            case RoundupFilterType.MYSAVEQOC:
-                prefix = get_config('prefix')
-                not_found_message += f' Total `{prefix}saveqoc` rips: **{totalSaveQocRips}**'
+        if desc.flags & (RoundupFlag.SAVEQOC | RoundupFlag.USER_REACT_CHECK_TYPE):
+            prefix = get_config('prefix')
+            not_found_message += f' Total `{prefix}saveqoc` rips: **{totalSaveQocRips}**'
 
         await send_and_if_errors(not_found_message, "Roundup had errors.", error_strings, command_context.channel)
 
@@ -472,7 +405,7 @@ async def send_roundup(roundup_desc: RoundupDesc, command_context: CommandContex
     brief="Show all QoC rips",
 )
 async def roundup(args: list[str], command_context: CommandContext):
-    roundup_desc = RoundupDesc()
+    roundup_desc = RoundupDesc(flags = 0)
     await send_roundup(roundup_desc, command_context)
 
 
@@ -481,8 +414,8 @@ async def roundup(args: list[str], command_context: CommandContext):
     brief="Show QoC rips you've pinned :pushpin:",
 )
 async def mypins(args: list[str], command_context: CommandContext):
-    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.MYPINS,
-                               message_author_id = command_context.user.id, not_found_message = "No pins are yours.")
+    roundup_desc = RoundupDesc(flags = RoundupFlag.MYPINS,
+                               not_found_message = "No pins are yours.")
     await send_roundup(roundup_desc, command_context)
 
 
@@ -492,8 +425,9 @@ async def mypins(args: list[str], command_context: CommandContext):
     aliases=['mywrenches', 'myfix'],
 )
 async def myfixes(args: list[str], command_context: CommandContext):
-    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.MYFIXES, 
-                               user_id = command_context.user.id, not_found_message="No fixes are yours.")
+    roundup_desc = RoundupDesc(flags = RoundupFlag.USER_REACT_CHECK_TYPE, 
+                               user_react_check_types = [UserReactCheckType.FIX],
+                               not_found_message="No fixes are yours.")
     await send_roundup(roundup_desc, command_context)
 
 
@@ -502,8 +436,9 @@ async def myfixes(args: list[str], command_context: CommandContext):
     brief="Show QoC rips you've not reviewed",
 )
 async def myfresh(args: list[str], command_context: CommandContext):
-    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.MYFRESH, \
-                               user_id = command_context.user.id, not_found_message = "You have nothing to reveiw! Good work!")
+    roundup_desc = RoundupDesc(flags = RoundupFlag.NOT_USER_REACT_CHECK_TYPE,
+                               not_user_react_check_types = [UserReactCheckType.REVIEW],
+                               not_found_message = "You have nothing to reveiw! Good work!")
     await send_roundup(roundup_desc, command_context)
 
 
@@ -513,8 +448,9 @@ async def myfresh(args: list[str], command_context: CommandContext):
     aliases=["myapproved"]
 )
 async def mychecks(args: list[str], command_context: CommandContext):
-    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.MYCHECKS, \
-                               user_id = command_context.user.id, not_found_message = "No checks are yours.")
+    roundup_desc = RoundupDesc(flags = RoundupFlag.USER_REACT_CHECK_TYPE,
+                               user_react_check_types = [UserReactCheckType.CHECK],
+                               not_found_message = "No checks are yours.")
     await send_roundup(roundup_desc, command_context)
 
 @command(
@@ -523,8 +459,9 @@ async def mychecks(args: list[str], command_context: CommandContext):
     aliases=["myrejected"]
 )
 async def myrejects(args: list[str], command_context: CommandContext):
-    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.MYREJECTS, \
-                               user_id = command_context.user.id, not_found_message = "No rejects are yours.")
+    roundup_desc = RoundupDesc(flags = RoundupFlag.USER_REACT_CHECK_TYPE,
+                               user_react_check_types = [UserReactCheckType.REJECT],
+                               not_found_message = "No rejects are yours.")
     await send_roundup(roundup_desc, command_context)
 
 @command(
@@ -533,8 +470,9 @@ async def myrejects(args: list[str], command_context: CommandContext):
     brief="Show QoC rips nobody's reviewed",
 )
 async def fresh(args: list[str], command_context: CommandContext):
-    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.FRESH, \
-            not_found_message = "No fresh rips.")
+    roundup_desc = RoundupDesc(flags = RoundupFlag.NOT_HAS_REACT_TYPE,
+                               not_has_react_types = REVIEW_REACT_LIST,
+                               not_found_message = "No fresh rips.")
     await send_roundup(roundup_desc, command_context)
 
 
@@ -543,8 +481,9 @@ async def fresh(args: list[str], command_context: CommandContext):
     brief="Show QoC rips with at least one :check: and one :reject:",
 )
 async def spicy(args: list[str], command_context: CommandContext):
-    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.SPICY, \
-            not_found_message = "No spicy rips :(")
+    roundup_desc = RoundupDesc(flags = RoundupFlag.HAS_ALL_REACT_TYPE,
+                               has_all_react_types=[ReactType.CHECK, ReactType.REJECT],
+                               not_found_message = "No spicy rips :(")
     await send_roundup(roundup_desc, command_context)
 
 
@@ -554,8 +493,8 @@ async def spicy(args: list[str], command_context: CommandContext):
     desc="Shows rips that have two more checks than rejects, no fixes or alerts, and no stops unaccompanied by a goldencheck."
 )
 async def saveqoc(args: list[str], command_context: CommandContext):
-    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.SAVEQOC, \
-            not_found_message = "No rips can be approved with only one check. All is lost!")
+    roundup_desc = RoundupDesc(flags = RoundupFlag.SAVEQOC,
+                               not_found_message = "No rips can be approved with only one check. All is lost!")
     await send_roundup(roundup_desc, command_context)
 
 @command(
@@ -564,8 +503,9 @@ async def saveqoc(args: list[str], command_context: CommandContext):
     desc="Shows rips you havne't checked that have two more checks than rejects, no fixes or alerts, and no stops unaccompanied by a goldencheck."
 )
 async def mysaveqoc(args: list[str], command_context: CommandContext):
-    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.MYSAVEQOC, \
-            not_found_message = "You cannot approve any rips with only one check!")
+    roundup_desc = RoundupDesc(flags = RoundupFlag.SAVEQOC | RoundupFlag.USER_REACT_CHECK_TYPE,
+                               user_react_check_types= [UserReactCheckType.CHECK],
+                               not_found_message = "No rips can be approved with only one check. All is lost!")
     await send_roundup(roundup_desc, command_context)
 
 
@@ -586,9 +526,9 @@ async def search(args: list[str], command_context: CommandContext):
     if len(parsed_search_input.invalid_input_error_string):
         return await send(parsed_search_input.invalid_input_error_string, command_context.channel)
 
-    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.SEARCH_TITLE, \
-            parsed_search_input=parsed_search_input,\
-            not_found_message = f'No rips {parsed_search_input.containing_error_string} in title found.')
+    roundup_desc = RoundupDesc(flags = RoundupFlag.SEARCH_TITLE,
+                               parsed_search_input = parsed_search_input,
+                               not_found_message = f'No rips {parsed_search_input.containing_error_string} in title found.')
     await send_roundup(roundup_desc, command_context)
 
 
@@ -598,9 +538,9 @@ async def search(args: list[str], command_context: CommandContext):
     aliases=["email"]
 )
 async def emails(args: list[str], command_context: CommandContext):
-    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.SEARCH_AUTHOR, \
-            parsed_search_input = parse_search_input(["email"]),\
-            not_found_message = "No emails.")
+    roundup_desc = RoundupDesc(flags = RoundupFlag.SEARCH_AUTHOR,
+                               parsed_search_input = parse_search_input(["email"]),
+                               not_found_message = "No emails.")
     await send_roundup(roundup_desc, command_context)
 
 
@@ -622,9 +562,9 @@ async def events(args: list[str], command_context: CommandContext):
     if len(parsed_search_input.invalid_input_error_string):
         return await send(parsed_search_input.invalid_input_error_string, command_context.channel)
 
-    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.SEARCH_AUTHOR, \
-            parsed_search_input=parsed_search_input,\
-            not_found_message = f'No rips {parsed_search_input.containing_error_string} in author line.')
+    roundup_desc = RoundupDesc(flags = RoundupFlag.SEARCH_AUTHOR,
+                               parsed_search_input = parsed_search_input,
+                               not_found_message = f'No rips {parsed_search_input.containing_error_string} in author line.')
     await send_roundup(roundup_desc, command_context)
 
 
@@ -634,8 +574,9 @@ async def events(args: list[str], command_context: CommandContext):
     desc="does not consider :goldcheck: or check number requirements such as :7check:",
 )
 async def checks(args: list[str], command_context: CommandContext):
-    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.HASREACT, \
-                               reaction_type=ReactType.CHECK, not_found_message="No checks found.")
+    roundup_desc = RoundupDesc(flags = RoundupFlag.HAS_REACT_TYPE,
+                               has_react_types = [ReactType.CHECK],
+                               not_found_message="No checks found.")
     await send_roundup(roundup_desc, command_context)
 
 @command(
@@ -644,8 +585,9 @@ async def checks(args: list[str], command_context: CommandContext):
     aliases=["nocheck"]
 )
 async def nochecks(args: list[str], command_context: CommandContext):
-    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.NOTHASREACT, \
-                               reaction_type=ReactType.CHECK, not_found_message="No non-checked rips found.")
+    roundup_desc = RoundupDesc(flags = RoundupFlag.NOT_HAS_REACT_TYPE,
+                               not_has_react_types = [ReactType.CHECK],
+                               not_found_message="No non-checked rips found.")
     await send_roundup(roundup_desc, command_context)
 
 @command(
@@ -653,8 +595,9 @@ async def nochecks(args: list[str], command_context: CommandContext):
     brief="Show QoC rips with :reject:",
 )
 async def rejects(args: list[str], command_context: CommandContext):
-    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.HASREACT, \
-                               reaction_type=ReactType.REJECT, not_found_message="No rejected rips found.")
+    roundup_desc = RoundupDesc(flags = RoundupFlag.HAS_REACT_TYPE,
+                               has_react_types = [ReactType.REJECT],
+                               not_found_message="No rejected rips found.")
     await send_roundup(roundup_desc, command_context)
 
 @command(
@@ -663,8 +606,9 @@ async def rejects(args: list[str], command_context: CommandContext):
     aliases=["noreject"]
 )
 async def norejects(args: list[str], command_context: CommandContext):
-    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.NOTHASREACT, \
-                               reaction_type=ReactType.REJECT, not_found_message="No non-rejected rips found.")
+    roundup_desc = RoundupDesc(flags = RoundupFlag.NOT_HAS_REACT_TYPE,
+                               not_has_react_types = [ReactType.REJECT],
+                               not_found_message="No non-rejected rips found.")
     await send_roundup(roundup_desc, command_context)
 
 @command(
@@ -673,8 +617,9 @@ async def norejects(args: list[str], command_context: CommandContext):
     aliases=['wrenches', 'fix', 'wrench', 'fixes']
 )
 async def fixes(args: list[str], command_context: CommandContext):
-    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.HASREACT, \
-                               reaction_type=ReactType.FIX, not_found_message="No wrenches found.")
+    roundup_desc = RoundupDesc(flags = RoundupFlag.HAS_REACT_TYPE,
+                               has_react_types = [ReactType.FIX],
+                               not_found_message="No wrenches found.")
     await send_roundup(roundup_desc, command_context)
 
 @command(
@@ -683,8 +628,9 @@ async def fixes(args: list[str], command_context: CommandContext):
     aliases=["nowrenches", "nofix", "nowrench"]
 )
 async def nofixes(args: list[str], command_context: CommandContext):
-    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.NOTHASREACT, \
-                               reaction_type=ReactType.FIX, not_found_message="No non-fix rips found.")
+    roundup_desc = RoundupDesc(flags = RoundupFlag.NOT_HAS_REACT_TYPE,
+                               not_has_react_types = [ReactType.FIX],
+                               not_found_message = "No non-fix rips found.")
     await send_roundup(roundup_desc, command_context)
 
 
@@ -694,7 +640,8 @@ async def nofixes(args: list[str], command_context: CommandContext):
     aliases=['unsentwrenches']
 )
 async def unsentfixes(args: list[str], command_context: CommandContext):
-    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.UNSENTFIXES, \
+    roundup_desc = RoundupDesc(flags = RoundupFlag.HAS_REACT_TYPE | RoundupFlag.NOT_HAS_REACT_TYPE,
+                               has_react_types = [ReactType.FIX], not_has_react_types = [ReactType.SENDBACK],
                                not_found_message="No unsent fixes found. Good job!")
     await send_roundup(roundup_desc, command_context)
 
@@ -704,7 +651,9 @@ async def unsentfixes(args: list[str], command_context: CommandContext):
     aliases=['unsentteamwrenches', 'unsentfixesteam', 'unsentwrenchesteam']
 )
 async def unsentteamfixes(args: list[str], command_context: CommandContext):
-    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.UNSENTTEAMFIXES, \
+    roundup_desc = RoundupDesc(flags = RoundupFlag.HAS_REACT_TYPE | RoundupFlag.NOT_HAS_REACT_TYPE | RoundupFlag.SEARCH_AUTHOR,
+                               has_react_types = [ReactType.FIX], not_has_react_types = [ReactType.SENDBACK],
+                               parsed_search_input = parse_search_input(["NOT", "email"]),
                                not_found_message="No non-email unsent fixes found. Good job, team!")
     await send_roundup(roundup_desc, command_context)
 
@@ -714,7 +663,8 @@ async def unsentteamfixes(args: list[str], command_context: CommandContext):
     aliases=['unsentwrenches']
 )
 async def nosendback(args: list[str], command_context: CommandContext):
-    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.NOSENDBACK, \
+    roundup_desc = RoundupDesc(flags = RoundupFlag.NOT_HAS_REACT_TYPE,
+                               not_has_react_types = [ReactType.SENDBACK],
                                not_found_message="No non-senback rips. Time to wait?")
     await send_roundup(roundup_desc, command_context)
 
@@ -723,8 +673,9 @@ async def nosendback(args: list[str], command_context: CommandContext):
     brief="Show QoC rips with :stop:",
 )
 async def stops(args: list[str], command_context: CommandContext):
-    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.HASREACT, \
-                               reaction_type=ReactType.STOP, not_found_message="No octogons found.")
+    roundup_desc = RoundupDesc(flags = RoundupFlag.HAS_REACT_TYPE,
+                               has_react_types = [ReactType.STOP],
+                               not_found_message="No octogons found.")
     await send_roundup(roundup_desc, command_context)
 
 @command(
@@ -741,8 +692,9 @@ async def hasreact(args: list[str], command_context: CommandContext):
 
     react_input = emoji_to_react_name_if_emoji(args[0])
 
-    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.SEARCH_REACTION, \
-                               react_name=react_input, not_found_message=f'No rips with {args[0]} found.')
+    roundup_desc = RoundupDesc(flags = RoundupFlag.SEARCH_REACT,
+                               search_react_name = react_input,
+                               not_found_message=f'No rips with {args[0]} found.')
     await send_roundup(roundup_desc, command_context)
 
 @command(
@@ -751,9 +703,9 @@ async def hasreact(args: list[str], command_context: CommandContext):
     aliases=["jingle"]
 )
 async def jingles(args: list[str], command_context: CommandContext):
-    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.HASREACT, \
-                               reaction_type=ReactType.JINGLE,
-                               not_found_message=f'No jingle rips found.')
+    roundup_desc = RoundupDesc(flags = RoundupFlag.HAS_REACT_TYPE,
+                               has_react_types = [ReactType.JINGLE],
+                               not_found_message = f'No jingle rips found.')
     await send_roundup(roundup_desc, command_context)
 
 
@@ -763,7 +715,7 @@ async def jingles(args: list[str], command_context: CommandContext):
     aliases=['sortlength', 'sortripsbylength']
 )
 async def sortbylength(args: list[str], command_context: CommandContext):
-    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.SORTBYLENGTH, \
+    roundup_desc = RoundupDesc(flags = RoundupFlag.SORTBYLENGTH,
                                not_found_message=f'Length of all QoC rips: **Zero Seconds!**')
     await send_roundup(roundup_desc, command_context)
 
@@ -773,27 +725,31 @@ async def sortbylength(args: list[str], command_context: CommandContext):
     brief=f'Show QoC rips pinned over %overdue_days% days'
 )
 async def overdue(args: list[str], command_context: CommandContext):
-    roundup_desc = RoundupDesc(roundup_filter_type = RoundupFilterType.OVERDUE, not_found_message="No overdue rips.")
+    roundup_desc = RoundupDesc(flags = RoundupFlag.OVERDUE,
+                               not_found_message="No overdue rips.")
     await send_roundup(roundup_desc, command_context)
 
 
-async def roundup_random(roundup_filter_type: RoundupFilterType, args: list[str], command_context: CommandContext):
-    search_line_string = "title"
-    if roundup_filter_type == RoundupFilterType.RANDOM_AUTHOR:
+
+async def parse_random_input_or_send_error(args: list[str], flagSearchType: RoundupFlag,
+                                        command_context: CommandContext) -> ParsedRandomInput | None:
+    search_line_string = "???"
+    if flagSearchType & RoundupFlag.SEARCH_TITLE:
+        search_line_string = "title"
+    if flagSearchType & RoundupFlag.SEARCH_AUTHOR:
         search_line_string = "author line"
 
-    parsed_random_input = await parse_random_input(args, search_line_string)
-    if len(parsed_random_input.invalid_input_error_string):
-        if parsed_random_input.invalid_input_error_string_is_embed:
-            return await send_embed(parsed_random_input.invalid_input_error_string, command_context.channel, EmbedDesc())
+    result = await parse_random_input(args, search_line_string)
+    if len(result.invalid_input_error_string):
+        if result.invalid_input_error_string_is_embed:
+            await send_embed(result.invalid_input_error_string, command_context.channel, EmbedDesc())
+            return None
         else:
-            return await send(parsed_random_input.invalid_input_error_string, command_context.channel)
+            await send(result.invalid_input_error_string, command_context.channel)
+            return None
 
-    roundup_desc = RoundupDesc(roundup_filter_type = roundup_filter_type, \
-                               parsed_random_input=parsed_random_input, \
-                               not_found_message=parsed_random_input.not_found_error_string)
-    await send_roundup(roundup_desc, command_context)
-
+    return result
+    
 
 @command(
     command_type=CommandType.QOC,
@@ -802,7 +758,18 @@ async def roundup_random(roundup_filter_type: RoundupFilterType, args: list[str]
     aliases=['random', 'randomtitle', 'randomqoc', 'random_qoc', 'lucky', 'letsgogambling!']
 )
 async def randompull(args: list[str], command_context: CommandContext):
-    await roundup_random(RoundupFilterType.RANDOM, args, command_context)
+    parsed_random_input = await parse_random_input_or_send_error(args, RoundupFlag.SEARCH_TITLE, command_context)
+    if not parsed_random_input: return
+
+    flags = RoundupFlag.RANDOM
+    if len(parsed_random_input.parsed_search_input.search_keys):
+        flags |= RoundupFlag.SEARCH_TITLE
+
+    roundup_desc = RoundupDesc(flags = flags,
+                               parsed_search_input = parsed_random_input.parsed_search_input,
+                               parsed_random_input = parsed_random_input,
+                               not_found_message = parsed_random_input.not_found_error_string)
+    await send_roundup(roundup_desc, command_context)
 
 
 @command(
@@ -812,7 +779,18 @@ async def randompull(args: list[str], command_context: CommandContext):
     aliases=['randomevent', 'randomauthor']
 )
 async def random_event(args: list[str], command_context: CommandContext):
-    await roundup_random(RoundupFilterType.RANDOM_AUTHOR, args, command_context)
+    parsed_random_input = await parse_random_input_or_send_error(args, RoundupFlag.SEARCH_AUTHOR, command_context)
+    if not parsed_random_input: return
+
+    flags = RoundupFlag.RANDOM
+    if len(parsed_random_input.parsed_search_input.search_keys):
+        flags |= RoundupFlag.SEARCH_AUTHOR
+
+    roundup_desc = RoundupDesc(flags = flags,
+                               parsed_search_input = parsed_random_input.parsed_search_input,
+                               parsed_random_input = parsed_random_input,
+                               not_found_message = parsed_random_input.not_found_error_string)
+    await send_roundup(roundup_desc, command_context)
 
 
 @command(
@@ -822,7 +800,22 @@ async def random_event(args: list[str], command_context: CommandContext):
     aliases=['randomfresh', 'freshrandom', 'fresh_random']
 )
 async def random_fresh(args: list[str], command_context: CommandContext):
-    await roundup_random(RoundupFilterType.RANDOM_FRESH, args, command_context)
+    parsed_random_input = await parse_random_input_or_send_error(args, RoundupFlag.SEARCH_TITLE, command_context)
+    if not parsed_random_input: return
+
+    flags = RoundupFlag.RANDOM | RoundupFlag.NOT_HAS_REACT_TYPE
+    has_react_types = [] 
+    not_has_react_types = REVIEW_REACT_LIST 
+    if parsed_random_input.parsed_search_input.is_not:
+        flags = RoundupFlag.RANDOM | RoundupFlag.HAS_REACT_TYPE
+        has_react_types = REVIEW_REACT_LIST 
+        not_has_react_types = [] 
+
+    roundup_desc = RoundupDesc(flags = flags, 
+                               has_react_types = has_react_types, not_has_react_types = not_has_react_types,
+                               parsed_random_input = parsed_random_input,
+                               not_found_message = "Nope!")
+    await send_roundup(roundup_desc, command_context)
 
 
 @command(
@@ -832,7 +825,23 @@ async def random_fresh(args: list[str], command_context: CommandContext):
     aliases=['randommyfresh', 'myfreshrandom', 'myfresh_random', 'grind', 'oknext', 'potato', 'iamaslavetothesystem']
 )
 async def random_myfresh(args: list[str], command_context: CommandContext):
-    await roundup_random(RoundupFilterType.RANDOM_MYFRESH, args, command_context)
+    parsed_random_input = await parse_random_input_or_send_error(args, RoundupFlag.SEARCH_TITLE, command_context)
+    if not parsed_random_input: return
+
+    flags = RoundupFlag.RANDOM | RoundupFlag.NOT_USER_REACT_CHECK_TYPE
+    user_react_check_types = [] 
+    not_user_react_check_types = [UserReactCheckType.REVIEW]
+    if parsed_random_input.parsed_search_input.is_not:
+        flags = RoundupFlag.RANDOM | RoundupFlag.USER_REACT_CHECK_TYPE
+        user_react_check_types = [UserReactCheckType.REVIEW]
+        not_user_react_check_types = [] 
+
+    roundup_desc = RoundupDesc(flags = flags, 
+                               user_react_check_types = user_react_check_types, 
+                               not_user_react_check_types = not_user_react_check_types, 
+                               parsed_random_input = parsed_random_input,
+                               not_found_message = "Nope!")
+    await send_roundup(roundup_desc, command_context)
 
 
 async def current_or_qoc_channel(channel: TextChannel | Thread) -> ChannelAndErrors:
