@@ -44,6 +44,7 @@ class ReactType(Enum):
     FIX = auto()
     REJECT = auto()
     STOP = auto()
+    STOPSKIP = auto()
     ALERT = auto()
     QOC = auto()
     METADATA = auto()
@@ -69,6 +70,7 @@ REACT_INFOS: dict[ReactType, ReactInfo] = {
     ReactType.FIX: ReactInfo([DEFAULT_FIX], ["fix", "wrench"]),
     ReactType.REJECT: ReactInfo([DEFAULT_REJECT], ["reject"]),
     ReactType.STOP: ReactInfo([DEFAULT_STOP], ["stop", "octagonal"]),
+    ReactType.STOPSKIP: ReactInfo([""], ["stopskip"]),
     ReactType.ALERT: ReactInfo([DEFAULT_ALERT], ["alert"]),
     ReactType.QOC: ReactInfo([DEFAULT_QOC], ["qoc"]),
     ReactType.METADATA: ReactInfo([DEFAULT_METADATA], ["metadata"]),
@@ -190,7 +192,9 @@ def rip_is_one_check_away_from_accept(rip) -> bool:
     #to standardize that in bot tho
     checks_count = rip_react_count([ReactType.CHECK], rip)
     rejects_count = rip_react_count([ReactType.REJECT], rip)
-    has_valid_stop = rip_has_react([ReactType.STOP], rip) and not rip_has_react([ReactType.GOLDCHECK], rip)
+    has_valid_stop = rip_has_react([ReactType.STOP], rip) \
+        and not rip_has_react([ReactType.GOLDCHECK], rip) \
+        and not rip_has_react([ReactType.STOPSKIP], rip)
     is_valid = checks_count - rejects_count == 2 \
         and not rip_has_react(FIX_REACT_LIST, rip) \
         and not has_valid_stop
