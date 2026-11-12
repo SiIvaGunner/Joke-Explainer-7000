@@ -2408,7 +2408,7 @@ async def disable_metadata(args: list[str], command_context: CommandContext):
 )
 async def enable_pinlimit_must_die(args: list[str], command_context: CommandContext):
     set_channel_pinlimit_mode(command_context.channel.id, True)
-    await send("Soft pin limit is now hard pin limit. Good luck.", command_context.channel)
+    await send("Soft pin limit is now hard pin limit. Now I get to be annoying! :)", command_context.channel)
 
 @command(
     command_type=CommandType.MANAGEMENT,
@@ -2416,7 +2416,7 @@ async def enable_pinlimit_must_die(args: list[str], command_context: CommandCont
 )
 async def disable_pinlimit_must_die(args: list[str], command_context: CommandContext):
     set_channel_pinlimit_mode(command_context.channel.id, False)
-    await send("Back to normal.", command_context.channel)
+    await send("Pin limit is off. Let in the flood.", command_context.channel)
 
 
 # ============ Helper/test commands ============== #
