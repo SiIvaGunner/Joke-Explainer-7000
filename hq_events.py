@@ -129,6 +129,8 @@ async def on_ready():
     ##NOTE: (Ahmayk) reminder system disabled for now
     # post_reminders.start()
 
+    rip_cache_queue_processing.start()
+
     #NOTE: (Ahmayk) fetch sheet data on init to initialize credentials info and make sure that works
     credentials_and_errors = await refresh_credentials()
     if credentials_and_errors.credentials:

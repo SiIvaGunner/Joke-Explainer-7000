@@ -1,7 +1,10 @@
+
 from discord import Message, Thread, TextChannel
+from discord.ext import tasks
 
 from typing import NamedTuple, List
 from enum import Enum, auto
+from queue import SimpleQueue 
 
 from contextlib import asynccontextmanager
 import asyncio
@@ -13,18 +16,70 @@ from hq_react import *
 from hq_strings import *
 from hq_database import *
 
+
+##NOTE: (Ahmayk) Reading from RIP_CACHE and USER_REACT_CACHE is fine from anywhere
+## However WRITING to it directly is only allowed in queue processing
+## To modify these caches, queue a RipCacheCommand to RIP_CACHE_COMMAND_QUEUE.
+## There's no way to enforce this in python as far as I know, so just don't 
+# write to the cache directly please outside where I've labeled
 RIP_CACHE: dict[int, dict[int, Rip]] = {}
 USER_REACT_CACHE: dict[int, dict[React, List[int]]] = {}
 
+class RipCacheCommandType(Enum):
+    NULL = 0,
+    CACHE_RIP = auto(),
+
+class RipCacheCommand(NamedTuple):
+    type: RipCacheCommandType
+    rip: Rip
+
+
+RIP_CACHE_COMMAND_QUEUE: SimpleQueue[RipCacheCommand] = SimpleQueue()
+
+### ----- Can write to RIP_CACHE and USER_REACT_CACHE START -------
+
+##NOTE (Ahmayk) This is fine to call outside of the queue 
+# because we're not interfering with any other data in the dictionary (persumably)
 def init_channel_cache(channel_id: int):
     if channel_id not in RIP_CACHE:
         RIP_CACHE[channel_id] = {}
+    pass
+
+@tasks.loop(seconds=1)
+async def rip_cache_queue_processing():
+
+    while RIP_CACHE_COMMAND_QUEUE.qsize():
+
+        command = RIP_CACHE_COMMAND_QUEUE.get()
+        rip = command.rip
+        init_channel_cache(rip.channel_id)
+
+        match(command.type):
+            case RipCacheCommandType.CACHE_RIP: 
+                RIP_CACHE[rip.channel_id][rip.message_id] = rip
+
+
+
+### ----- Can write to RIP_CACHE and USER_REACT_CACHE END -------
+
+
+def init_rip(message) -> Rip:
+
+    reacts: List[React] = []
+
+    for reaction in message.reactions:
+        react = init_react(reaction)
+        for i in range(0, reaction.count):
+            reacts.append(react)
+
+    return Rip(message.content, message.id, message.channel.id, message.guild.id, message.author.id, \
+            str(message.author), reacts, message.created_at)
 
 
 def cache_rip_in_message(message: Message):
     rip = init_rip(message)
-    init_channel_cache(message.channel.id)
-    RIP_CACHE[message.channel.id][message.id] = rip
+    command = RipCacheCommand(RipCacheCommandType.CACHE_RIP, rip)
+    RIP_CACHE_COMMAND_QUEUE.put(command)
     return rip
 
 
@@ -137,18 +192,6 @@ def get_channel_info(channel: TextChannel | Thread) -> ChannelInfo:
     is_cache_qoc = channel_is_types(channel, ['QOC'])
     
     return ChannelInfo(rip_fetch_type, is_cache_qoc)
-
-def init_rip(message) -> Rip:
-
-    reacts: List[React] = []
-
-    for reaction in message.reactions:
-        react = init_react(reaction)
-        for i in range(0, reaction.count):
-            reacts.append(react)
-
-    return Rip(message.content, message.id, message.channel.id, message.guild.id, message.author.id, \
-            str(message.author), reacts, message.created_at)
 
 
 def react_needs_user_cache(react: React) -> bool:
