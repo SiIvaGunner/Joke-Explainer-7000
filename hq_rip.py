@@ -30,6 +30,10 @@ class RipCacheCommandType(Enum):
     CACHE_RIP = auto(),
     CACHE_USER_REACT_DATA = auto(),
     REMOVE_RIP = auto(),
+    ADD_REACT = auto(),
+    REMOVE_REACT = auto(),
+    CLEAR_REACT = auto(),
+    CLEAR_REACT_ALL = auto(),
 
 class RipCacheCommand(NamedTuple):
     type: RipCacheCommandType
@@ -37,6 +41,9 @@ class RipCacheCommand(NamedTuple):
     message_id: int
     rip_to_cache: Rip = Rip("", 0, 0, 0, 0, "", [], datetime.min)
     user_react_data_to_cache: dict[React, List[int]] = {}
+    emoji: discord.PartialEmoji = discord.PartialEmoji(name="null")
+    emoji_user_id: int = 0
+    
 
 
 RIP_CACHE_COMMAND_QUEUE: SimpleQueue[RipCacheCommand] = SimpleQueue()
@@ -50,31 +57,169 @@ def init_channel_cache(channel_id: int):
         RIP_CACHE[channel_id] = {}
     pass
 
+
+async def remove_reaction_from_cache(channel_id: int, message_id: int, emoji: discord.PartialEmoji, user_id: int | None, remove_all: bool):
+    try:
+        verbose_log = ""
+        VERBOSE_RECT_LOGGING = False
+        react_type = react_name_to_react_type(emoji.name)
+        if react_type in REVIEW_REACT_LIST or react_type in FIX_REACT_LIST:
+            VERBOSE_RECT_LOGGING = True
+
+        if VERBOSE_RECT_LOGGING:
+            verbose_log += f'\n- :x: {emoji} react removal heard on message id {message_id}'
+
+        in_rip_cache = channel_id in RIP_CACHE and message_id in RIP_CACHE[channel_id]
+        in_user_react_cache = message_id in USER_REACT_CACHE
+        if in_rip_cache or in_user_react_cache:
+
+            async with lock_message(message_id, [], None):
+
+                react = React(emoji.id or 0, emoji.name, str(emoji))
+
+                if in_rip_cache:
+
+                    if VERBOSE_RECT_LOGGING:
+                        verbose_log += f'\n- is in rip cache. Removing from rip cache'
+
+                    rip = RIP_CACHE[channel_id][message_id]
+                    for cached_react in rip.reacts:
+                        if cached_react == react:
+                            rip.reacts.remove(cached_react)
+                            if not remove_all:
+                                break
+
+                if in_user_react_cache: 
+
+                    if VERBOSE_RECT_LOGGING:
+                        verbose_log += f'\n- is in user react cache. Removing from user react cache'
+
+                    if user_id and \
+                        react in USER_REACT_CACHE[message_id] and \
+                        user_id in USER_REACT_CACHE[message_id][react]:
+                        USER_REACT_CACHE[message_id][react].remove(user_id)
+                    
+                    if remove_all or not len(USER_REACT_CACHE[message_id]):
+                        USER_REACT_CACHE.pop(message_id)
+
+        if VERBOSE_RECT_LOGGING and len(verbose_log):
+            await write_log(verbose_log)
+    except Exception as error:
+        await send_crash(f'ERROR on raw reaction remove:', error, None)
+
+
 @tasks.loop(seconds=1)
 async def rip_cache_queue_processing() -> None:
+    try:
 
-    while RIP_CACHE_COMMAND_QUEUE.qsize():
+        while RIP_CACHE_COMMAND_QUEUE.qsize():
 
-        command = RIP_CACHE_COMMAND_QUEUE.get()
-        init_channel_cache(command.channel_id)
+            command = RIP_CACHE_COMMAND_QUEUE.get()
+            init_channel_cache(command.channel_id)
 
-        match(command.type):
-            case RipCacheCommandType.CACHE_RIP: 
-                rip = command.rip_to_cache
-                RIP_CACHE[rip.channel_id][rip.message_id] = rip
+            match(command.type):
+                case RipCacheCommandType.CACHE_RIP: 
+                    rip = command.rip_to_cache
+                    RIP_CACHE[rip.channel_id][rip.message_id] = rip
 
-            case RipCacheCommandType.CACHE_USER_REACT_DATA: 
-                for react, user_ids in command.user_react_data_to_cache.items():
-                    USER_REACT_CACHE[command.message_id][react] = []
-                    for user_id in user_ids:
-                        USER_REACT_CACHE[command.message_id][react].append(user_id) 
+                case RipCacheCommandType.CACHE_USER_REACT_DATA: 
+                    for react, user_ids in command.user_react_data_to_cache.items():
+                        USER_REACT_CACHE[command.message_id][react] = []
+                        for user_id in user_ids:
+                            USER_REACT_CACHE[command.message_id][react].append(user_id) 
 
-            case RipCacheCommandType.REMOVE_RIP: 
-                if command.channel_id in RIP_CACHE and command.message_id in RIP_CACHE[command.channel_id]: 
-                    RIP_CACHE[command.channel_id].pop(command.message_id)
-                if command.message_id in USER_REACT_CACHE:
-                    USER_REACT_CACHE.pop(command.message_id)
+                case RipCacheCommandType.REMOVE_RIP: 
+                    if command.channel_id in RIP_CACHE and command.message_id in RIP_CACHE[command.channel_id]: 
+                        RIP_CACHE[command.channel_id].pop(command.message_id)
+                    if command.message_id in USER_REACT_CACHE:
+                        USER_REACT_CACHE.pop(command.message_id)
 
+                case RipCacheCommandType.ADD_REACT: 
+
+                    error_strings: list[str] = []
+
+                    VERBOSE_RECT_LOGGING = False
+                    verbose_log = ""
+
+                    react_type = react_name_to_react_type(command.emoji.name)
+                    if react_type in REVIEW_REACT_LIST or react_type in FIX_REACT_LIST:
+                        VERBOSE_RECT_LOGGING = True
+
+                    if VERBOSE_RECT_LOGGING:
+                        verbose_log += f'\n- {command.emoji} react heard on message id {command.message_id}'
+
+                    channel_and_errors = await discord_find_channel(command.channel_id)
+                    channel = channel_and_errors.channel
+                    if channel:
+
+                        if VERBOSE_RECT_LOGGING:
+                            verbose_log += f'\n- Channel found: {channel.jump_url}'
+
+                        is_qoc_channel = channel_is_types(channel, ['QOC'])
+                        is_suborqueue_channel = channel_is_types(channel, ['QUEUE', 'SUBS', 'SUBS_THREAD', 'SUBS_PIN'])
+
+                        if is_qoc_channel or is_suborqueue_channel:
+                            async with lock_message(command.message_id, error_strings, None):
+
+                                if VERBOSE_RECT_LOGGING:
+                                    verbose_log += f'\n- Channel is valid rip channel'
+
+                                message_and_errors = await discord_fetch_message(command.message_id, channel)
+                                message = message_and_errors.message
+                                if message:
+                                    if VERBOSE_RECT_LOGGING:
+                                        verbose_log += f'\n- Message fetched! Link: {message.jump_url}'
+
+                                    if is_message_rip(message):
+                                        async with lock_channel(command.channel_id, error_strings, None):
+                                            if VERBOSE_RECT_LOGGING:
+                                                verbose_log += f'\n- Message is rip'
+
+                                            rip = init_rip(message)
+                                            RIP_CACHE[rip.channel_id][rip.message_id] = rip
+                                            if is_qoc_channel:
+
+                                                if VERBOSE_RECT_LOGGING:
+                                                    verbose_log += f'\n- Message is QOC! Adding to user react cache'
+
+                                                if rip.message_id not in USER_REACT_CACHE: 
+                                                    USER_REACT_CACHE[rip.message_id] = {} 
+
+                                                react = React(command.emoji.id or 0, command.emoji.name, str(command.emoji))
+                                                if react not in USER_REACT_CACHE[rip.message_id]: 
+                                                    USER_REACT_CACHE[rip.message_id][react] = [] 
+
+                                                USER_REACT_CACHE[rip.message_id][react].append(command.emoji_user_id) 
+                                else:
+                                    log_channel = await get_log_channel()
+                                    await send_and_if_errors(f'ERROR on raw reaction add: Failed to fetch message with id: {command.message_id}', "", message_and_errors.error_strings, log_channel)
+
+                    else:
+                        log_channel = await get_log_channel()
+                        await send_and_if_errors(f'ERROR on raw reaction add: Failed to fetch channel with id: {command.channel_id}', "", channel_and_errors.error_strings, log_channel)
+
+                    if VERBOSE_RECT_LOGGING and len(verbose_log):
+                        await write_log(verbose_log)
+
+                case RipCacheCommandType.REMOVE_REACT: 
+                    await remove_reaction_from_cache(command.channel_id, command.message_id, command.emoji, command.emoji_user_id, False)
+
+                case RipCacheCommandType.CLEAR_REACT: 
+                    await remove_reaction_from_cache(command.channel_id, command.message_id, command.emoji, None, True)
+
+                case RipCacheCommandType.CLEAR_REACT_ALL: 
+                    in_rip_cache = command.channel_id in RIP_CACHE and command.message_id in RIP_CACHE[command.channel_id]
+                    in_user_react_cache = command.message_id in USER_REACT_CACHE
+                    if in_rip_cache or in_user_react_cache:
+                        async with lock_message(command.message_id, [], None):
+                            if in_rip_cache: 
+                                RIP_CACHE[command.channel_id][command.message_id].reacts.clear()
+                            if in_user_react_cache: 
+                                USER_REACT_CACHE.pop(command.message_id)
+
+
+    except Exception as error:
+        await send_crash(f'ERROR on rip_cache_queue_processing:', error, None)
 
 ### ----- Can write to RIP_CACHE and USER_REACT_CACHE END -------
 
