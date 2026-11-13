@@ -34,6 +34,7 @@ class RipCacheCommandType(Enum):
     REMOVE_REACT = auto(),
     CLEAR_REACT = auto(),
     CLEAR_REACT_ALL = auto(),
+    EDIT_TEXT = auto(),
 
 class RipCacheCommand(NamedTuple):
     type: RipCacheCommandType
@@ -43,7 +44,7 @@ class RipCacheCommand(NamedTuple):
     user_react_data_to_cache: dict[React, List[int]] = {}
     emoji: discord.PartialEmoji = discord.PartialEmoji(name="null")
     emoji_user_id: int = 0
-    
+    rip_text: str = ""
 
 
 RIP_CACHE_COMMAND_QUEUE: SimpleQueue[RipCacheCommand] = SimpleQueue()
@@ -216,6 +217,11 @@ async def rip_cache_queue_processing() -> None:
                                 RIP_CACHE[command.channel_id][command.message_id].reacts.clear()
                             if in_user_react_cache: 
                                 USER_REACT_CACHE.pop(command.message_id)
+
+                case RipCacheCommandType.EDIT_TEXT: 
+                    rip = RIP_CACHE[command.channel_id][command.message_id]
+                    rip = rip._replace(text = command.rip_text)
+                    RIP_CACHE[command.channel_id][command.message_id] = rip
 
 
     except Exception as error:

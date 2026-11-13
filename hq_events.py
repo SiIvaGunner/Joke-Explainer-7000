@@ -376,22 +376,24 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
     try:
         if payload.channel_id in RIP_CACHE and payload.message_id in RIP_CACHE[payload.channel_id]: 
             error_strings: list[str] = []
-            async with lock_message(payload.message_id, error_strings, None):
-                rip = RIP_CACHE[payload.channel_id][payload.message_id]
-                old_text = rip.text
-                rip = rip._replace(text = payload.message.content)
-                RIP_CACHE[payload.channel_id][payload.message_id] = rip
-            if len(error_strings):
-                await send_if_errors("Error on updating edited rip:", error_strings, payload.message.channel)
+            rip = RIP_CACHE[payload.channel_id][payload.message_id]
+            old_text = rip.text
+            if old_text != payload.message.content:
+                async with lock_message(payload.message_id, error_strings, None):
+                    command = RipCacheCommand(RipCacheCommandType.EDIT_TEXT, payload.channel_id, payload.message_id,
+                                            rip_text=payload.message.content)
+                    RIP_CACHE_COMMAND_QUEUE.put(command)
+                if len(error_strings):
+                    await send_if_errors("Error on updating edited rip:", error_strings, payload.message.channel)
 
-            if channel_is_types(payload.message.channel, ['QOC']) and payload.message.pinned:
-                async with payload.message.channel.typing():
-                    try:
-                        desc = VetRipDesc(message=payload.message, past_rip_message_content=old_text)
-                        vet_report = await vet_rip_or_url(payload.message.content, desc, payload.message.guild)
-                        await send_if_errors("Errors while vetting:", vet_report.error_strings, payload.message.channel)
-                    except Exception as error:
-                        await send_crash(f'ERROR on rip vet after pin:', error, payload.message.channel)
+                if channel_is_types(payload.message.channel, ['QOC']) and payload.message.pinned:
+                    async with payload.message.channel.typing():
+                        try:
+                            desc = VetRipDesc(message=payload.message, past_rip_message_content=old_text)
+                            vet_report = await vet_rip_or_url(payload.message.content, desc, payload.message.guild)
+                            await send_if_errors("Errors while vetting:", vet_report.error_strings, payload.message.channel)
+                        except Exception as error:
+                            await send_crash(f'ERROR on rip vet after pin:', error, payload.message.channel)
     except Exception as error:
         await send_crash(f'ERROR on raw message edit:', error, None)
 
