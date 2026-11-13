@@ -184,49 +184,46 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
                     txt = "" 
                     error_strings: list[str] = []
 
-                    async with lock_channel(channel.id, error_strings, channel):
+                    current_message_ids: list[int] = []
+                    messages_and_errors = await discord_get_channel_pins(None, channel)
+                    error_strings.extend(messages_and_errors.error_strings)
+                    for message in messages_and_errors.messages: 
+                        current_message_ids.append(message.id)
 
-                        current_message_ids: list[int] = []
-                        messages_and_errors = await discord_get_channel_pins(None, channel)
-                        error_strings.extend(messages_and_errors.error_strings)
-                        for message in messages_and_errors.messages: 
-                            current_message_ids.append(message.id)
+                    rips_to_remove: List[Rip] = []
+                    if channel.id in RIP_CACHE:
+                        for message_id, rip in RIP_CACHE[channel.id].items():
+                            if message_id not in current_message_ids:
+                                rips_to_remove.append(rip)
 
-                        rips_to_remove: List[Rip] = []
-                        if channel.id in RIP_CACHE:
-                            for message_id, rip in RIP_CACHE[channel.id].items():
-                                if message_id not in current_message_ids:
-                                    rips_to_remove.append(rip)
+                    if len(rips_to_remove):
+                        audit_log_entries_and_errors = await discord_get_audit_log_entries(discord.AuditLogAction.message_unpin, 10, channel.guild) 
+                        error_strings.extend(audit_log_entries_and_errors.error_strings)
+                        spec_overdue_days = get_config('spec_overdue_days')
+                        overdue_days = get_config('overdue_days')
 
-                        if len(rips_to_remove):
-                            audit_log_entries_and_errors = await discord_get_audit_log_entries(discord.AuditLogAction.message_unpin, 10, channel.guild) 
-                            error_strings.extend(audit_log_entries_and_errors.error_strings)
-                            spec_overdue_days = get_config('spec_overdue_days')
-                            overdue_days = get_config('overdue_days')
+                        for rip in rips_to_remove:
+                            await remove_rip_from_cache(rip.message_id, channel.id)
 
-                            for rip in rips_to_remove:
-                                await remove_rip_from_cache(rip.message_id, channel.id)
+                            user_string = 'Someone' 
+                            for entry in audit_log_entries_and_errors.audit_log_entires:
+                                if entry.extra and entry.user and entry.extra.message_id == rip.message_id:
+                                    user_string = entry.user.name
+                                    break
 
-                                user_string = 'Someone' 
-                                for entry in audit_log_entries_and_errors.audit_log_entires:
-                                    if entry.extra and entry.user and entry.extra.message_id == rip.message_id:
-                                        user_string = entry.user.name
-                                        break
+                            string_and_errors = await get_formatted_rip_length(rip.text, False, False, channel.guild)
+                            ##NOTE: (Ahmayk) No one cares if length processing errors out here, don't say anything
+                            #perhaps dangerous but whatever
+                            # error_strings.extend(string_and_errors.error_strings)
 
-                                string_and_errors = await get_formatted_rip_length(rip.text, False, False, channel.guild)
-                                ##NOTE: (Ahmayk) No one cares if length processing errors out here, don't say anything
-                                #perhaps dangerous but whatever
-                                # error_strings.extend(string_and_errors.error_strings)
+                            formatted_rip = format_rip(rip, string_and_errors.string, channel.guild, True, spec_overdue_days, overdue_days)
+                            txt += f'\n{UNPIN_START_STRING} **{user_string}** unpinned\n{formatted_rip}'
 
-                                formatted_rip = format_rip(rip, string_and_errors.string, channel.guild, True, spec_overdue_days, overdue_days)
-                                txt += f'\n{UNPIN_START_STRING} **{user_string}** unpinned\n{formatted_rip}'
-
-                            rips_and_errors = await get_rips_fast(channel, GetRipsDesc())
-                            error_strings.extend(rips_and_errors.error_strings)
-                            new_count = len(rips_and_errors.rips)
-                            soft_pin_limit = get_config('soft_pin_limit')
-                            txt += f'-# Rip Count: {new_count}/{soft_pin_limit}'
-
+                        rips_and_errors = await get_rips_fast(channel, GetRipsDesc())
+                        error_strings.extend(rips_and_errors.error_strings)
+                        new_count = len(rips_and_errors.rips)
+                        soft_pin_limit = get_config('soft_pin_limit')
+                        txt += f'-# Rip Count: {new_count}/{soft_pin_limit}'
 
                     await send_and_if_errors(txt, "Errors during unpin.", error_strings, channel)
 
@@ -294,13 +291,12 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
                         elif new_count < SOFT_PIN_LIMIT and new_count >= max(0, SOFT_PIN_LIMIT - 10):
                             await send(f"-# Warning: **{SOFT_PIN_LIMIT - new_count} rips** until pinlimit is reached.\n-# Rip Count: {new_count}/{SOFT_PIN_LIMIT}", channel)
 
-                        async with lock_channel(channel.id, error_strings, None):
-                            #NOTE: (Ahmayk) have to fetch message to get reaction data for cache
-                            message_and_errors = await discord_fetch_message(message.id, channel)
-                            error_strings.extend(message_and_errors.error_strings)
-                            if message_and_errors.message:
-                                message = message_and_errors.message
-                            rip = cache_rip_in_message(message)
+                        #NOTE: (Ahmayk) have to fetch message to get reaction data for cache
+                        message_and_errors = await discord_fetch_message(message.id, channel)
+                        error_strings.extend(message_and_errors.error_strings)
+                        if message_and_errors.message:
+                            message = message_and_errors.message
+                        rip = cache_rip_in_message(message)
 
                         credentials_and_errors = await refresh_credentials()
                         error_strings.extend(credentials_and_errors.error_strings)
@@ -375,16 +371,12 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
 async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
     try:
         if payload.channel_id in RIP_CACHE and payload.message_id in RIP_CACHE[payload.channel_id]: 
-            error_strings: list[str] = []
             rip = RIP_CACHE[payload.channel_id][payload.message_id]
             old_text = rip.text
             if old_text != payload.message.content:
-                async with lock_message(payload.message_id, error_strings, None):
-                    command = RipCacheCommand(RipCacheCommandType.EDIT_TEXT, payload.channel_id, payload.message_id,
-                                            rip_text=payload.message.content)
-                    RIP_CACHE_COMMAND_QUEUE.put(command)
-                if len(error_strings):
-                    await send_if_errors("Error on updating edited rip:", error_strings, payload.message.channel)
+                command = RipCacheCommand(RipCacheCommandType.EDIT_TEXT, payload.channel_id, payload.message_id,
+                                        rip_text=payload.message.content)
+                RIP_CACHE_COMMAND_QUEUE.put(command)
 
                 if channel_is_types(payload.message.channel, ['QOC']) and payload.message.pinned:
                     async with payload.message.channel.typing():
