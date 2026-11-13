@@ -6,7 +6,6 @@ from typing import NamedTuple, List
 from enum import Enum, auto
 from queue import SimpleQueue 
 
-from contextlib import asynccontextmanager
 import asyncio
 
 from hq_config import *
@@ -27,6 +26,7 @@ USER_REACT_CACHE: dict[int, dict[React, List[int]]] = {}
 
 class RipCacheCommandType(Enum):
     NULL = 0,
+    END_CHANNEL_INIT = auto(),
     CACHE_RIP = auto(),
     CACHE_USER_REACT_DATA = auto(),
     REMOVE_RIP = auto(),
@@ -39,7 +39,8 @@ class RipCacheCommandType(Enum):
 class RipCacheCommand(NamedTuple):
     type: RipCacheCommandType
     channel_id: int
-    message_id: int
+    message_id: int = 0
+    init_event: asyncio.Event | None = None
     rip_to_cache: Rip = Rip("", 0, 0, 0, 0, "", [], datetime.min)
     user_react_data_to_cache: dict[React, List[int]] = {}
     emoji: discord.PartialEmoji = discord.PartialEmoji(name="null")
@@ -116,10 +117,17 @@ async def rip_cache_queue_processing() -> None:
             command = RIP_CACHE_COMMAND_QUEUE.get()
             init_channel_cache(command.channel_id)
 
+            # print(f'QUEUE: processing {command.type}')
+
             match(command.type):
+
+                case RipCacheCommandType.END_CHANNEL_INIT: 
+                    assert command.init_event
+                    command.init_event.set()
+
                 case RipCacheCommandType.CACHE_RIP: 
                     rip = command.rip_to_cache
-                    RIP_CACHE[rip.channel_id][rip.message_id] = rip
+                    RIP_CACHE[command.channel_id][rip.message_id] = rip
 
                 case RipCacheCommandType.CACHE_USER_REACT_DATA: 
                     for react, user_ids in command.user_react_data_to_cache.items():
@@ -134,8 +142,6 @@ async def rip_cache_queue_processing() -> None:
                         USER_REACT_CACHE.pop(command.message_id)
 
                 case RipCacheCommandType.ADD_REACT: 
-
-                    error_strings: list[str] = []
 
                     VERBOSE_RECT_LOGGING = False
                     verbose_log = ""
@@ -239,7 +245,7 @@ def init_rip(message) -> Rip:
 
 def cache_rip_in_message(message: Message):
     rip = init_rip(message)
-    command = RipCacheCommand(RipCacheCommandType.CACHE_RIP, rip.channel_id, rip.message_id, rip)
+    command = RipCacheCommand(RipCacheCommandType.CACHE_RIP, rip.channel_id, rip.message_id, rip_to_cache=rip)
     RIP_CACHE_COMMAND_QUEUE.put(command)
     return rip
 
@@ -442,7 +448,7 @@ async def process_rip_channel(channel: TextChannel | Thread, is_validate_message
                         #NOTE: (Ahmayk) we insert thread rips also in its parent channel dict so that
                         #we get all rips in theads when we get the parent channel's rips 
                         for thread_rip in thread_rips:
-                            command = RipCacheCommand(RipCacheCommandType.CACHE_RIP, channel.id, message.id, thread_rip)
+                            command = RipCacheCommand(RipCacheCommandType.CACHE_RIP, channel.id, message.id, rip_to_cache=thread_rip)
                             RIP_CACHE_COMMAND_QUEUE.put(command)
                 else:
                     string_and_errors = await process_rip_message(message, False, is_validate_message, typing_channel)
@@ -466,22 +472,30 @@ class GetRipsDesc(NamedTuple):
     typing_channel: TextChannel | Thread | None = None
     rebuild_cache: bool = False
 
+INIT_CHANNEL_EVENT: dict[int, asyncio.Event] = {}
+
+#NOTE: (Ahmayk) This is the single codepath for caching all rips in a channel
+# Will block if the channel has not completed its first initialization
 async def get_rips(channel: TextChannel | Thread, desc: GetRipsDesc) -> RipsAndErrors: 
 
     error_strings: list[str] = [] 
 
-    init_channel_cache(channel.id)
+    if channel.id not in INIT_CHANNEL_EVENT:
+        INIT_CHANNEL_EVENT[channel.id] = asyncio.Event()
 
-    ##NOTE: (Ahmayk) We need to prevent other processes from accessing the cache 
-    ## in the case where we are updating the cache. If we allow access to the cache while
-    ## it is being updated, it would likely be incomplete or wrong! 
+    init_event = INIT_CHANNEL_EVENT[channel.id]
 
-    ##TODO: (Ahmayk) loading check
+    if not init_event.is_set() or desc.rebuild_cache:
 
-    if not len(RIP_CACHE[channel.id]) or desc.rebuild_cache:
         async with desc.typing_channel.typing() if desc.typing_channel is not None else empty_async_context():
             string_and_errors = await process_rip_channel(channel, False, desc.typing_channel)
             error_strings.extend(string_and_errors.error_strings)
+
+        if not init_event.is_set():
+            RIP_CACHE_COMMAND_QUEUE.put(RipCacheCommand(RipCacheCommandType.END_CHANNEL_INIT, channel.id,
+                                                        init_event = init_event)) 
+
+    await init_event.wait()
 
     rips = list(RIP_CACHE[channel.id].values())
 
