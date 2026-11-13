@@ -29,11 +29,14 @@ class RipCacheCommandType(Enum):
     NULL = 0,
     CACHE_RIP = auto(),
     CACHE_USER_REACT_DATA = auto(),
+    REMOVE_RIP = auto(),
 
 class RipCacheCommand(NamedTuple):
     type: RipCacheCommandType
-    rip: Rip
-    user_react_data: dict[React, List[int]] = {}
+    channel_id: int
+    message_id: int
+    rip_to_cache: Rip = Rip("", 0, 0, 0, 0, "", [], datetime.min)
+    user_react_data_to_cache: dict[React, List[int]] = {}
 
 
 RIP_CACHE_COMMAND_QUEUE: SimpleQueue[RipCacheCommand] = SimpleQueue()
@@ -48,23 +51,29 @@ def init_channel_cache(channel_id: int):
     pass
 
 @tasks.loop(seconds=1)
-async def rip_cache_queue_processing():
+async def rip_cache_queue_processing() -> None:
 
     while RIP_CACHE_COMMAND_QUEUE.qsize():
 
         command = RIP_CACHE_COMMAND_QUEUE.get()
-        rip = command.rip
-        init_channel_cache(rip.channel_id)
+        init_channel_cache(command.channel_id)
 
         match(command.type):
             case RipCacheCommandType.CACHE_RIP: 
+                rip = command.rip_to_cache
                 RIP_CACHE[rip.channel_id][rip.message_id] = rip
 
             case RipCacheCommandType.CACHE_USER_REACT_DATA: 
-                for react, user_ids in command.user_react_data.items():
-                    USER_REACT_CACHE[rip.message_id][react] = []
+                for react, user_ids in command.user_react_data_to_cache.items():
+                    USER_REACT_CACHE[command.message_id][react] = []
                     for user_id in user_ids:
-                        USER_REACT_CACHE[rip.message_id][react].append(user_id) 
+                        USER_REACT_CACHE[command.message_id][react].append(user_id) 
+
+            case RipCacheCommandType.REMOVE_RIP: 
+                if command.channel_id in RIP_CACHE and command.message_id in RIP_CACHE[command.channel_id]: 
+                    RIP_CACHE[command.channel_id].pop(command.message_id)
+                if command.message_id in USER_REACT_CACHE:
+                    USER_REACT_CACHE.pop(command.message_id)
 
 
 ### ----- Can write to RIP_CACHE and USER_REACT_CACHE END -------
@@ -84,7 +93,7 @@ def init_rip(message) -> Rip:
 
 def cache_rip_in_message(message: Message):
     rip = init_rip(message)
-    command = RipCacheCommand(RipCacheCommandType.CACHE_RIP, rip)
+    command = RipCacheCommand(RipCacheCommandType.CACHE_RIP, rip.channel_id, rip.message_id, rip)
     RIP_CACHE_COMMAND_QUEUE.put(command)
     return rip
 
@@ -92,7 +101,8 @@ def cache_rip_in_message(message: Message):
 def cache_user_react_data(user_react_data: dict[React, List[int]], rip: Rip):
     if rip.message_id not in USER_REACT_CACHE:
         USER_REACT_CACHE[rip.message_id] = {} 
-    command = RipCacheCommand(RipCacheCommandType.CACHE_USER_REACT_DATA, rip, user_react_data)
+    command = RipCacheCommand(RipCacheCommandType.CACHE_USER_REACT_DATA, rip.channel_id,
+                               rip.message_id, user_react_data_to_cache=user_react_data)
     RIP_CACHE_COMMAND_QUEUE.put(command)
 
 
@@ -242,7 +252,7 @@ def validate_rip_message(message: Message, user_react_data: dict[React, List[int
     if channel_info.is_cache_qoc:
 
         if len(user_react_data) and message.id not in USER_REACT_CACHE:
-            result += f'\n**User react dict not initialied for ${message.jump_url}**' 
+            result += f'\n**User react dict not initialied for {message.jump_url}**' 
             USER_REACT_CACHE[message.id] = {}
 
         for react, user_ids in user_react_data.items(): 
@@ -334,7 +344,8 @@ async def process_rip_channel(channel: TextChannel | Thread, is_validate_message
                             #we get all rips in theads when we get the parent channel's rips 
                             for thread_rip in thread_rips:
                                 async with lock_message(thread_rip.message_id, error_strings, None):
-                                    RIP_CACHE[channel.id][thread_rip.message_id] = thread_rip 
+                                    command = RipCacheCommand(RipCacheCommandType.CACHE_RIP, channel.id, message.id, thread_rip)
+                                    RIP_CACHE_COMMAND_QUEUE.put(command)
                 else:
                     string_and_errors = await process_rip_message(message, False, is_validate_message, typing_channel)
                     return_message += string_and_errors.string
@@ -506,10 +517,8 @@ async def remove_rip_from_cache(message_id: int, channel_id: int):
     ##so that we can then remove whatever was being processed
     ##TODO: (Ahmayk) return errors (tho do we need to?)
     async with lock_message(message_id, [], None):
-        if channel_id in RIP_CACHE and message_id in RIP_CACHE[channel_id]: 
-            RIP_CACHE[channel_id].pop(message_id)
-        if message_id in USER_REACT_CACHE:
-            USER_REACT_CACHE.pop(message_id)
+        command = RipCacheCommand(RipCacheCommandType.REMOVE_RIP, channel_id, message_id)
+        RIP_CACHE_COMMAND_QUEUE.put(command)
 
     CACHE_LOCK_MESSAGE.pop(message_id)
 
