@@ -28,10 +28,12 @@ USER_REACT_CACHE: dict[int, dict[React, List[int]]] = {}
 class RipCacheCommandType(Enum):
     NULL = 0,
     CACHE_RIP = auto(),
+    CACHE_USER_REACT_DATA = auto(),
 
 class RipCacheCommand(NamedTuple):
     type: RipCacheCommandType
     rip: Rip
+    user_react_data: dict[React, List[int]] = {}
 
 
 RIP_CACHE_COMMAND_QUEUE: SimpleQueue[RipCacheCommand] = SimpleQueue()
@@ -58,6 +60,11 @@ async def rip_cache_queue_processing():
             case RipCacheCommandType.CACHE_RIP: 
                 RIP_CACHE[rip.channel_id][rip.message_id] = rip
 
+            case RipCacheCommandType.CACHE_USER_REACT_DATA: 
+                for react, user_ids in command.user_react_data.items():
+                    USER_REACT_CACHE[rip.message_id][react] = []
+                    for user_id in user_ids:
+                        USER_REACT_CACHE[rip.message_id][react].append(user_id) 
 
 
 ### ----- Can write to RIP_CACHE and USER_REACT_CACHE END -------
@@ -75,12 +82,18 @@ def init_rip(message) -> Rip:
     return Rip(message.content, message.id, message.channel.id, message.guild.id, message.author.id, \
             str(message.author), reacts, message.created_at)
 
-
 def cache_rip_in_message(message: Message):
     rip = init_rip(message)
     command = RipCacheCommand(RipCacheCommandType.CACHE_RIP, rip)
     RIP_CACHE_COMMAND_QUEUE.put(command)
     return rip
+
+
+def cache_user_react_data(user_react_data: dict[React, List[int]], rip: Rip):
+    if rip.message_id not in USER_REACT_CACHE:
+        USER_REACT_CACHE[rip.message_id] = {} 
+    command = RipCacheCommand(RipCacheCommandType.CACHE_USER_REACT_DATA, rip, user_react_data)
+    RIP_CACHE_COMMAND_QUEUE.put(command)
 
 
 async def process_jingle_status(message: Message) -> list[str]:
@@ -115,15 +128,6 @@ def is_message_rip(message: Message) -> bool:
                 result = channel_is_types(message.channel, ['SUBS_PIN']) and message.pinned
     return result 
 
-
-def cache_user_react_data(user_react_data: dict[React, List[int]], message_id: int):
-    if len(user_react_data):
-        if message_id not in USER_REACT_CACHE:
-            USER_REACT_CACHE[message_id] = {} 
-        for react, user_ids in user_react_data.items():
-            USER_REACT_CACHE[message_id][react] = []
-            for user_id in user_ids:
-                USER_REACT_CACHE[message_id][react].append(user_id) 
 
 
 CACHE_LOCK_CHANNEL: dict[int, asyncio.Lock] = {}
@@ -292,9 +296,9 @@ async def process_rip_message(message: Message, refetch_message: bool, is_valida
             if is_validate_message:
                 return_message = validate_rip_message(message, user_react_data)
 
-            cache_rip_in_message(message)
+            rip = cache_rip_in_message(message)
             if channel_info.is_cache_qoc:
-                cache_user_react_data(user_react_data, message.id)
+                cache_user_react_data(user_react_data, rip)
 
             await process_jingle_status(message)
 
@@ -544,7 +548,7 @@ async def user_is_react(user_react_check_types: list[UserReactCheckType], user_i
                 if message_and_errors.message:
                     user_react_data_and_errors = await discord_get_user_react_data(react_list, message_and_errors.message)
                     error_strings.extend(user_react_data_and_errors.error_strings)
-                    cache_user_react_data(user_react_data_and_errors.user_react_dict, message_and_errors.message.id)
+                    cache_user_react_data(user_react_data_and_errors.user_react_dict, rip)
 
         for react in rip.reacts:
             if react_is_one(react_list, react.name):
