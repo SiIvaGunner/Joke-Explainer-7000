@@ -475,7 +475,7 @@ class GetRipsDesc(NamedTuple):
 INIT_CHANNEL_EVENT: dict[int, asyncio.Event] = {}
 
 #NOTE: (Ahmayk) This is the single codepath for caching all rips in a channel
-# Will block if the channel has not completed its first initialization
+# Will block if the channel has not completed its first initialization (is started on bot startup)
 async def get_rips(channel: TextChannel | Thread, desc: GetRipsDesc) -> RipsAndErrors: 
 
     error_strings: list[str] = [] 
@@ -504,6 +504,9 @@ async def get_rips(channel: TextChannel | Thread, desc: GetRipsDesc) -> RipsAndE
     return RipsAndErrors(rips, error_strings)
 
 
+#NOTE: (Ahmayk) This will get rips in the fastest way it can 
+# If the cache is not initialized yet, we pull the rips ourselves without reaction data
+# should be used when react data is not needed (for example, !stats, where we are only counting the rips) 
 async def get_rips_fast(channel: TextChannel | Thread, desc: GetRipsDesc) -> RipsAndErrors: 
 
     init_channel_cache(channel.id)
@@ -512,32 +515,27 @@ async def get_rips_fast(channel: TextChannel | Thread, desc: GetRipsDesc) -> Rip
     rips = []
     error_strings = []
 
-    ##TODO: (Ahmayk) loading check
-
-    if channel_info.rip_fetch_type == RipFetchType.ALL_MESSAGES_AND_THREADS or \
-       channel_info.rip_fetch_type == RipFetchType.ALL_MESSAGES_NO_THREADS:
-
-        #NOTE: (Ahmayk) The path to get rips normally is already as fast
-        #as we can get so just do that
+    if (
+        channel_info.rip_fetch_type == RipFetchType.ALL_MESSAGES_AND_THREADS 
+        or channel_info.rip_fetch_type == RipFetchType.ALL_MESSAGES_NO_THREADS
+        or (channel.id in INIT_CHANNEL_EVENT and INIT_CHANNEL_EVENT[channel.id].is_set())
+    ):
         rips_and_errors = await get_rips(channel, desc)
         rips = rips_and_errors.rips
         error_strings = rips_and_errors.error_strings
-
     else:
-        if len(RIP_CACHE[channel.id]):
-            rips_and_errors = await get_rips(channel, desc)
-            rips = rips_and_errors.rips
-            error_strings = rips_and_errors.error_strings
-        else:
-            async with desc.typing_channel.typing() if desc.typing_channel is not None else empty_async_context():
-                messages_and_errors = await discord_get_channel_pins(None, channel)
-                error_strings.extend(messages_and_errors.error_strings)
-                for message in messages_and_errors.messages:
-                    if is_message_rip(message):
-                        ##NOTE: (Ahmayk) No fetching message for reactions for speed!
-                        rip = init_rip(message)
-                        rips.append(rip)
-                rips.sort(key = lambda rip: rip.created_at, reverse=True)
+        #NOTE: (Ahmayk) The one case where doing a one time fetch for rips will be faster is for pinned messages
+        # where the cache is still loading as we have to wait for a slow reaction grabbing process to cache those rips
+        async with desc.typing_channel.typing() if desc.typing_channel is not None else empty_async_context():
+            messages_and_errors = await discord_get_channel_pins(None, channel)
+            error_strings.extend(messages_and_errors.error_strings)
+            for message in messages_and_errors.messages:
+                if is_message_rip(message):
+                    ##NOTE: (Ahmayk) No fetching message for reactions for speed!
+                    # (Pinned messages will not have this info)
+                    rip = init_rip(message)
+                    rips.append(rip)
+            rips.sort(key = lambda rip: rip.created_at, reverse=True)
 
     return RipsAndErrors(rips, error_strings)
 
