@@ -193,6 +193,30 @@ async def rip_cache_queue_processing() -> None:
                                             USER_REACT_CACHE[rip.message_id][react] = [] 
 
                                         USER_REACT_CACHE[rip.message_id][react].append(command.emoji_user_id) 
+                                elif VERBOSE_RECT_LOGGING:
+                                    ##Temp test
+                                    verbose_log += f'\n- Message is NOT a rip'
+                                    result = False
+                                    has_quotes = '```' in message.content
+                                    if has_quotes:
+                                        rip_links = extract_rip_link(message.content)
+                                        if len(rip_links) > 0 or len(message.attachments):
+                                            if not result:
+                                                result = channel_is_types(message.channel, ['QOC']) and message.pinned
+                                            else:
+                                                verbose_log += f' (Not qoc channel)'
+
+                                            if not result:
+                                                result = channel_is_types(message.channel, ['QUEUE'])
+                                            if not result:
+                                                result = channel_is_types(message.channel, ['SUBS', 'SUBS_THREAD'])
+                                            if not result:
+                                                result = channel_is_types(message.channel, ['SUBS_PIN']) and message.pinned
+                                        else:
+                                            verbose_log += f' (No links or attachments)'
+                                    else:
+                                        verbose_log += f' (No quotes)'
+
                             else:
                                 log_channel = await get_log_channel()
                                 await send_and_if_errors(f'ERROR on raw reaction add: Failed to fetch message with id: {command.message_id}', "", message_and_errors.error_strings, log_channel)

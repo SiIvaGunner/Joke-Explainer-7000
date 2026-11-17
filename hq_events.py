@@ -323,7 +323,7 @@ async def on_guild_channel_pins_update(channel: typing.Union[GuildChannel, Threa
                 else:
                     if channel_is_types(message.channel, ['QOC', 'SUBS_PIN']):
                         await discord_add_reaction('❓', message)
-                        await send("I don't recognize that pinned message a rip. Double check that there's a link to the rip and if there's a code block.", message.channel)
+                        await send("I don't recognize that pinned message as a rip. Double check that there's a link to the rip and if there's a code block.", message.channel)
 
                 await send_and_if_errors(return_message, "Warning: Pinning QoC rip returned errors.", error_strings, channel, delete_afterwards_time)
 
