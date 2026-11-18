@@ -193,7 +193,7 @@ def rip_react_count(reaction_type_list: List[ReactType], rip: Rip) -> int:
             result += 1
     return result 
 
-def rip_is_one_check_away_from_accept(rip) -> bool:
+def rip_has_net_checks_for_accept(num: int, rip: Rip) -> bool:
     #NOTE: (Ahmayk) does not take num checks needed into account, it could if we wanted
     #to standardize that in bot tho
     checks_count = rip_react_count([ReactType.CHECK], rip)
@@ -201,11 +201,10 @@ def rip_is_one_check_away_from_accept(rip) -> bool:
     has_valid_stop = rip_has_react([ReactType.STOP], rip) \
         and not rip_has_react([ReactType.GOLDCHECK], rip) \
         and not rip_has_react([ReactType.STOPSKIP], rip)
-    is_valid = checks_count - rejects_count == 2 \
+    is_valid = checks_count - rejects_count == num \
         and not rip_has_react(FIX_REACT_LIST, rip) \
         and not has_valid_stop
     return is_valid
-
 
 #NOTE: (Ahmayk) This is an enum so we can iterate 
 # all possible user react checks for caching on startup and validation

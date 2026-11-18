@@ -264,7 +264,8 @@ class RoundupFlag(IntFlag):
     SEARCH_AUTHOR = auto()
     SEARCH_REACT = auto()
     OVERDUE = auto()
-    SAVEQOC = auto()
+    NET_CHECKS = auto()
+    HELPQOC = auto()
     SORTBYLENGTH = auto()
 
 class RoundupDesc(NamedTuple):
@@ -278,6 +279,7 @@ class RoundupDesc(NamedTuple):
     search_react_name: str = "" 
     not_found_message: str = ""
     parsed_random_input: ParsedRandomInput = ParsedRandomInput(0, ParsedSearchInput([], [], False, "", ""), "", False, "")
+    net_checks_num: int = 0
 
 async def send_roundup(desc: RoundupDesc, command_context: CommandContext):
 
@@ -353,8 +355,8 @@ async def send_roundup(desc: RoundupDesc, command_context: CommandContext):
         if is_valid and desc.flags & RoundupFlag.OVERDUE:
             is_valid &= (datetime.now(timezone.utc) - rip.created_at) > timedelta(days=overdue_days)
 
-        if is_valid and desc.flags & RoundupFlag.SAVEQOC:
-            is_valid &= rip_is_one_check_away_from_accept(rip)
+        if is_valid and desc.flags & RoundupFlag.NET_CHECKS:
+            is_valid &= rip_has_net_checks_for_accept(desc.net_checks_num, rip)
 
         if is_valid:
             filtered_rips.append(rip)
@@ -388,13 +390,16 @@ async def send_roundup(desc: RoundupDesc, command_context: CommandContext):
         if len(desc.not_found_message):
             not_found_message = desc.not_found_message
 
-        if desc.flags & (RoundupFlag.SAVEQOC | RoundupFlag.USER_REACT_CHECK_TYPE):
-            totalSaveQocRips = 0
+        if desc.flags & (RoundupFlag.NET_CHECKS | RoundupFlag.USER_REACT_CHECK_TYPE):
+            netChecksRips = 0
             for rip in rips:
-                if rip_is_one_check_away_from_accept(rip):
-                    totalSaveQocRips += 1
+                if rip_has_net_checks_for_accept(desc.net_checks_num, rip):
+                    netChecksRips += 1
             prefix = get_config('prefix')
-            not_found_message += f' Total `{prefix}saveqoc` rips: **{totalSaveQocRips}**'
+            command_name = 'saveqoc'
+            if desc.net_checks_num == 2:
+                command_name = 'helpqoc'
+            not_found_message += f' Total `{prefix}{command_name}` rips: **{netChecksRips}**'
 
         await send_and_if_errors(not_found_message, "Roundup had errors.", error_strings, command_context.channel)
 
@@ -493,7 +498,8 @@ async def spicy(args: list[str], command_context: CommandContext):
     desc="Shows rips that have two more checks than rejects, no fixes or alerts, and no stops unaccompanied by a goldencheck."
 )
 async def saveqoc(args: list[str], command_context: CommandContext):
-    roundup_desc = RoundupDesc(flags = RoundupFlag.SAVEQOC,
+    roundup_desc = RoundupDesc(flags = RoundupFlag.NET_CHECKS,
+                               net_checks_num = 2,
                                not_found_message = "No rips can be approved with only one check. All is lost!")
     await send_roundup(roundup_desc, command_context)
 
@@ -503,9 +509,31 @@ async def saveqoc(args: list[str], command_context: CommandContext):
     desc="Shows rips you havne't checked that have two more checks than rejects, no fixes or alerts, and no stops unaccompanied by a goldencheck."
 )
 async def mysaveqoc(args: list[str], command_context: CommandContext):
-    roundup_desc = RoundupDesc(flags = RoundupFlag.SAVEQOC | RoundupFlag.NOT_USER_REACT_CHECK_TYPE,
-                               not_user_react_check_types = [UserReactCheckType.CHECK],
+    roundup_desc = RoundupDesc(flags = RoundupFlag.NET_CHECKS | RoundupFlag.NOT_USER_REACT_CHECK_TYPE,
+                               not_user_react_check_types = [UserReactCheckType.CHECK], net_checks_num = 2,
                                not_found_message = "You cannot approve any rips with only one check!")
+    await send_roundup(roundup_desc, command_context)
+
+@command(
+    command_type=CommandType.QOC,
+    brief="Show QoC rips where two :check::check: would approve the rip",
+    desc="Shows rips that have one more checks than rejects, no fixes or alerts, and no stops unaccompanied by a goldencheck."
+)
+async def helpqoc(args: list[str], command_context: CommandContext):
+    roundup_desc = RoundupDesc(flags = RoundupFlag.NET_CHECKS,
+                               net_checks_num = 1,
+                               not_found_message = "No rips can be approved with only two checks.")
+    await send_roundup(roundup_desc, command_context)
+
+@command(
+    command_type=CommandType.QOC,
+    brief="Show QoC rips where your and another's :check::check: would approve the rip",
+    desc="Shows rips you havne't checked that have two more checks than rejects, no fixes or alerts, and no stops unaccompanied by a goldencheck."
+)
+async def myhelpqoc(args: list[str], command_context: CommandContext):
+    roundup_desc = RoundupDesc(flags = RoundupFlag.NET_CHECKS | RoundupFlag.NOT_USER_REACT_CHECK_TYPE,
+                               not_user_react_check_types = [UserReactCheckType.CHECK], net_checks_num = 1,
+                               not_found_message = "There are no rips with only one net check that you haven't checked!")
     await send_roundup(roundup_desc, command_context)
 
 
