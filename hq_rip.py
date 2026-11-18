@@ -696,10 +696,12 @@ async def user_is_react(user_react_check_types: list[UserReactCheckType], user_i
     for react in rip.reacts:
         if react_is_one(react_list, react.name):
             # NOTE: (Ahmayk) if the react isn't in the cache then we programmed something wrong
-            assert react in USER_REACT_CACHE[rip.message_id]
-            if user_id in USER_REACT_CACHE[rip.message_id][react]:
-                result = True
-                break
+            if react in USER_REACT_CACHE:
+                if user_id in USER_REACT_CACHE[rip.message_id][react]:
+                    result = True
+                    break
+            else:
+                await write_log(f"**Warning: user react not found in cache\n- {str(react)}\n- rip message id: {rip.message_id}**")
 
 
     return BoolAndErrors(result, error_strings)
