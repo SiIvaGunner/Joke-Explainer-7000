@@ -526,6 +526,14 @@ async def get_rips(channel: TextChannel | Thread, desc: GetRipsDesc) -> RipsAndE
     return RipsAndErrors(rips, error_strings)
 
 
+async def wait_for_cache_on_channel(channel_id: int):
+    if channel_id in INIT_CHANNEL_EVENT:
+        init_event = INIT_CHANNEL_EVENT[channel_id]
+        if not init_event.is_set():
+            RIP_CACHE_COMMAND_QUEUE.put(RipCacheCommand(RipCacheCommandType.END_CHANNEL_INIT, channel_id, init_event = init_event)) 
+        await init_event.wait()
+
+
 #NOTE: (Ahmayk) This will get rips in the fastest way it can 
 # If the cache is not initialized yet, we pull the rips ourselves without reaction data
 # should be used when react data is not needed (for example, !stats, where we are only counting the rips) 
@@ -654,6 +662,21 @@ async def remove_rip_from_cache(message_id: int, channel_id: int):
     command = RipCacheCommand(RipCacheCommandType.REMOVE_RIP, channel_id, message_id)
     RIP_CACHE_COMMAND_QUEUE.put(command)
 
+async def update_user_react_cache(react_list: list[ReactType], rip: Rip, channel: TextChannel | Thread, error_strings: list[str]):
+    # NOTE: (Ahmayk) this message fetch isn't actually neccessary, but we need the
+    # message react object to call reaction.users().
+    # As far as I can tell this is the only way discord.py exposes this API call.
+    # An optimization here would be to figure out how to do this without the reaction object,
+    # perhaps bypassing discord.py to make the direct api call we need
+    # In pratice we shouldn't be calling this code path too often anyway during regular usage
+    # So isn't the biggest problem
+    message_and_errors = await discord_fetch_message(rip.message_id, channel)
+    error_strings.extend(message_and_errors.error_strings)
+    if message_and_errors.message:
+        user_react_data_and_errors = await discord_get_user_react_data(react_list, message_and_errors.message)
+        error_strings.extend(user_react_data_and_errors.error_strings)
+        cache_user_react_data(user_react_data_and_errors.user_react_dict, rip)
+        await wait_for_cache_on_channel(channel.id)
 
 async def user_is_react(user_react_check_types: list[UserReactCheckType], user_id: int, rip: Rip,\
                         typing_channel: TextChannel | Thread | None) -> BoolAndErrors:
@@ -674,32 +697,22 @@ async def user_is_react(user_react_check_types: list[UserReactCheckType], user_i
             break
 
     if fetch_user_ids: 
+        await write_log(f"Warning: fetching user react data for reacts {react_list} in user_is_react()")
         channel_and_errors = await discord_find_channel(rip.channel_id)
         error_strings.extend(channel_and_errors.error_strings)
         if channel_and_errors.channel:
-            # NOTE: (Ahmayk) this message fetch isn't actually neccessary, but we need the
-            # message react object to call reaction.users().
-            # As far as I can tell this is the only way discord.py exposes this API call.
-            # An optimization here would be to figure out how to do this without the reaction object,
-            # perhaps bypassing discord.py to make the direct api call we need
-            # In pratice we shouldn't be calling this code path too often anyway during regular usage
-            # So isn't the biggest problem
-            message_and_errors = await discord_fetch_message(rip.message_id, channel_and_errors.channel)
-            error_strings.extend(message_and_errors.error_strings)
-            if message_and_errors.message:
-                user_react_data_and_errors = await discord_get_user_react_data(react_list, message_and_errors.message)
-                error_strings.extend(user_react_data_and_errors.error_strings)
-                cache_user_react_data(user_react_data_and_errors.user_react_dict, rip)
+            if typing_channel:
+                async with typing_channel.typing():
+                    await update_user_react_cache(react_list, rip, channel_and_errors.channel, error_strings)
+            else:
+                await update_user_react_cache(react_list, rip, channel_and_errors.channel, error_strings)
 
     for react in rip.reacts:
         if react_is_one(react_list, react.name):
-            # NOTE: (Ahmayk) if the react isn't in the cache then we programmed something wrong
             if react in USER_REACT_CACHE:
                 if user_id in USER_REACT_CACHE[rip.message_id][react]:
                     result = True
                     break
-            else:
-                await write_log(f"**Warning: user react not found in cache\n- {str(react)}\n- rip message id: {rip.message_id}**")
 
 
     return BoolAndErrors(result, error_strings)
