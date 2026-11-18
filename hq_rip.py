@@ -203,10 +203,8 @@ async def rip_cache_queue_processing() -> None:
                                         if len(rip_links) > 0 or len(message.attachments):
                                             if not result:
                                                 result = channel_is_types(message.channel, ['QOC']) and message.pinned
-                                            else:
-                                                verbose_log += f' (Not qoc channel)'
-
                                             if not result:
+                                                verbose_log += f' (Not qoc channel)'
                                                 result = channel_is_types(message.channel, ['QUEUE'])
                                             if not result:
                                                 result = channel_is_types(message.channel, ['SUBS', 'SUBS_THREAD'])
