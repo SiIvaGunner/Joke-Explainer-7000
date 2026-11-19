@@ -709,7 +709,7 @@ async def user_is_react(user_react_check_types: list[UserReactCheckType], user_i
 
     for react in rip.reacts:
         if react_is_one(react_list, react.name):
-            if react in USER_REACT_CACHE:
+            if react in USER_REACT_CACHE[rip.message_id]:
                 if user_id in USER_REACT_CACHE[rip.message_id][react]:
                     result = True
                     break
